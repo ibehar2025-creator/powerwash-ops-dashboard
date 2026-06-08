@@ -16,7 +16,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -126,7 +127,8 @@ textarea {
 }
 
 .settings-grid input,
-.settings-grid textarea {
+.settings-grid textarea,
+.settings-grid select {
   @apply mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white;
 }
 
