@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #f1f5f9;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.nav-item {
+  @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-ink dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white;
+}
+
+.nav-item.active {
+  @apply bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200;
+}
+
+.mobile-tab {
+  @apply inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300;
+}
+
+.mobile-tab.active {
+  @apply border-lagoon bg-mist text-lagoon dark:border-cyan-400 dark:bg-cyan-500/15 dark:text-cyan-200;
+}
+
+.status-badge {
+  @apply inline-flex w-fit items-center rounded-md px-2 py-1 text-xs font-semibold capitalize;
+}
+
+.data-table {
+  @apply min-w-full divide-y divide-slate-200 text-left text-sm dark:divide-slate-800;
+}
+
+.data-table th {
+  @apply bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400;
+}
+
+.data-table td {
+  @apply max-w-[280px] px-4 py-3 align-top text-slate-600 dark:text-slate-300;
+}
+
+.data-table tbody tr {
+  @apply border-b border-slate-100 last:border-0 dark:border-slate-800;
+}
+
+.icon-button {
+  @apply inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-cyan-300 dark:hover:text-cyan-200;
+}
+
+.text-button,
+.primary-button {
+  @apply inline-flex h-9 items-center justify-center rounded-lg px-3 text-sm font-semibold transition;
+}
+
+.text-button {
+  @apply border border-slate-200 text-slate-600 hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:text-slate-200 dark:hover:border-cyan-300 dark:hover:text-cyan-200;
+}
+
+.primary-button {
+  @apply bg-lagoon text-white hover:bg-marine;
+}
+
+.photo-chip {
+  @apply mr-1 inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300;
+}
+
+.segmented {
+  @apply inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900;
+}
+
+.segmented button {
+  @apply inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm font-semibold capitalize text-slate-500 transition dark:text-slate-300;
+}
+
+.segmented button.active {
+  @apply bg-lagoon text-white;
+}
+
+.calendar-grid {
+  @apply grid gap-3 lg:grid-cols-7;
+}
+
+.calendar-grid.month-mode {
+  @apply lg:grid-cols-4;
+}
+
+.calendar-day {
+  @apply min-h-[240px] rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950;
+}
+
+.calendar-job {
+  @apply mb-2 flex w-full flex-col gap-1 rounded-lg border border-slate-200 bg-white p-3 text-left text-sm text-slate-600 transition hover:border-lagoon hover:shadow-soft dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
+}
+
+.metric-mini {
+  @apply rounded-lg bg-slate-50 p-3 dark:bg-slate-800;
+}
+
+.metric-mini span {
+  @apply block text-xs text-slate-500 dark:text-slate-400;
+}
+
+.metric-mini strong {
+  @apply mt-1 block text-base text-ink dark:text-white;
+}
+
+.settings-grid {
+  @apply grid gap-4 sm:grid-cols-2;
+}
+
+.settings-grid label {
+  @apply text-sm font-semibold text-slate-600 dark:text-slate-300;
+}
+
+.settings-grid input,
+.settings-grid textarea {
+  @apply mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white;
+}
+
+.settings-grid textarea {
+  @apply min-h-24;
+}
+
+.tag {
+  @apply rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300;
+}
+
+.detail-row {
+  @apply rounded-lg bg-slate-50 p-3 dark:bg-slate-800;
+}
+
+.detail-row span {
+  @apply block text-xs text-slate-500 dark:text-slate-400;
+}
+
+.detail-row strong {
+  @apply mt-1 block text-sm text-ink dark:text-white;
+}
+
+.photo-box {
+  @apply grid h-36 place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400;
+}
+
+@media (max-width: 640px) {
+  .data-table th,
+  .data-table td {
+    @apply px-3 py-2;
+  }
+}
