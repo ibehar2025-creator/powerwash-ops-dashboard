@@ -3,7 +3,7 @@ export type PaymentStatus = "paid" | "unpaid" | "partially paid" | "past due";
 export type LeadStatus = "new" | "contacted" | "quoted" | "scheduled" | "won" | "lost";
 export type PaymentMethod = "Zelle" | "cash" | "card" | "check" | "other";
 export type CustomerInsight = "repeat customer" | "high-value customer" | "overdue payment" | "inactive customer";
-export type PlanType = "monthly" | "6-month" | "yearly";
+export type PlanType = "monthly" | "3-month" | "yearly";
 
 export interface Customer {
   id: string;
@@ -115,4 +115,13 @@ export interface BusinessSettings {
   paymentMethods: PaymentMethod[];
   serviceTypes: string[];
   theme: "light" | "dark";
+}
+
+export interface Review {
+  id: string;
+  submittedAt: string;
+  name: string;
+  rating: number;
+  review: string;
+  source: "spreadsheet-import" | "manual";
 }
