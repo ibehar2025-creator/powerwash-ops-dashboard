@@ -780,7 +780,7 @@ function Invoices({ customers, invoices, onInvoiceUpdate, onInvoiceCreate }: { c
                 <strong className="text-ink dark:text-white">{invoiceDisplayName(item, customers)}</strong>
                 <Badge status={item.status} />
               </div>
-              <p className="mt-1 text-sm text-slate-500">{item.id} - owed {currency.format(amountOwed(item))}</p>
+              <p className="mt-1 text-sm text-slate-500">Due {item.dueDate} - owed {currency.format(amountOwed(item))}</p>
             </button>
           ))}
         </div>
@@ -803,7 +803,7 @@ function Invoices({ customers, invoices, onInvoiceUpdate, onInvoiceCreate }: { c
                 <h3 className="text-lg font-bold text-ink dark:text-white">{businessSettings.businessName}</h3>
                 <p className="text-sm text-slate-500">{businessSettings.phone} / {businessSettings.email}</p>
               </div>
-              <p className="font-semibold text-lagoon dark:text-cyan-300">{invoice.id}</p>
+              <p className="font-semibold text-lagoon dark:text-cyan-300">{invoiceDisplayName(invoice, customers)}</p>
             </div>
             <div className="mt-5 grid gap-2 text-sm">
               <p><strong>Bill to:</strong> {customer.name}</p>
