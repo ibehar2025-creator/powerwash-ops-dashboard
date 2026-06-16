@@ -1,6 +1,11 @@
 import type { CrewMember, Customer, Expense, Invoice, Job, Lead, PaymentMethod } from "../types/business";
 
-export const today = "2026-06-08";
+export const today = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Chicago",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
 
 export const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -41,15 +46,16 @@ export function crewPay(member: CrewMember, jobs: Job[], targetDate = today) {
 }
 
 export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[], expenses: Expense[], crew: CrewMember[]) {
+  const currentMonth = today.slice(0, 7);
   const todayJobs = jobs.filter((job) => job.date === today);
-  const monthJobs = jobs.filter((job) => job.date.startsWith("2026-06"));
-  const dailyRevenue = todayJobs.reduce((sum, job) => sum + job.amountPaid, 0);
+  const monthJobs = jobs.filter((job) => job.date.startsWith(currentMonth));
+  const dailyRevenue = todayJobs.reduce((sum, job) => sum + job.amountPaid + job.tipAmount, 0);
   const monthlyRevenue = monthJobs.reduce((sum, job) => sum + job.amountPaid + job.tipAmount, 0);
   const totalTips = jobs.reduce((sum, job) => sum + job.tipAmount, 0);
   const unpaidInvoices = invoices.filter((invoice) => invoice.status !== "paid");
   const crewPayouts = crew.reduce((sum, member) => sum + crewPay(member, jobs).weeklyPay, 0);
   const leadWins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
-  const conversionRate = Math.round((leadWins / leads.length) * 100);
+  const conversionRate = leads.length ? Math.round((leadWins / leads.length) * 100) : 0;
   const expenseTotal = expenses.reduce((sum, expense) => sum + expense.amount, 0);
 
   return {
@@ -74,7 +80,7 @@ export function revenueByDay(jobs: Job[]) {
   return Object.values(
     jobs.reduce<Record<string, { date: string; revenue: number; tips: number; jobs: number }>>((acc, job) => {
       acc[job.date] ??= { date: job.date.slice(5), revenue: 0, tips: 0, jobs: 0 };
-      acc[job.date].revenue += job.amountPaid;
+      acc[job.date].revenue += job.amountPaid + job.tipAmount;
       acc[job.date].tips += job.tipAmount;
       acc[job.date].jobs += 1;
       return acc;
@@ -87,7 +93,7 @@ export function serviceBreakdown(jobs: Job[]) {
     jobs.reduce<Record<string, { name: string; count: number; revenue: number }>>((acc, job) => {
       acc[job.serviceType] ??= { name: job.serviceType, count: 0, revenue: 0 };
       acc[job.serviceType].count += 1;
-      acc[job.serviceType].revenue += job.price;
+      acc[job.serviceType].revenue += job.amountPaid + job.tipAmount;
       return acc;
     }, {}),
   );
@@ -97,7 +103,7 @@ export function paymentMethodTotals(jobs: Job[]) {
   return jobs.reduce<Record<PaymentMethod | "unassigned", number>>(
     (acc, job) => {
       const method = job.paymentMethod ?? "unassigned";
-      acc[method] = (acc[method] ?? 0) + job.amountPaid;
+      acc[method] = (acc[method] ?? 0) + job.amountPaid + job.tipAmount;
       return acc;
     },
     { Zelle: 0, cash: 0, card: 0, check: 0, other: 0, unassigned: 0 },
