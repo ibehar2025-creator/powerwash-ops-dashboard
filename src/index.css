@@ -82,8 +82,13 @@ select {
   @apply rounded-lg border border-slate-200 p-3 dark:border-slate-800;
 }
 
-.photo-field input:not([type="file"]) {
+.photo-field input:not([type="file"]),
+.photo-field textarea {
   @apply mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white;
+}
+
+.photo-field textarea {
+  @apply min-h-24;
 }
 
 .segmented {
