@@ -216,6 +216,22 @@ function mergeCustomersWithPlanCustomers(base: Customer[], plans?: Array<Service
   return next;
 }
 
+function mergeFallbackRecurringCustomers(base: Customer[]) {
+  const next = [...base];
+  const planCustomerIds = new Set(importedServicePlans.map((plan) => plan.customerId));
+  for (const customer of importedCustomers) {
+    if (customer.subscribedPlanId && planCustomerIds.has(customer.id) && !next.some((existing) => existing.id === customer.id)) {
+      next.push(customer);
+    }
+  }
+  return next;
+}
+
+function customersFromSyncPayload(payload: SyncPayload) {
+  const syncedCustomers = mergeCustomersWithPlanCustomers(payload.customers ?? [], payload.servicePlans);
+  return payload.servicePlans ? syncedCustomers : mergeFallbackRecurringCustomers(syncedCustomers);
+}
+
 function cleanServicePlans(plans: Array<ServicePlan & { customer?: Customer }>) {
   return plans.map(({ customer: _customer, ...plan }) => plan);
 }
@@ -432,7 +448,7 @@ export default function App() {
       const response = await fetch(syncEndpoint);
       if (!response.ok) throw new Error(`Sync failed with ${response.status}`);
       const payload = (await response.json()) as SyncPayload;
-      if (payload.customers) setCustomers(mergeCustomersWithPlanCustomers(payload.customers, payload.servicePlans));
+      if (payload.customers) setCustomers(customersFromSyncPayload(payload));
       if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
       if (payload.invoices) setInvoices(payload.invoices);
       if (payload.expenses) setExpenses(payload.expenses);
@@ -524,7 +540,7 @@ export default function App() {
     });
     if (!response.ok) throw new Error(`Sheet save failed with ${response.status}`);
     const payload = (await response.json().catch(() => ({}))) as SyncPayload & { ok?: boolean };
-    if (payload.customers) setCustomers(mergeCustomersWithPlanCustomers(payload.customers, payload.servicePlans));
+    if (payload.customers) setCustomers(customersFromSyncPayload(payload));
     if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
     if (payload.invoices) setInvoices(payload.invoices);
     if (payload.expenses) setExpenses(payload.expenses);
@@ -922,7 +938,7 @@ function Reports({ customers, jobs, invoices, expenses }: { customers: Customer[
   const maxRevenue = Math.max(...revenue.map((item) => item.revenue), 1);
   const averageJob = jobs.length ? jobs.reduce((sum, job) => sum + job.price, 0) / jobs.length : 0;
   const repeatStats = repeatCustomerStats(customers, jobs);
-  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Jobs past due" value={`${metrics.pastDueJobs}`} detail="Needs action" icon={FileText} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomersWithJobs} customers with 2+ jobs`} icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Paid vs unpaid" kicker="Invoice mix, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Unpaid invoices</span><strong>{invoices.filter((invoice) => invoice.status !== "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
+  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Jobs past due" value={`${metrics.pastDueJobs}`} detail="Needs action" icon={FileText} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomers} customers: ${repeatStats.recurringCustomers} recurring plans, ${repeatStats.multiJobCustomers} booked 2+ jobs`} icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Paid vs unpaid" kicker="Invoice mix, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Unpaid invoices</span><strong>{invoices.filter((invoice) => invoice.status !== "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
 }
 
 function Reviews({ reviews }: { reviews: ReviewRow[] }) {

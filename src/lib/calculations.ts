@@ -118,31 +118,64 @@ export function paymentMethodTotals(jobs: Job[]) {
   );
 }
 
-function normalizedCustomerName(customer?: Customer) {
-  return (customer?.name ?? "")
+function normalizedName(value?: string) {
+  return (value ?? "")
     .toLowerCase()
     .replace(/^same\s+/, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
 
+function normalizedCustomerName(customer?: Customer) {
+  return normalizedName(customer?.name);
+}
+
+function matchingCustomerKey(name: string, keys: Iterable<string>) {
+  const key = normalizedName(name);
+  if (!key) return "";
+  const existingKeys = Array.from(keys);
+  if (existingKeys.includes(key)) return key;
+
+  const prefixMatches = existingKeys.filter((existingKey) => existingKey.startsWith(`${key} `) || key.startsWith(`${existingKey} `));
+  if (prefixMatches.length === 1) return prefixMatches[0];
+
+  const firstWord = key.split(" ")[0];
+  const firstWordMatches = existingKeys.filter((existingKey) => existingKey.split(" ")[0] === firstWord);
+  return firstWordMatches.length === 1 ? firstWordMatches[0] : key;
+}
+
 export function repeatCustomerStats(customers: Customer[], jobs: Job[]) {
   const customersById = new Map(customers.map((customer) => [customer.id, customer]));
-  const counts = new Map<string, number>();
+  const identities = new Map<string, { jobCount: number; hasRecurringPlan: boolean }>();
 
   for (const job of jobs) {
     const customer = customersById.get(job.customerId);
     const key = normalizedCustomerName(customer) || job.customerId;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const identity = identities.get(key) ?? { jobCount: 0, hasRecurringPlan: false };
+    identity.jobCount += 1;
+    identities.set(key, identity);
   }
 
-  const totalCustomersWithJobs = counts.size;
-  const repeatCustomers = Array.from(counts.values()).filter((count) => count >= 2).length;
+  for (const customer of customers) {
+    if (!customer.subscribedPlanId) continue;
+    const key = matchingCustomerKey(customer.name, identities.keys()) || customer.id;
+    const identity = identities.get(key) ?? { jobCount: 0, hasRecurringPlan: false };
+    identity.hasRecurringPlan = true;
+    identities.set(key, identity);
+  }
+
+  const allCustomers = Array.from(identities.values());
+  const repeatCustomers = allCustomers.filter((identity) => identity.jobCount >= 2 || identity.hasRecurringPlan).length;
+  const multiJobCustomers = allCustomers.filter((identity) => identity.jobCount >= 2).length;
+  const recurringCustomers = allCustomers.filter((identity) => identity.hasRecurringPlan).length;
+  const totalCustomers = allCustomers.length;
 
   return {
     repeatCustomers,
-    totalCustomersWithJobs,
-    rate: totalCustomersWithJobs ? Math.round((repeatCustomers / totalCustomersWithJobs) * 100) : 0,
+    multiJobCustomers,
+    recurringCustomers,
+    totalCustomers,
+    rate: totalCustomers ? Math.round((repeatCustomers / totalCustomers) * 100) : 0,
   };
 }
 
