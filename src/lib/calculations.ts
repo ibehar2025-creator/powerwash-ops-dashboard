@@ -118,6 +118,34 @@ export function paymentMethodTotals(jobs: Job[]) {
   );
 }
 
+function normalizedCustomerName(customer?: Customer) {
+  return (customer?.name ?? "")
+    .toLowerCase()
+    .replace(/^same\s+/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function repeatCustomerStats(customers: Customer[], jobs: Job[]) {
+  const customersById = new Map(customers.map((customer) => [customer.id, customer]));
+  const counts = new Map<string, number>();
+
+  for (const job of jobs) {
+    const customer = customersById.get(job.customerId);
+    const key = normalizedCustomerName(customer) || job.customerId;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const totalCustomersWithJobs = counts.size;
+  const repeatCustomers = Array.from(counts.values()).filter((count) => count >= 2).length;
+
+  return {
+    repeatCustomers,
+    totalCustomersWithJobs,
+    rate: totalCustomersWithJobs ? Math.round((repeatCustomers / totalCustomersWithJobs) * 100) : 0,
+  };
+}
+
 export function bestCustomers(customers: Customer[], jobs: Job[]) {
   return customers
     .map((customer) => ({ ...customer, spent: customerSpend(customer.id, jobs) }))

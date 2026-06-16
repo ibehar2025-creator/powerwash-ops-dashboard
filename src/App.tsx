@@ -45,6 +45,7 @@ import {
   paymentHistory,
   paymentMethodTotals,
   revenueByDay,
+  repeatCustomerStats,
   serviceBreakdown,
   today,
 } from "./lib/calculations";
@@ -62,7 +63,8 @@ type SyncPayload = Partial<{
 }>;
 type JobPhotoPatch = Pick<Job, "beforePhoto" | "afterPhoto">;
 type JobPhotoOverrides = Record<string, JobPhotoPatch>;
-type JobPhotoSaveResult = { ok: boolean; message?: string };
+type JobSaveResult = { ok: boolean; message?: string };
+type PersistedJobPatch = Pick<Job, "status" | "paymentStatus" | "amountPaid" | "tipAmount" | "paymentMethod" | "price" | "beforePhoto" | "afterPhoto">;
 type AddClientJobInput = {
   name: string;
   phone: string;
@@ -190,6 +192,19 @@ function normalizeJobPhotos(job: Job): Job {
 function sheetRowNumberFromJobId(jobId: string) {
   const match = jobId.match(/^sheet-(?:job|j)-0*(\d+)$/);
   return match ? Number(match[1]) + 1 : undefined;
+}
+
+function persistedJobPatch(patch: Partial<Job>) {
+  const next: Partial<PersistedJobPatch> = {};
+  if ("status" in patch) next.status = patch.status;
+  if ("paymentStatus" in patch) next.paymentStatus = patch.paymentStatus;
+  if ("amountPaid" in patch) next.amountPaid = patch.amountPaid;
+  if ("tipAmount" in patch) next.tipAmount = patch.tipAmount;
+  if ("paymentMethod" in patch) next.paymentMethod = patch.paymentMethod;
+  if ("price" in patch) next.price = patch.price;
+  if ("beforePhoto" in patch) next.beforePhoto = patch.beforePhoto;
+  if ("afterPhoto" in patch) next.afterPhoto = patch.afterPhoto;
+  return next;
 }
 
 function mergeCustomersWithPlanCustomers(base: Customer[], plans?: Array<ServicePlan & { customer?: Customer }>) {
@@ -337,7 +352,7 @@ function PhotoPreview({ label, value }: { label: string; value?: string }) {
   );
 }
 
-function PhotoField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => JobPhotoSaveResult | Promise<JobPhotoSaveResult> }) {
+function PhotoField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => JobSaveResult | Promise<JobSaveResult> }) {
   const [draft, setDraft] = useState(value ?? "");
   const [status, setStatus] = useState("");
 
@@ -438,50 +453,58 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [syncEndpoint, syncSheets]);
 
-  async function saveJobPhotos(jobId: string, patch: JobPhotoPatch): Promise<JobPhotoSaveResult> {
-    const localSaved = writePhotoOverride(jobId, patch);
+  async function saveJobPatch(jobId: string, patch: Partial<PersistedJobPatch>): Promise<JobSaveResult> {
+    let localSaved = true;
+    if ("beforePhoto" in patch || "afterPhoto" in patch) {
+      const photoPatch: JobPhotoPatch = {};
+      if ("beforePhoto" in patch) photoPatch.beforePhoto = patch.beforePhoto;
+      if ("afterPhoto" in patch) photoPatch.afterPhoto = patch.afterPhoto;
+      localSaved = writePhotoOverride(jobId, photoPatch);
+    }
     if (!syncEndpoint) {
       return {
         ok: localSaved,
-        message: localSaved ? "Photo saved on this device. Add the sheet sync URL to save it to Google Sheets." : "Photo shows now, but could not be saved on this device.",
+        message: localSaved ? "Saved on this device. Add the sheet sync URL to save it to Google Sheets." : "Change shows now, but could not be saved on this device.",
       };
     }
     const rowNumber = sheetRowNumberFromJobId(jobId);
     if (!rowNumber) {
       return {
         ok: localSaved,
-        message: "Photo saved on this device. Sync this new job from Google Sheets, then save the photo again.",
+        message: "Saved on this device. Sync this new job from Google Sheets, then save it again.",
       };
     }
     const response = await fetch(syncEndpoint, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action: "updateJobPhotos", jobId, rowNumber, photos: patch }),
+      body: JSON.stringify({ action: "updateJob", jobId, rowNumber, patch }),
     });
-    if (!response.ok) throw new Error(`Photo sheet save failed with ${response.status}`);
+    if (!response.ok) throw new Error(`Sheet save failed with ${response.status}`);
     const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    if (payload.ok === false) throw new Error(payload.error ?? "Photo sheet save failed.");
-    setSyncStatus(`Saved job photo to Upcoming Jobs at ${new Date().toLocaleTimeString()}.`);
+    if (payload.ok === false) throw new Error(payload.error ?? "Sheet save failed.");
+    setSyncStatus(`Saved job update to Upcoming Jobs at ${new Date().toLocaleTimeString()}.`);
     window.setTimeout(() => void syncSheets(false), 1500);
     return { ok: true };
   }
 
-  function updateJob(jobId: string, patch: Partial<Job>): JobPhotoSaveResult | Promise<JobPhotoSaveResult> {
-    let photoSaved = true;
-    let saveResult: Promise<JobPhotoSaveResult> | undefined;
-    if ("beforePhoto" in patch || "afterPhoto" in patch) {
+  function updateJob(jobId: string, patch: Partial<Job>): JobSaveResult | Promise<JobSaveResult> {
+    const sheetPatch = persistedJobPatch(patch);
+    let saveResult: Promise<JobSaveResult> | undefined;
+    if ("beforePhoto" in sheetPatch || "afterPhoto" in sheetPatch) {
       const photoPatch: JobPhotoPatch = {};
-      if ("beforePhoto" in patch) photoPatch.beforePhoto = patch.beforePhoto;
-      if ("afterPhoto" in patch) photoPatch.afterPhoto = patch.afterPhoto;
-      photoSaved = writePhotoOverride(jobId, photoPatch);
-      saveResult = saveJobPhotos(jobId, photoPatch).catch((error) => ({
+      if ("beforePhoto" in sheetPatch) photoPatch.beforePhoto = sheetPatch.beforePhoto;
+      if ("afterPhoto" in sheetPatch) photoPatch.afterPhoto = sheetPatch.afterPhoto;
+      writePhotoOverride(jobId, photoPatch);
+    }
+    if (Object.keys(sheetPatch).length) {
+      saveResult = saveJobPatch(jobId, sheetPatch).catch((error) => ({
         ok: false,
-        message: error instanceof Error ? error.message : "Photo sheet save failed.",
+        message: error instanceof Error ? error.message : "Sheet save failed.",
       }));
     }
     setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...patch } : job));
     setSelectedJob((current) => current?.id === jobId ? { ...current, ...patch } : current);
-    return saveResult ?? { ok: photoSaved };
+    return saveResult ?? { ok: true };
   }
 
   function updateInvoice(invoiceId: string, patch: Partial<Invoice>) {
@@ -697,7 +720,7 @@ function Leads() {
   return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
 }
 
-function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobPhotoSaveResult | Promise<JobPhotoSaveResult>; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
+function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult>; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
   return <div className="space-y-4"><AddClientJobForm onCreate={onClientJobCreate} /><Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={job.status} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><PhotoChip label="Before" value={job.beforePhoto} /><PhotoChip label="After" value={job.afterPhoto} /></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section></div>;
 }
 
@@ -724,7 +747,7 @@ function Calendar({ customers, jobs, onJobClick }: { customers: Customer[]; jobs
   return <Section title="Scheduling calendar" kicker={`Date-matched spreadsheet schedule: ${rangeLabel}`} action={action}><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address || "No address listed"}</span><span className="text-xs">Unassigned</span><Badge status={job.status} /></button>)}</div>; })}</div></Section>;
 }
 
-function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobPhotoSaveResult | Promise<JobPhotoSaveResult> }) {
+function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult> }) {
   const [selectedId, setSelectedId] = useState(customers[0]?.id ?? "");
   const customer = findCustomer(customers, selectedId);
   const selectedJobs = jobsForCustomer(customer.id, jobs);
@@ -732,12 +755,74 @@ function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { custome
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"><Stat label="Daily revenue" value={currency.format(metrics.dailyRevenue)} detail="Total job value today" icon={BadgeDollarSign} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Month-to-date job value" icon={BarChart3} /><Stat label="Projected monthly" value={currency.format(metrics.projectedMonthlyRevenue)} detail="Includes upcoming jobs this month" icon={Sparkles} /><Stat label="Expenses" value={currency.format(metrics.expenses)} detail="From the Expenses sheet" icon={CreditCard} /><Stat label="Net profit" value={currency.format(metrics.netProfit)} detail="Monthly revenue minus expenses" icon={WalletCards} /></div><div className="grid gap-4 xl:grid-cols-[300px_1fr]"><Section title="Customer money" kicker="Click a customer"><div className="space-y-2">{customers.map((item) => <button key={item.id} className={cx("w-full rounded-lg border p-3 text-left text-sm transition hover:border-lagoon dark:border-slate-800", customer.id === item.id ? "border-lagoon bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200" : "border-slate-200 text-slate-600 dark:text-slate-300")} onClick={() => setSelectedId(item.id)}><span className="block font-semibold">{item.name}</span><span className="text-xs">{currency.format(customerSpend(item.id, jobs))} collected</span></button>)}</div></Section><Section title={customer.name} kicker="Edit paid amounts, tips, and payment method"><div className="mb-4 grid gap-3 sm:grid-cols-3"><div className="metric-mini"><span>Paid</span><strong>{currency.format(selectedJobs.reduce((sum, job) => sum + job.amountPaid, 0))}</strong></div><div className="metric-mini"><span>Tips</span><strong>{currency.format(selectedJobs.reduce((sum, job) => sum + job.tipAmount, 0))}</strong></div><div className="metric-mini"><span>Still owed</span><strong>{currency.format(selectedJobs.reduce((sum, job) => sum + Math.max(job.price - job.amountPaid, 0), 0))}</strong></div></div><div className="space-y-3">{selectedJobs.map((job) => <div key={job.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-ink dark:text-white">{job.date} - {job.serviceType}</p><Badge status={job.paymentStatus} /></div><div className="settings-grid"><Field label="Job price">{moneyInput(job.price, (value) => onJobUpdate(job.id, { price: value }))}</Field><Field label="Amount paid">{moneyInput(job.amountPaid, (value) => onJobUpdate(job.id, { amountPaid: value }))}</Field><Field label="Tip">{moneyInput(job.tipAmount, (value) => onJobUpdate(job.id, { tipAmount: value }))}</Field><Field label="Payment method"><select value={job.paymentMethod ?? "other"} onChange={(event) => onJobUpdate(job.id, { paymentMethod: event.target.value as PaymentMethod })}>{businessSettings.paymentMethods.map((method) => <option key={method} value={method}>{method}</option>)}</select></Field></div></div>)}</div></Section></div><Section title="Expenses sheet" kicker="Rows from the new Expenses tab"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Category</th><th>Vendor</th><th>Amount</th><th>Notes</th></tr></thead><tbody>{expenses.length ? expenses.map((expense) => <tr key={expense.id}><td>{expense.date}</td><td>{expense.category}</td><td>{expense.vendor}</td><td>{currency.format(expense.amount)}</td><td>{expense.notes}</td></tr>) : <tr><td colSpan={5}>No expenses recorded yet. Add rows to the Expenses sheet and sync.</td></tr>}</tbody></table></DataTable></Section><Section title="Payment method tracking" kicker="Totals from current job payments"><div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">{Object.entries(paymentMethodTotals(jobs)).map(([method, total]) => <div key={method} className="metric-mini"><span>{method}</span><strong>{currency.format(total)}</strong></div>)}</div></Section></div>;
 }
 
+function invoiceDisplayName(invoice: Invoice, customers: Customer[]) {
+  const customer = findCustomer(customers, invoice.customerId);
+  return `${customer.name} - ${invoice.serviceDescription || "Power washing"}`;
+}
+
 function Invoices({ customers, invoices, onInvoiceUpdate, onInvoiceCreate }: { customers: Customer[]; invoices: Invoice[]; onInvoiceUpdate: (invoiceId: string, patch: Partial<Invoice>) => void; onInvoiceCreate: () => void }) {
   const [selectedId, setSelectedId] = useState(invoices[0]?.id ?? "");
   const invoice = invoices.find((item) => item.id === selectedId) ?? invoices[0];
   const customer = invoice ? findCustomer(customers, invoice.customerId) : customers[0];
   const update = (patch: Partial<Invoice>) => invoice && onInvoiceUpdate(invoice.id, patch);
-  return <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]"><Section title="Invoices" kicker="Click any invoice to edit it" action={<button className="primary-button" onClick={() => { onInvoiceCreate(); setSelectedId(`inv-manual-${String(invoices.length + 1).padStart(3, "0")}`); }}>Create invoice</button>}><div className="space-y-2">{invoices.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", invoice?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}><div className="flex items-center justify-between gap-3"><strong className="text-ink dark:text-white">{item.id}</strong><Badge status={item.status} /></div><p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - owed {currency.format(amountOwed(item))}</p></button>)}</div></Section>{invoice && <Section title="Invoice editor" kicker="Paid, unpaid, partial, tip, amount paid, amount owed"><div className="settings-grid"><Field label="Customer"><select value={invoice.customerId} onChange={(event) => update({ customerId: event.target.value })}>{customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={invoice.status} onChange={(event) => update({ status: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><Field label="Service description"><input value={invoice.serviceDescription} onChange={(event) => update({ serviceDescription: event.target.value })} /></Field><Field label="Payment method"><select value={invoice.paymentMethod ?? "other"} onChange={(event) => update({ paymentMethod: event.target.value as PaymentMethod })}>{businessSettings.paymentMethods.map((method) => <option key={method} value={method}>{method}</option>)}</select></Field><Field label="Price">{moneyInput(invoice.price, (value) => update({ price: value }))}</Field><Field label="Discount">{moneyInput(invoice.discount, (value) => update({ discount: value }))}</Field><Field label="Tip">{moneyInput(invoice.tip, (value) => update({ tip: value }))}</Field><Field label="Amount paid">{moneyInput(invoice.amountPaid, (value) => update({ amountPaid: value }))}</Field></div><div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950"><div className="flex items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-ink dark:text-white">{businessSettings.businessName}</h3><p className="text-sm text-slate-500">{businessSettings.phone} / {businessSettings.email}</p></div><p className="font-semibold text-lagoon dark:text-cyan-300">{invoice.id}</p></div><div className="mt-5 grid gap-2 text-sm"><p><strong>Bill to:</strong> {customer.name}</p><p><strong>Service:</strong> {invoice.serviceDescription}</p><p><strong>Message:</strong> {businessSettings.defaultInvoiceMessage}</p></div><div className="mt-5 space-y-2 text-sm"><div className="flex justify-between"><span>Price</span><strong>{currency.format(invoice.price)}</strong></div><div className="flex justify-between"><span>Discount</span><strong>-{currency.format(invoice.discount)}</strong></div><div className="flex justify-between"><span>Tip</span><strong>{currency.format(invoice.tip)}</strong></div><div className="flex justify-between border-t border-slate-200 pt-2 text-base dark:border-slate-800"><span>Total</span><strong>{currency.format(invoice.price - invoice.discount + invoice.tip)}</strong></div><div className="flex justify-between"><span>Paid</span><strong>{currency.format(invoice.amountPaid)}</strong></div><div className="flex justify-between text-coral"><span>Still owed</span><strong>{currency.format(amountOwed(invoice))}</strong></div></div></div></Section>}</div>;
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      <Section
+        title="Invoices"
+        kicker="Click any invoice to edit it"
+        action={<button className="primary-button" onClick={() => { onInvoiceCreate(); setSelectedId(`inv-manual-${String(invoices.length + 1).padStart(3, "0")}`); }}>Create invoice</button>}
+      >
+        <div className="space-y-2">
+          {invoices.map((item) => (
+            <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", invoice?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}>
+              <div className="flex items-center justify-between gap-3">
+                <strong className="text-ink dark:text-white">{invoiceDisplayName(item, customers)}</strong>
+                <Badge status={item.status} />
+              </div>
+              <p className="mt-1 text-sm text-slate-500">{item.id} - owed {currency.format(amountOwed(item))}</p>
+            </button>
+          ))}
+        </div>
+      </Section>
+      {invoice && (
+        <Section title={invoiceDisplayName(invoice, customers)} kicker="Paid, unpaid, partial, tip, amount paid, amount owed">
+          <div className="settings-grid">
+            <Field label="Customer"><select value={invoice.customerId} onChange={(event) => update({ customerId: event.target.value })}>{customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+            <Field label="Status"><select value={invoice.status} onChange={(event) => update({ status: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field>
+            <Field label="Service description"><input value={invoice.serviceDescription} onChange={(event) => update({ serviceDescription: event.target.value })} /></Field>
+            <Field label="Payment method"><select value={invoice.paymentMethod ?? "other"} onChange={(event) => update({ paymentMethod: event.target.value as PaymentMethod })}>{businessSettings.paymentMethods.map((method) => <option key={method} value={method}>{method}</option>)}</select></Field>
+            <Field label="Price">{moneyInput(invoice.price, (value) => update({ price: value }))}</Field>
+            <Field label="Discount">{moneyInput(invoice.discount, (value) => update({ discount: value }))}</Field>
+            <Field label="Tip">{moneyInput(invoice.tip, (value) => update({ tip: value }))}</Field>
+            <Field label="Amount paid">{moneyInput(invoice.amountPaid, (value) => update({ amountPaid: value }))}</Field>
+          </div>
+          <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-ink dark:text-white">{businessSettings.businessName}</h3>
+                <p className="text-sm text-slate-500">{businessSettings.phone} / {businessSettings.email}</p>
+              </div>
+              <p className="font-semibold text-lagoon dark:text-cyan-300">{invoice.id}</p>
+            </div>
+            <div className="mt-5 grid gap-2 text-sm">
+              <p><strong>Bill to:</strong> {customer.name}</p>
+              <p><strong>Service:</strong> {invoice.serviceDescription}</p>
+              <p><strong>Message:</strong> {businessSettings.defaultInvoiceMessage}</p>
+            </div>
+            <div className="mt-5 space-y-2 text-sm">
+              <div className="flex justify-between"><span>Price</span><strong>{currency.format(invoice.price)}</strong></div>
+              <div className="flex justify-between"><span>Discount</span><strong>-{currency.format(invoice.discount)}</strong></div>
+              <div className="flex justify-between"><span>Tip</span><strong>{currency.format(invoice.tip)}</strong></div>
+              <div className="flex justify-between border-t border-slate-200 pt-2 text-base dark:border-slate-800"><span>Total</span><strong>{currency.format(invoice.price - invoice.discount + invoice.tip)}</strong></div>
+              <div className="flex justify-between"><span>Paid</span><strong>{currency.format(invoice.amountPaid)}</strong></div>
+              <div className="flex justify-between text-coral"><span>Still owed</span><strong>{currency.format(amountOwed(invoice))}</strong></div>
+            </div>
+          </div>
+        </Section>
+      )}
+    </div>
+  );
 }
 
 function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void }) {
@@ -836,8 +921,8 @@ function Reports({ customers, jobs, invoices, expenses }: { customers: Customer[
   const revenue = revenueByDay(jobs);
   const maxRevenue = Math.max(...revenue.map((item) => item.revenue), 1);
   const averageJob = jobs.length ? jobs.reduce((sum, job) => sum + job.price, 0) / jobs.length : 0;
-  const repeatRate = customers.length ? Math.round((customers.filter((customer) => customer.insights.includes("repeat customer")).length / customers.length) * 100) : 0;
-  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Jobs past due" value={`${metrics.pastDueJobs}`} detail="Needs action" icon={FileText} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatRate}%`} detail="Customers tagged repeat" icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Paid vs unpaid" kicker="Invoice mix, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Unpaid invoices</span><strong>{invoices.filter((invoice) => invoice.status !== "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
+  const repeatStats = repeatCustomerStats(customers, jobs);
+  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Jobs past due" value={`${metrics.pastDueJobs}`} detail="Needs action" icon={FileText} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomersWithJobs} customers with 2+ jobs`} icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Paid vs unpaid" kicker="Invoice mix, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Unpaid invoices</span><strong>{invoices.filter((invoice) => invoice.status !== "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
 }
 
 function Reviews({ reviews }: { reviews: ReviewRow[] }) {
@@ -845,7 +930,7 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
-function JobModal({ customers, job, onClose, onJobUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobPhotoSaveResult | Promise<JobPhotoSaveResult> }) {
+function JobModal({ customers, job, onClose, onJobUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult> }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4">
       <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
