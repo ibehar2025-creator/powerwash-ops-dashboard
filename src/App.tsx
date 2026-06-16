@@ -57,7 +57,7 @@ type SyncPayload = Partial<{
   jobs: Job[];
   invoices: Invoice[];
   expenses: Expense[];
-  servicePlans: ServicePlan[];
+  servicePlans: Array<ServicePlan & { customer?: Customer }>;
   reviews: ReviewRow[];
 }>;
 type JobPhotoPatch = Pick<Job, "beforePhoto" | "afterPhoto">;
@@ -190,6 +190,19 @@ function normalizeJobPhotos(job: Job): Job {
 function sheetRowNumberFromJobId(jobId: string) {
   const match = jobId.match(/^sheet-(?:job|j)-0*(\d+)$/);
   return match ? Number(match[1]) + 1 : undefined;
+}
+
+function mergeCustomersWithPlanCustomers(base: Customer[], plans?: Array<ServicePlan & { customer?: Customer }>) {
+  if (!plans?.length) return base;
+  const next = [...base];
+  for (const plan of plans) {
+    if (plan.customer && !next.some((customer) => customer.id === plan.customer?.id)) next.push(plan.customer);
+  }
+  return next;
+}
+
+function cleanServicePlans(plans: Array<ServicePlan & { customer?: Customer }>) {
+  return plans.map(({ customer: _customer, ...plan }) => plan);
 }
 
 function resolvePhotoUrl(value?: string) {
@@ -404,11 +417,11 @@ export default function App() {
       const response = await fetch(syncEndpoint);
       if (!response.ok) throw new Error(`Sync failed with ${response.status}`);
       const payload = (await response.json()) as SyncPayload;
-      if (payload.customers) setCustomers(payload.customers);
+      if (payload.customers) setCustomers(mergeCustomersWithPlanCustomers(payload.customers, payload.servicePlans));
       if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
       if (payload.invoices) setInvoices(payload.invoices);
       if (payload.expenses) setExpenses(payload.expenses);
-      if (payload.servicePlans) setPlans(payload.servicePlans);
+      if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
       if (payload.reviews) setReviews(payload.reviews);
       setSyncStatus(`Synced from Google Sheets at ${new Date().toLocaleTimeString()}.`);
     } catch (error) {
@@ -488,11 +501,11 @@ export default function App() {
     });
     if (!response.ok) throw new Error(`Sheet save failed with ${response.status}`);
     const payload = (await response.json().catch(() => ({}))) as SyncPayload & { ok?: boolean };
-    if (payload.customers) setCustomers(payload.customers);
+    if (payload.customers) setCustomers(mergeCustomersWithPlanCustomers(payload.customers, payload.servicePlans));
     if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
     if (payload.invoices) setInvoices(payload.invoices);
     if (payload.expenses) setExpenses(payload.expenses);
-    if (payload.servicePlans) setPlans(payload.servicePlans);
+    if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
     if (payload.reviews) setReviews(payload.reviews);
     if (!payload.jobs) {
       const createdAt = Date.now();
