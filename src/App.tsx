@@ -496,10 +496,12 @@ function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plan
 function Contracts() {
   const [customerName, setCustomerName] = useState("");
   const [dealType, setDealType] = useState<"recurring" | "standard">("recurring");
+  const [planFrequency, setPlanFrequency] = useState("");
   const [includedServices, setIncludedServices] = useState("");
   const [price, setPrice] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const cleanName = customerName.trim() || "[Customer Name]";
+  const cleanFrequency = planFrequency.trim() || "[Plan frequency]";
   const cleanServices = includedServices.trim() || "[Services included]";
   const cleanPrice = price.trim() || "[Price]";
   const contractTitle = dealType === "recurring" ? "Recurring Power Washing Service Agreement" : "Power Washing Service Agreement";
@@ -517,7 +519,7 @@ ${cleanServices}
 The customer agrees to pay ${cleanPrice} for the services listed above. Payment is due when the work is completed unless both parties agree otherwise in writing.
 
 3. Deal Type
-${dealType === "recurring" ? "This is a recurring service plan. The customer and The Powerwashing Pros will agree on scheduling before each visit. Any extra services not listed above may require an updated price." : "This is a standard one-time power washing deal. Any extra services not listed above may require an updated price."}
+${dealType === "recurring" ? `This is a recurring service plan scheduled ${cleanFrequency}. The customer and The Powerwashing Pros will agree on the exact appointment time before each visit. Any extra services not listed above may require an updated price.` : "This is a standard one-time power washing deal. Any extra services not listed above may require an updated price."}
 
 4. Customer Responsibilities
 The customer agrees to provide access to the work area, move fragile personal items when needed, and notify The Powerwashing Pros of any surface concerns before work begins.
@@ -543,7 +545,7 @@ The Powerwashing Pros: ______________________________`;
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-      <Section title="Contract draft" kicker="Name, deal type, included work, and price">
+      <Section title="Contract draft" kicker="Name, deal type, frequency, included work, and price">
         <div className="settings-grid">
           <Field label="Customer name">
             <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer name" />
@@ -557,6 +559,11 @@ The Powerwashing Pros: ______________________________`;
           <Field label="Amount they will pay">
             <input value={price} onChange={(event) => setPrice(event.target.value)} placeholder="$250" />
           </Field>
+          {dealType === "recurring" && (
+            <Field label="Plan frequency">
+              <input value={planFrequency} onChange={(event) => setPlanFrequency(event.target.value)} placeholder="Every 6 weeks" />
+            </Field>
+          )}
           <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
             Included in the deal
             <textarea value={includedServices} onChange={(event) => setIncludedServices(event.target.value)} placeholder="Example: driveway, front walkway, sidewalks, and back patio" />
