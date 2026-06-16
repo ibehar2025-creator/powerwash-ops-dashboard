@@ -53,8 +53,11 @@ export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[],
   const currentMonth = today.slice(0, 7);
   const todayJobs = jobs.filter((job) => job.date === today);
   const monthJobs = jobs.filter((job) => job.date.startsWith(currentMonth));
+  const monthToDateJobs = monthJobs.filter((job) => job.date <= today);
+  const projectedMonthJobs = monthJobs.filter((job) => job.status !== "canceled");
   const dailyRevenue = todayJobs.reduce((sum, job) => sum + jobRevenue(job), 0);
-  const monthlyRevenue = monthJobs.reduce((sum, job) => sum + jobRevenue(job), 0);
+  const monthlyRevenue = monthToDateJobs.reduce((sum, job) => sum + jobRevenue(job), 0);
+  const projectedMonthlyRevenue = projectedMonthJobs.reduce((sum, job) => sum + jobRevenue(job), 0);
   const totalTips = jobs.reduce((sum, job) => sum + job.tipAmount, 0);
   const unpaidInvoices = invoices.filter((invoice) => invoice.status !== "paid");
   const crewPayouts = crew.reduce((sum, member) => sum + crewPay(member, jobs).weeklyPay, 0);
@@ -68,6 +71,7 @@ export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[],
     jobsToday: todayJobs.length,
     pastDueJobs: jobs.filter((job) => job.status === "past due").length,
     monthlyRevenue,
+    projectedMonthlyRevenue,
     unpaidInvoiceCount: unpaidInvoices.length,
     unpaidInvoiceTotal: unpaidInvoices.reduce((sum, invoice) => sum + amountOwed(invoice), 0),
     totalTips,
