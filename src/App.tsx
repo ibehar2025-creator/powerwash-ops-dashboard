@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ClipboardList,
   CreditCard,
+  Copy,
   FileText,
   LayoutDashboard,
   Menu,
@@ -47,7 +48,7 @@ import {
 import type { Customer, Expense, Invoice, Job, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "reports" | "reviews";
+type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
 type SyncPayload = Partial<{
   customers: Customer[];
   jobs: Job[];
@@ -66,6 +67,7 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "finance", label: "Finance", icon: WalletCards },
   { id: "invoices", label: "Invoices", icon: ReceiptText },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
+  { id: "contracts", label: "Contracts", icon: FileText },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "reviews", label: "Reviews", icon: Star },
 ];
@@ -298,6 +300,7 @@ export default function App() {
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
+            {activeTab === "contracts" && <Contracts />}
             {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
           </div>
@@ -354,6 +357,84 @@ function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plan
   const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
   const plan = plans.find((item) => item.id === selectedId) ?? plans[0];
   return <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]"><Section title="Service plans" kicker="Imported from Recurring Jobs"><div className="space-y-2">{plans.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", plan?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}><div className="flex items-center justify-between gap-3"><strong className="capitalize text-ink dark:text-white">{item.type} plan</strong><Badge status={item.paymentStatus} /></div><p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - renews {item.renewalDate}</p></button>)}</div></Section>{plan && <Section title="Plan editor" kicker="Subscription status, renewal, services, pricing"><div className="settings-grid"><Field label="Customer"><select value={plan.customerId} onChange={(event) => onPlanUpdate(plan.id, { customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Plan type"><select value={String(plan.type)} onChange={(event) => onPlanUpdate(plan.id, { type: event.target.value as ServicePlan["type"] })}>{planTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field><Field label="Plan price">{moneyInput(plan.price, (value) => onPlanUpdate(plan.id, { price: value }))}</Field><Field label="Discount %">{moneyInput(plan.discountPct, (value) => onPlanUpdate(plan.id, { discountPct: value }))}</Field><Field label="Renewal date"><input value={plan.renewalDate} onChange={(event) => onPlanUpdate(plan.id, { renewalDate: event.target.value })} /></Field><Field label="Payment status"><select value={plan.paymentStatus} onChange={(event) => onPlanUpdate(plan.id, { paymentStatus: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={plan.notes} onChange={(event) => onPlanUpdate(plan.id, { notes: event.target.value })} /></label></div><div className="mt-4 flex flex-wrap gap-2">{plan.servicesIncluded.map((service) => <span key={service} className="tag">{service}</span>)}</div></Section>}</div>;
+}
+
+function Contracts() {
+  const [customerName, setCustomerName] = useState("");
+  const [dealType, setDealType] = useState<"recurring" | "standard">("recurring");
+  const [includedServices, setIncludedServices] = useState("");
+  const [price, setPrice] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+  const cleanName = customerName.trim() || "[Customer Name]";
+  const cleanServices = includedServices.trim() || "[Services included]";
+  const cleanPrice = price.trim() || "[Price]";
+  const contractTitle = dealType === "recurring" ? "Recurring Power Washing Service Agreement" : "Power Washing Service Agreement";
+  const contractDraft = `${contractTitle}
+
+Date: ${today}
+
+This agreement is between ${businessSettings.businessName} and ${cleanName}.
+
+1. Services Included
+${businessSettings.businessName} agrees to provide the following power washing services:
+${cleanServices}
+
+2. Price and Payment
+The customer agrees to pay ${cleanPrice} for the services listed above. Payment is due when the work is completed unless both parties agree otherwise in writing.
+
+3. Deal Type
+${dealType === "recurring" ? "This is a recurring service plan. The customer and The Powerwashing Pros will agree on scheduling before each visit. Any extra services not listed above may require an updated price." : "This is a standard one-time power washing deal. Any extra services not listed above may require an updated price."}
+
+4. Customer Responsibilities
+The customer agrees to provide access to the work area, move fragile personal items when needed, and notify The Powerwashing Pros of any surface concerns before work begins.
+
+5. Surface Condition
+The Powerwashing Pros will use reasonable care while cleaning. Results may vary depending on the age, condition, staining, and material of the surface.
+
+6. Acceptance
+By agreeing to this draft, both parties confirm that the services, price, and deal type above are correct.
+
+Customer: ${cleanName}
+
+The Powerwashing Pros: ______________________________`;
+
+  async function copyContract() {
+    try {
+      await navigator.clipboard.writeText(contractDraft);
+      setCopyStatus("Contract draft copied.");
+    } catch {
+      setCopyStatus("Copy failed. Select the draft text and copy it manually.");
+    }
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+      <Section title="Contract draft" kicker="Name, deal type, included work, and price">
+        <div className="settings-grid">
+          <Field label="Customer name">
+            <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer name" />
+          </Field>
+          <Field label="Deal type">
+            <select value={dealType} onChange={(event) => setDealType(event.target.value as "recurring" | "standard")}>
+              <option value="recurring">Recurring plan</option>
+              <option value="standard">Normal powerwashing deal</option>
+            </select>
+          </Field>
+          <Field label="Amount they will pay">
+            <input value={price} onChange={(event) => setPrice(event.target.value)} placeholder="$250" />
+          </Field>
+          <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+            Included in the deal
+            <textarea value={includedServices} onChange={(event) => setIncludedServices(event.target.value)} placeholder="Example: driveway, front walkway, sidewalks, and back patio" />
+          </label>
+        </div>
+      </Section>
+      <Section title={contractTitle} kicker="Generated draft" action={<button className="text-button" onClick={copyContract}><Copy size={16} /> Copy draft</button>}>
+        <pre className="contract-preview">{contractDraft}</pre>
+        {copyStatus && <p className="mt-3 text-sm font-semibold text-lagoon dark:text-cyan-300">{copyStatus}</p>}
+      </Section>
+    </div>
+  );
 }
 
 function Reports({ customers, jobs, invoices, expenses }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[] }) {
