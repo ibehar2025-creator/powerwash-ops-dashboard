@@ -29,6 +29,10 @@ export function paymentHistory(customerId: string, invoices: Invoice[]) {
   return invoices.filter((invoice) => invoice.customerId === customerId);
 }
 
+function jobRevenue(job: Job) {
+  return job.price + job.tipAmount;
+}
+
 export function crewPay(member: CrewMember, jobs: Job[], targetDate = today) {
   const assigned = jobs.filter((job) => job.crewIds.includes(member.id));
   const dailyJobs = assigned.filter((job) => job.date === targetDate);
@@ -49,8 +53,8 @@ export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[],
   const currentMonth = today.slice(0, 7);
   const todayJobs = jobs.filter((job) => job.date === today);
   const monthJobs = jobs.filter((job) => job.date.startsWith(currentMonth));
-  const dailyRevenue = todayJobs.reduce((sum, job) => sum + job.amountPaid + job.tipAmount, 0);
-  const monthlyRevenue = monthJobs.reduce((sum, job) => sum + job.amountPaid + job.tipAmount, 0);
+  const dailyRevenue = todayJobs.reduce((sum, job) => sum + jobRevenue(job), 0);
+  const monthlyRevenue = monthJobs.reduce((sum, job) => sum + jobRevenue(job), 0);
   const totalTips = jobs.reduce((sum, job) => sum + job.tipAmount, 0);
   const unpaidInvoices = invoices.filter((invoice) => invoice.status !== "paid");
   const crewPayouts = crew.reduce((sum, member) => sum + crewPay(member, jobs).weeklyPay, 0);
@@ -80,7 +84,7 @@ export function revenueByDay(jobs: Job[]) {
   return Object.values(
     jobs.reduce<Record<string, { date: string; revenue: number; tips: number; jobs: number }>>((acc, job) => {
       acc[job.date] ??= { date: job.date.slice(5), revenue: 0, tips: 0, jobs: 0 };
-      acc[job.date].revenue += job.amountPaid + job.tipAmount;
+      acc[job.date].revenue += jobRevenue(job);
       acc[job.date].tips += job.tipAmount;
       acc[job.date].jobs += 1;
       return acc;
@@ -93,7 +97,7 @@ export function serviceBreakdown(jobs: Job[]) {
     jobs.reduce<Record<string, { name: string; count: number; revenue: number }>>((acc, job) => {
       acc[job.serviceType] ??= { name: job.serviceType, count: 0, revenue: 0 };
       acc[job.serviceType].count += 1;
-      acc[job.serviceType].revenue += job.amountPaid + job.tipAmount;
+      acc[job.serviceType].revenue += jobRevenue(job);
       return acc;
     }, {}),
   );
