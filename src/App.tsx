@@ -10,6 +10,7 @@ import {
   CreditCard,
   Copy,
   FileText,
+  ImagePlus,
   LayoutDashboard,
   Menu,
   Moon,
@@ -57,6 +58,8 @@ type SyncPayload = Partial<{
   servicePlans: ServicePlan[];
   reviews: ReviewRow[];
 }>;
+type JobPhotoPatch = Pick<Job, "beforePhoto" | "afterPhoto">;
+type JobPhotoOverrides = Record<string, JobPhotoPatch>;
 
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -94,6 +97,7 @@ const monthDays = [
 ];
 const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
+const PHOTO_STORAGE_KEY = "powerwash-job-photo-overrides";
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -101,6 +105,69 @@ function cx(...classes: Array<string | false | undefined>) {
 
 function findCustomer(customers: Customer[], customerId: string) {
   return customers.find((customer) => customer.id === customerId) ?? customers[0];
+}
+
+function readPhotoOverrides(): JobPhotoOverrides {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(PHOTO_STORAGE_KEY) ?? "{}") as JobPhotoOverrides;
+  } catch {
+    return {};
+  }
+}
+
+function writePhotoOverride(jobId: string, patch: JobPhotoPatch) {
+  if (typeof window === "undefined") return;
+  try {
+    const current = readPhotoOverrides();
+    const nextForJob = { ...current[jobId], ...patch };
+    const next = { ...current, [jobId]: nextForJob };
+    if (!nextForJob.beforePhoto && !nextForJob.afterPhoto) delete next[jobId];
+    window.localStorage.setItem(PHOTO_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Storage can fail if a browser blocks it or the uploaded images exceed quota.
+  }
+}
+
+function mergePhotoOverrides(rows: Job[]) {
+  const overrides = readPhotoOverrides();
+  return rows.map((job) => ({ ...job, ...overrides[job.id] }));
+}
+
+function resolvePhotoUrl(value?: string) {
+  const url = value?.trim();
+  if (!url) return "";
+  if (url.startsWith("data:image/") || url.startsWith("blob:")) return url;
+  const driveId = url.match(/drive\.google\.com\/file\/d\/([^/]+)/)?.[1] ?? url.match(/[?&]id=([^&]+)/)?.[1];
+  if (driveId) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w1200`;
+  return url;
+}
+
+function fileToPhotoDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read photo."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("Could not load photo."));
+      image.onload = () => {
+        const maxSide = 1400;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Could not prepare photo."));
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function moneyInput(value: number, onChange: (value: number) => void) {
@@ -169,9 +236,61 @@ function PhotoChip({ label, value }: { label: string; value?: string }) {
 }
 
 function PhotoPreview({ label, value }: { label: string; value?: string }) {
+  const [failed, setFailed] = useState(false);
+  const displayUrl = resolvePhotoUrl(value);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [displayUrl]);
+
   return (
     <div className="photo-box">
-      {value ? <img className="h-full w-full rounded-lg object-cover" src={value} alt={`${label} job`} /> : <span>No {label.toLowerCase()} photo URL yet</span>}
+      {displayUrl && !failed ? (
+        <img className="h-full w-full rounded-lg object-cover" src={displayUrl} alt={`${label} job`} onError={() => setFailed(true)} />
+      ) : value ? (
+        <div className="space-y-2 p-3 text-center">
+          <p>Photo link is private or blocked.</p>
+          <a className="text-button" href={value} target="_blank" rel="noreferrer">Open photo</a>
+        </div>
+      ) : (
+        <span>No {label.toLowerCase()} photo yet</span>
+      )}
+    </div>
+  );
+}
+
+function PhotoField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) {
+  const [status, setStatus] = useState("");
+
+  async function uploadPhoto(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setStatus("Choose an image file.");
+      return;
+    }
+    try {
+      setStatus("Saving photo...");
+      onChange(await fileToPhotoDataUrl(file));
+      setStatus("Photo saved in this browser.");
+    } catch {
+      setStatus("Could not save that photo. Try a smaller image or paste a link.");
+    }
+  }
+
+  return (
+    <div className="photo-field">
+      <Field label={`${label} photo link`}>
+        <input value={value ?? ""} placeholder="Paste image URL or Google Drive share link" onChange={(event) => onChange(event.target.value)} />
+      </Field>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <label className="text-button cursor-pointer">
+          <ImagePlus size={16} /> Upload photo
+          <input className="sr-only" type="file" accept="image/*" onChange={(event) => void uploadPhoto(event.target.files?.[0])} />
+        </label>
+        {value && <button className="text-button" onClick={() => onChange("")}>Clear</button>}
+      </div>
+      {status && <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{status}</p>}
+      <PhotoPreview label={label} value={value} />
     </div>
   );
 }
@@ -180,7 +299,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
-  const [jobs, setJobs] = useState<Job[]>(importedJobs.map((job) => ({ ...job, crewIds: [] })));
+  const [jobs, setJobs] = useState<Job[]>(() => mergePhotoOverrides(importedJobs.map((job) => ({ ...job, crewIds: [] }))));
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
   const [expenses, setExpenses] = useState<Expense[]>(importedExpenses);
   const [plans, setPlans] = useState<ServicePlan[]>(importedServicePlans);
@@ -205,7 +324,7 @@ export default function App() {
       if (!response.ok) throw new Error(`Sync failed with ${response.status}`);
       const payload = (await response.json()) as SyncPayload;
       if (payload.customers) setCustomers(payload.customers);
-      if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
+      if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
       if (payload.invoices) setInvoices(payload.invoices);
       if (payload.expenses) setExpenses(payload.expenses);
       if (payload.servicePlans) setPlans(payload.servicePlans);
@@ -226,6 +345,12 @@ export default function App() {
   }, [syncEndpoint, syncSheets]);
 
   function updateJob(jobId: string, patch: Partial<Job>) {
+    if ("beforePhoto" in patch || "afterPhoto" in patch) {
+      const photoPatch: JobPhotoPatch = {};
+      if ("beforePhoto" in patch) photoPatch.beforePhoto = patch.beforePhoto;
+      if ("afterPhoto" in patch) photoPatch.afterPhoto = patch.afterPhoto;
+      writePhotoOverride(jobId, photoPatch);
+    }
     setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...patch } : job));
     setSelectedJob((current) => current?.id === jobId ? { ...current, ...patch } : current);
   }
@@ -452,5 +577,31 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
 }
 
 function JobModal({ customers, job, onClose, onJobUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => void }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4"><div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Job details</p><h3 className="text-xl font-bold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</h3><p className="text-sm text-slate-500">{job.date} at {job.time}</p></div><button className="icon-button" onClick={onClose} title="Close">x</button></div><div className="mt-5 grid gap-4 md:grid-cols-2"><div className="detail-row"><span>Address</span><strong>{job.address || "No address listed"}</strong></div><div className="detail-row"><span>Service</span><strong>{job.serviceType}</strong></div><div className="detail-row"><span>Assignment</span><strong>Unassigned</strong></div><div className="detail-row"><span>Status</span><Badge status={job.status} /></div><div className="detail-row"><span>Price</span><strong>{currency.format(job.price)}</strong></div><div className="detail-row"><span>Paid / tip</span><strong>{currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</strong></div><div className="detail-row md:col-span-2"><span>Notes</span><strong>{job.notes}</strong></div></div><div className="mt-5 grid gap-3 md:grid-cols-2"><Field label="Before photo URL"><input value={job.beforePhoto ?? ""} placeholder="Paste image URL or Drive image link" onChange={(event) => onJobUpdate(job.id, { beforePhoto: event.target.value })} /></Field><Field label="After photo URL"><input value={job.afterPhoto ?? ""} placeholder="Paste image URL or Drive image link" onChange={(event) => onJobUpdate(job.id, { afterPhoto: event.target.value })} /></Field><PhotoPreview label="Before" value={job.beforePhoto} /><PhotoPreview label="After" value={job.afterPhoto} /></div></div></div>;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Job details</p>
+            <h3 className="text-xl font-bold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</h3>
+            <p className="text-sm text-slate-500">{job.date} at {job.time}</p>
+          </div>
+          <button className="icon-button" onClick={onClose} title="Close">x</button>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="detail-row"><span>Address</span><strong>{job.address || "No address listed"}</strong></div>
+          <div className="detail-row"><span>Service</span><strong>{job.serviceType}</strong></div>
+          <div className="detail-row"><span>Assignment</span><strong>Unassigned</strong></div>
+          <div className="detail-row"><span>Status</span><Badge status={job.status} /></div>
+          <div className="detail-row"><span>Price</span><strong>{currency.format(job.price)}</strong></div>
+          <div className="detail-row"><span>Paid / tip</span><strong>{currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</strong></div>
+          <div className="detail-row md:col-span-2"><span>Notes</span><strong>{job.notes}</strong></div>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <PhotoField label="Before" value={job.beforePhoto} onChange={(value) => onJobUpdate(job.id, { beforePhoto: value })} />
+          <PhotoField label="After" value={job.afterPhoto} onChange={(value) => onJobUpdate(job.id, { afterPhoto: value })} />
+        </div>
+      </div>
+    </div>
+  );
 }
