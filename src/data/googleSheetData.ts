@@ -80,10 +80,10 @@ const sheetRows: SheetJobRow[] = [
 ];
 
 const recurringPlanRows: RecurringPlanRow[] = [
-  { name: "Mark", price: 175, frequency: "3 months", renewalDate: "2026-09-01", phone: "832-405-4440" },
-  { name: "Michelle", price: 230, frequency: "6 weeks", renewalDate: "2026-07-20" },
-  { name: "Hannah", price: 250, frequency: "Yearly", renewalDate: "2027-06-11" },
-  { name: "Vallone", price: 275, frequency: "Yearly", renewalDate: "Not set in sheet" },
+  { name: "Mark", price: 175, frequency: "3 months", renewalDate: "September", phone: "832-405-4440" },
+  { name: "Michelle", price: 230, frequency: "6 weeks", renewalDate: "July 20th" },
+  { name: "Hannah", price: 250, frequency: "Yearly", renewalDate: "6/11/27" },
+  { name: "Vallone", price: 275, frequency: "Yearly", renewalDate: "" },
 ];
 
 export const spreadsheetImportNotice =
@@ -124,21 +124,40 @@ function planType(frequency: string): ServicePlan["type"] {
   return "monthly";
 }
 
-function matchingCustomerId(planName: string) {
+function matchesPlanName(rowName: string, planName: string) {
+  const normalizedRow = rowName.toLowerCase();
   const normalizedPlan = planName.toLowerCase();
-  const matchIndex = sheetRows.findIndex((row) => row.name.toLowerCase() === normalizedPlan || row.name.toLowerCase().startsWith(normalizedPlan));
+  return normalizedRow === normalizedPlan || normalizedRow.startsWith(normalizedPlan);
+}
+
+function rowsMatchingPlanName(planName: string) {
+  return sheetRows.filter((row) => matchesPlanName(row.name, planName));
+}
+
+function matchingCustomerId(plan: RecurringPlanRow) {
+  const matchingRows = rowsMatchingPlanName(plan.name);
+  const priceMatchIndex = sheetRows.findIndex((row) => matchesPlanName(row.name, plan.name) && row.price === plan.price);
+  const nameMatchIndex = matchingRows.length === 1 ? sheetRows.findIndex((row) => matchesPlanName(row.name, plan.name)) : -1;
+  const matchIndex = priceMatchIndex >= 0 ? priceMatchIndex : nameMatchIndex;
   return matchIndex >= 0 ? customerId(sheetRows[matchIndex], matchIndex) : customerId(sheetRows[0], 0);
 }
 
-function planIdForCustomerName(name: string) {
-  const normalizedName = name.toLowerCase();
-  const index = recurringPlanRows.findIndex((plan) => normalizedName === plan.name.toLowerCase() || normalizedName.startsWith(plan.name.toLowerCase()));
+function matchingPlanForRow(row: SheetJobRow) {
+  const candidates = recurringPlanRows.filter((plan) => matchesPlanName(row.name, plan.name));
+  const priceMatch = candidates.find((plan) => plan.price === row.price);
+  if (priceMatch) return priceMatch;
+  return candidates.length === 1 && rowsMatchingPlanName(candidates[0].name).length === 1 ? candidates[0] : undefined;
+}
+
+function planIdForRow(row: SheetJobRow) {
+  const matchingPlan = matchingPlanForRow(row);
+  const index = matchingPlan ? recurringPlanRows.indexOf(matchingPlan) : -1;
   return index >= 0 ? `sp-${String(index + 1).padStart(3, "0")}` : undefined;
 }
 
 export const customers: Customer[] = sheetRows.map((row, index) => {
   const completed = normalizedStatus(row.status).startsWith("complete");
-  const matchingPlan = recurringPlanRows.find((plan) => row.name.toLowerCase() === plan.name.toLowerCase() || row.name.toLowerCase().startsWith(plan.name.toLowerCase()));
+  const matchingPlan = matchingPlanForRow(row);
 
   return {
     id: customerId(row, index),
@@ -147,7 +166,7 @@ export const customers: Customer[] = sheetRows.map((row, index) => {
     email: "",
     address: row.address,
     notes: `Imported from Upcoming Jobs. Original date text: ${row.originalDate}. ${row.notes ?? "No notes in spreadsheet."}`,
-    subscribedPlanId: planIdForCustomerName(row.name),
+    subscribedPlanId: planIdForRow(row),
     insights: completed ? ["repeat customer"] : row.date < actualToday ? ["overdue payment"] : ["inactive customer"],
   };
 });
@@ -210,13 +229,13 @@ export const payments: Payment[] = invoices
 export const servicePlans: ServicePlan[] = recurringPlanRows.map((plan, index) => ({
   id: `sp-${String(index + 1).padStart(3, "0")}`,
   type: planType(plan.frequency),
-  customerId: matchingCustomerId(plan.name),
+  customerId: matchingCustomerId(plan),
   discountPct: 0,
-  renewalDate: plan.renewalDate,
+  renewalDate: plan.renewalDate || "Not listed",
   servicesIncluded: ["Recurring power washing", plan.frequency],
   price: plan.price,
   paymentStatus: "unpaid",
-  notes: `Imported from Recurring Jobs sheet: ${plan.name}, $${plan.price}, ${plan.frequency}, next predicted date ${plan.renewalDate}${plan.phone ? `, phone ${plan.phone}` : ""}.`,
+  notes: `Imported from Recurring Jobs sheet: ${plan.name}, $${plan.price}, ${plan.frequency}, next predicted date ${plan.renewalDate || "not listed"}${plan.phone ? `, phone ${plan.phone}` : ""}.`,
 }));
 
 export const expenses: Expense[] = [];
