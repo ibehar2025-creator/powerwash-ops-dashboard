@@ -189,6 +189,20 @@ function normalizeJobPhotos(job: Job): Job {
   };
 }
 
+function timeFromOriginalDateText(notes?: string) {
+  const match = notes?.match(/Original date:\s*.*?\b(\d{1,2}):(\d{2})(?::\d{2})?\s*(?:GMT|\)|\.|$)/i);
+  if (!match) return undefined;
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function normalizeSyncedJobs(rows: Job[]) {
+  return mergePhotoOverrides(rows.map((job) => ({
+    ...job,
+    crewIds: [],
+    time: timeFromOriginalDateText(job.notes) ?? job.time,
+  })));
+}
+
 function sheetRowNumberFromJobId(jobId: string) {
   const match = jobId.match(/^sheet-(?:job|j)-0*(\d+)$/);
   return match ? Number(match[1]) + 1 : undefined;
@@ -424,7 +438,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
-  const [jobs, setJobs] = useState<Job[]>(() => mergePhotoOverrides(importedJobs.map((job) => ({ ...job, crewIds: [] }))));
+  const [jobs, setJobs] = useState<Job[]>(() => normalizeSyncedJobs(importedJobs));
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
   const [expenses, setExpenses] = useState<Expense[]>(importedExpenses);
   const [plans, setPlans] = useState<ServicePlan[]>(importedServicePlans);
@@ -449,7 +463,7 @@ export default function App() {
       if (!response.ok) throw new Error(`Sync failed with ${response.status}`);
       const payload = (await response.json()) as SyncPayload;
       if (payload.customers) setCustomers(customersFromSyncPayload(payload));
-      if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
+      if (payload.jobs) setJobs(normalizeSyncedJobs(payload.jobs));
       if (payload.invoices) setInvoices(payload.invoices);
       if (payload.expenses) setExpenses(payload.expenses);
       if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
@@ -541,7 +555,7 @@ export default function App() {
     if (!response.ok) throw new Error(`Sheet save failed with ${response.status}`);
     const payload = (await response.json().catch(() => ({}))) as SyncPayload & { ok?: boolean };
     if (payload.customers) setCustomers(customersFromSyncPayload(payload));
-    if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
+    if (payload.jobs) setJobs(normalizeSyncedJobs(payload.jobs));
     if (payload.invoices) setInvoices(payload.invoices);
     if (payload.expenses) setExpenses(payload.expenses);
     if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
