@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ElementType, ReactNode } from "react";
+import type { ElementType, FormEvent, ReactNode } from "react";
 import {
   BadgeDollarSign,
   BarChart3,
@@ -62,6 +62,16 @@ type SyncPayload = Partial<{
 }>;
 type JobPhotoPatch = Pick<Job, "beforePhoto" | "afterPhoto">;
 type JobPhotoOverrides = Record<string, JobPhotoPatch>;
+type AddClientJobInput = {
+  name: string;
+  phone: string;
+  address: string;
+  date: string;
+  time: string;
+  price: number;
+  serviceType: string;
+  notes: string;
+};
 
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -127,6 +137,10 @@ function cx(...classes: Array<string | false | undefined>) {
 
 function findCustomer(customers: Customer[], customerId: string) {
   return customers.find((customer) => customer.id === customerId) ?? customers[0];
+}
+
+function localId(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "new-client";
 }
 
 function readPhotoOverrides(): JobPhotoOverrides {
@@ -394,6 +408,56 @@ export default function App() {
     setPlans((current) => current.map((plan) => plan.id === planId ? { ...plan, ...patch } : plan));
   }
 
+  async function createClientJob(input: AddClientJobInput) {
+    if (!syncEndpoint) throw new Error("Live sheet saving needs VITE_SHEETS_SYNC_URL on Render.");
+    const response = await fetch(syncEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "addUpcomingJob", row: input }),
+    });
+    if (!response.ok) throw new Error(`Sheet save failed with ${response.status}`);
+    const payload = (await response.json().catch(() => ({}))) as SyncPayload & { ok?: boolean };
+    if (payload.customers) setCustomers(payload.customers);
+    if (payload.jobs) setJobs(mergePhotoOverrides(payload.jobs.map((job) => ({ ...job, crewIds: [] }))));
+    if (payload.invoices) setInvoices(payload.invoices);
+    if (payload.expenses) setExpenses(payload.expenses);
+    if (payload.servicePlans) setPlans(payload.servicePlans);
+    if (payload.reviews) setReviews(payload.reviews);
+    if (!payload.jobs) {
+      const createdAt = Date.now();
+      const customerId = `manual-c-${localId(input.name)}-${createdAt}`;
+      const newCustomer: Customer = {
+        id: customerId,
+        name: input.name,
+        phone: input.phone,
+        email: "",
+        address: input.address,
+        notes: "Added from the dashboard and saved to Upcoming Jobs.",
+        insights: ["inactive customer"],
+      };
+      const newJob: Job = {
+        id: `manual-j-${createdAt}`,
+        date: input.date,
+        time: input.time,
+        customerId,
+        address: input.address,
+        serviceType: input.serviceType,
+        status: "scheduled",
+        crewIds: [],
+        price: input.price,
+        amountPaid: 0,
+        tipAmount: 0,
+        paymentStatus: "unpaid",
+        notes: input.notes || "Added from dashboard.",
+        source: "spreadsheet-import",
+      };
+      setCustomers((current) => [newCustomer, ...current]);
+      setJobs((current) => [newJob, ...current]);
+    }
+    setSyncStatus(`Saved ${input.name} to Upcoming Jobs at ${new Date().toLocaleTimeString()}.`);
+    window.setTimeout(() => void syncSheets(false), 1500);
+  }
+
   function chooseTab(tabId: TabId) {
     setActiveTab(tabId);
     setMobileMenuOpen(false);
@@ -448,10 +512,10 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} reviews={reviews} onJobClick={setSelectedJob} />}
+            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} />}
             {activeTab === "leads" && <Leads />}
-            {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} />}
+            {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
@@ -467,11 +531,77 @@ export default function App() {
   );
 }
 
-function Dashboard({ customers, jobs, invoices, expenses, reviews, onJobClick }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; reviews: ReviewRow[]; onJobClick: (job: Job) => void }) {
+function Dashboard({ customers, jobs, invoices, expenses, reviews, onJobClick, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; reviews: ReviewRow[]; onJobClick: (job: Job) => void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const upcoming = jobs.filter((job) => job.status === "scheduled" || job.status === "in progress").slice(0, 6);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
-  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Total price of jobs scheduled today" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(metrics.dailyPay)} detail="Crew payroll is not configured" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Past due jobs" value={`${metrics.pastDueJobs}`} detail={`${currency.format(metrics.unpaidInvoiceTotal)} owed`} icon={FileText} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Month-to-date job value" icon={BarChart3} /><Stat label="Projected monthly" value={currency.format(metrics.projectedMonthlyRevenue)} detail="Includes upcoming jobs this month" icon={Sparkles} /><Stat label="Unpaid invoices" value={`${metrics.unpaidInvoiceCount}`} detail="Unpaid, partial, and past due" icon={ReceiptText} /><Stat label="Expenses" value={currency.format(metrics.expenses)} detail="From the Expenses sheet" icon={CreditCard} /><Stat label="Reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} /></div></Section><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></button>)}</div></Section><Section title="Customer insights" kicker="Retention signals"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><div><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{customer.insights.join(" / ")}</p></div><p className="font-semibold text-lagoon dark:text-cyan-300">{currency.format(customer.spent)}</p></div>)}</div></Section></div></div>;
+  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Total price of jobs scheduled today" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(metrics.dailyPay)} detail="Crew payroll is not configured" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Past due jobs" value={`${metrics.pastDueJobs}`} detail={`${currency.format(metrics.unpaidInvoiceTotal)} owed`} icon={FileText} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Month-to-date job value" icon={BarChart3} /><Stat label="Projected monthly" value={currency.format(metrics.projectedMonthlyRevenue)} detail="Includes upcoming jobs this month" icon={Sparkles} /><Stat label="Unpaid invoices" value={`${metrics.unpaidInvoiceCount}`} detail="Unpaid, partial, and past due" icon={ReceiptText} /><Stat label="Expenses" value={currency.format(metrics.expenses)} detail="From the Expenses sheet" icon={CreditCard} /><Stat label="Reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} /></div></Section><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></button>)}</div></Section><AddClientJobForm onCreate={onClientJobCreate} /><Section title="Customer insights" kicker="Retention signals"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><div><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{customer.insights.join(" / ")}</p></div><p className="font-semibold text-lagoon dark:text-cyan-300">{currency.format(customer.spent)}</p></div>)}</div></Section></div></div>;
+}
+
+function AddClientJobForm({ onCreate }: { onCreate: (input: AddClientJobInput) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [date, setDate] = useState(today);
+  const [time, setTime] = useState("09:00");
+  const [price, setPrice] = useState("");
+  const [serviceType, setServiceType] = useState("Full property");
+  const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("");
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setStatus("Add the customer name first.");
+      return;
+    }
+    try {
+      setSaving(true);
+      await onCreate({
+        name: cleanName,
+        phone: phone.trim(),
+        address: address.trim(),
+        date,
+        time,
+        price: Number(price.replace(/[^0-9.]/g, "")) || 0,
+        serviceType: serviceType.trim() || "Pressure washing service",
+        notes: notes.trim(),
+      });
+      setName("");
+      setPhone("");
+      setAddress("");
+      setPrice("");
+      setServiceType("Full property");
+      setNotes("");
+      setStatus("Saved to Upcoming Jobs.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not save to Upcoming Jobs.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Section title="Add client to sheet" kicker="Saves a new row to Upcoming Jobs">
+      <form className="settings-grid" onSubmit={submit}>
+        <Field label="Customer name"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer name" required /></Field>
+        <Field label="Phone"><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="713-000-0000" /></Field>
+        <Field label="Date"><input type="date" value={date} onChange={(event) => setDate(event.target.value)} required /></Field>
+        <Field label="Time"><input type="time" value={time} onChange={(event) => setTime(event.target.value)} required /></Field>
+        <Field label="Price"><input value={price} onChange={(event) => setPrice(event.target.value)} placeholder="$250" inputMode="decimal" /></Field>
+        <Field label="Service"><input value={serviceType} onChange={(event) => setServiceType(event.target.value)} placeholder="Driveway, sidewalks, patio" /></Field>
+        <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Address<input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Customer address" /></label>
+        <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Anything included, gate notes, reminders, etc." /></label>
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving" : "Save to Upcoming Jobs"}</button>
+          {status && <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status}</p>}
+        </div>
+      </form>
+    </Section>
+  );
 }
 
 function Customers({ customers, jobs, invoices }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[] }) {
@@ -483,8 +613,8 @@ function Leads() {
   return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
 }
 
-function Jobs({ customers, jobs, onJobClick, onJobUpdate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => boolean | void }) {
-  return <Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={job.status} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><PhotoChip label="Before" value={job.beforePhoto} /><PhotoChip label="After" value={job.afterPhoto} /></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section>;
+function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => boolean | void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
+  return <div className="space-y-4"><AddClientJobForm onCreate={onClientJobCreate} /><Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={job.status} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><PhotoChip label="Before" value={job.beforePhoto} /><PhotoChip label="After" value={job.afterPhoto} /></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section></div>;
 }
 
 function Calendar({ customers, jobs, onJobClick }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void }) {
