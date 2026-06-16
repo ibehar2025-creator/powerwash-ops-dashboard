@@ -62,6 +62,7 @@ type SyncPayload = Partial<{
 }>;
 type JobPhotoPatch = Pick<Job, "beforePhoto" | "afterPhoto">;
 type JobPhotoOverrides = Record<string, JobPhotoPatch>;
+type JobPhotoSaveResult = { ok: boolean; message?: string };
 type AddClientJobInput = {
   name: string;
   phone: string;
@@ -110,6 +111,7 @@ const monthDays = [
 const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
 const PHOTO_STORAGE_KEY = "powerwash-job-photo-overrides";
+const SHEET_PHOTO_LIMIT = 45_000;
 
 function addDays(date: string, days: number) {
   const next = new Date(`${date}T12:00:00`);
@@ -168,7 +170,26 @@ function writePhotoOverride(jobId: string, patch: JobPhotoPatch) {
 
 function mergePhotoOverrides(rows: Job[]) {
   const overrides = readPhotoOverrides();
-  return rows.map((job) => ({ ...job, ...overrides[job.id] }));
+  return rows.map((job) => normalizeJobPhotos({ ...job, ...overrides[job.id] }));
+}
+
+function cleanPhotoValue(value?: string) {
+  const trimmed = value?.trim();
+  if (!trimmed || /placeholder/i.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function normalizeJobPhotos(job: Job): Job {
+  return {
+    ...job,
+    beforePhoto: cleanPhotoValue(job.beforePhoto),
+    afterPhoto: cleanPhotoValue(job.afterPhoto),
+  };
+}
+
+function sheetRowNumberFromJobId(jobId: string) {
+  const match = jobId.match(/^sheet-(?:job|j)-0*(\d+)$/);
+  return match ? Number(match[1]) + 1 : undefined;
 }
 
 function resolvePhotoUrl(value?: string) {
@@ -190,7 +211,7 @@ function fileToPhotoDataUrl(file: File) {
       const image = new Image();
       image.onerror = () => reject(new Error("Could not load photo."));
       image.onload = () => {
-        const maxSide = 1400;
+        const maxSide = 900;
         const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(image.width * scale));
@@ -201,7 +222,12 @@ function fileToPhotoDataUrl(file: File) {
           return;
         }
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+        if (dataUrl.length > SHEET_PHOTO_LIMIT) {
+          reject(new Error("Photo is too large to save in Google Sheets. Use a Drive link or a smaller image."));
+          return;
+        }
+        resolve(dataUrl);
       };
       image.src = String(reader.result);
     };
@@ -298,12 +324,23 @@ function PhotoPreview({ label, value }: { label: string; value?: string }) {
   );
 }
 
-function PhotoField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => boolean | void }) {
+function PhotoField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => JobPhotoSaveResult | Promise<JobPhotoSaveResult> }) {
+  const [draft, setDraft] = useState(value ?? "");
   const [status, setStatus] = useState("");
 
-  function savePhotoValue(nextValue: string) {
-    const saved = onChange(nextValue);
-    setStatus(saved === false ? "Photo shows now, but it was too large for this browser to save permanently. Upload a smaller photo or use a Drive link." : nextValue ? "Photo saved." : "Photo cleared.");
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  async function savePhotoValue(nextValue: string) {
+    const cleaned = nextValue.trim();
+    if (cleaned.length > SHEET_PHOTO_LIMIT && cleaned.startsWith("data:image/")) {
+      setStatus("That photo is too large for Google Sheets. Use a Drive link or upload a smaller photo.");
+      return;
+    }
+    setStatus(cleaned ? "Saving photo..." : "Clearing photo...");
+    const result = await onChange(cleaned);
+    setStatus(result.message ?? (cleaned ? "Photo saved to Google Sheets." : "Photo cleared from Google Sheets."));
   }
 
   async function uploadPhoto(file?: File) {
@@ -316,21 +353,22 @@ function PhotoField({ label, value, onChange }: { label: string; value?: string;
       setStatus("Saving photo...");
       savePhotoValue(await fileToPhotoDataUrl(file));
     } catch {
-      setStatus("Could not save that photo. Try a smaller image or paste a link.");
+      setStatus("Could not save that photo. Try a smaller image or paste a Drive link.");
     }
   }
 
   return (
     <div className="photo-field">
       <Field label={`${label} photo link`}>
-        <textarea value={value ?? ""} placeholder="Paste image URL, Google Drive share link, or data:image text" onChange={(event) => savePhotoValue(event.target.value)} />
+        <textarea value={draft} placeholder="Paste image URL, Google Drive share link, or data:image text" onChange={(event) => setDraft(event.target.value)} />
       </Field>
       <div className="mt-2 flex flex-wrap gap-2">
+        <button className="text-button" onClick={() => void savePhotoValue(draft)}>Save photo</button>
         <label className="text-button cursor-pointer">
           <ImagePlus size={16} /> Upload photo
           <input className="sr-only" type="file" accept="image/*" onChange={(event) => void uploadPhoto(event.target.files?.[0])} />
         </label>
-        {value && <button className="text-button" onClick={() => savePhotoValue("")}>Clear</button>}
+        {value && <button className="text-button" onClick={() => void savePhotoValue("")}>Clear</button>}
       </div>
       {status && <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{status}</p>}
       <PhotoPreview label={label} value={value} />
@@ -387,17 +425,50 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [syncEndpoint, syncSheets]);
 
-  function updateJob(jobId: string, patch: Partial<Job>) {
+  async function saveJobPhotos(jobId: string, patch: JobPhotoPatch): Promise<JobPhotoSaveResult> {
+    const localSaved = writePhotoOverride(jobId, patch);
+    if (!syncEndpoint) {
+      return {
+        ok: localSaved,
+        message: localSaved ? "Photo saved on this device. Add the sheet sync URL to save it to Google Sheets." : "Photo shows now, but could not be saved on this device.",
+      };
+    }
+    const rowNumber = sheetRowNumberFromJobId(jobId);
+    if (!rowNumber) {
+      return {
+        ok: localSaved,
+        message: "Photo saved on this device. Sync this new job from Google Sheets, then save the photo again.",
+      };
+    }
+    const response = await fetch(syncEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "updateJobPhotos", jobId, rowNumber, photos: patch }),
+    });
+    if (!response.ok) throw new Error(`Photo sheet save failed with ${response.status}`);
+    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (payload.ok === false) throw new Error(payload.error ?? "Photo sheet save failed.");
+    setSyncStatus(`Saved job photo to Upcoming Jobs at ${new Date().toLocaleTimeString()}.`);
+    window.setTimeout(() => void syncSheets(false), 1500);
+    return { ok: true };
+  }
+
+  function updateJob(jobId: string, patch: Partial<Job>): JobPhotoSaveResult | Promise<JobPhotoSaveResult> {
     let photoSaved = true;
+    let saveResult: Promise<JobPhotoSaveResult> | undefined;
     if ("beforePhoto" in patch || "afterPhoto" in patch) {
       const photoPatch: JobPhotoPatch = {};
       if ("beforePhoto" in patch) photoPatch.beforePhoto = patch.beforePhoto;
       if ("afterPhoto" in patch) photoPatch.afterPhoto = patch.afterPhoto;
       photoSaved = writePhotoOverride(jobId, photoPatch);
+      saveResult = saveJobPhotos(jobId, photoPatch).catch((error) => ({
+        ok: false,
+        message: error instanceof Error ? error.message : "Photo sheet save failed.",
+      }));
     }
     setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...patch } : job));
     setSelectedJob((current) => current?.id === jobId ? { ...current, ...patch } : current);
-    return photoSaved;
+    return saveResult ?? { ok: photoSaved };
   }
 
   function updateInvoice(invoiceId: string, patch: Partial<Invoice>) {
@@ -613,7 +684,7 @@ function Leads() {
   return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
 }
 
-function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => boolean | void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
+function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobPhotoSaveResult | Promise<JobPhotoSaveResult>; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
   return <div className="space-y-4"><AddClientJobForm onCreate={onClientJobCreate} /><Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={job.status} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><PhotoChip label="Before" value={job.beforePhoto} /><PhotoChip label="After" value={job.afterPhoto} /></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section></div>;
 }
 
@@ -640,7 +711,7 @@ function Calendar({ customers, jobs, onJobClick }: { customers: Customer[]; jobs
   return <Section title="Scheduling calendar" kicker={`Date-matched spreadsheet schedule: ${rangeLabel}`} action={action}><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address || "No address listed"}</span><span className="text-xs">Unassigned</span><Badge status={job.status} /></button>)}</div>; })}</div></Section>;
 }
 
-function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => boolean | void }) {
+function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobPhotoSaveResult | Promise<JobPhotoSaveResult> }) {
   const [selectedId, setSelectedId] = useState(customers[0]?.id ?? "");
   const customer = findCustomer(customers, selectedId);
   const selectedJobs = jobsForCustomer(customer.id, jobs);
@@ -761,7 +832,7 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
-function JobModal({ customers, job, onClose, onJobUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => boolean | void }) {
+function JobModal({ customers, job, onClose, onJobUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobPhotoSaveResult | Promise<JobPhotoSaveResult> }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4">
       <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
