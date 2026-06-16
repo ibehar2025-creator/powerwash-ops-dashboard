@@ -376,7 +376,7 @@ Date: ${today}
 This agreement is between ${businessSettings.businessName} and ${cleanName}.
 
 1. Services Included
-${businessSettings.businessName} agrees to provide the following power washing services:
+${businessSettings.businessName} will provide the following power washing services:
 ${cleanServices}
 
 2. Price and Payment
@@ -417,7 +417,7 @@ The Powerwashing Pros: ______________________________`;
           <Field label="Deal type">
             <select value={dealType} onChange={(event) => setDealType(event.target.value as "recurring" | "standard")}>
               <option value="recurring">Recurring plan</option>
-              <option value="standard">Normal powerwashing deal</option>
+              <option value="standard">Normal power washing deal</option>
             </select>
           </Field>
           <Field label="Amount they will pay">
