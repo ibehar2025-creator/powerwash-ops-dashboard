@@ -6,6 +6,8 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   CreditCard,
   Copy,
@@ -98,6 +100,26 @@ const monthDays = [
 const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
 const PHOTO_STORAGE_KEY = "powerwash-job-photo-overrides";
+
+function addDays(date: string, days: number) {
+  const next = new Date(`${date}T12:00:00`);
+  next.setDate(next.getDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+function dateLabel(date: string, options: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" }) {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", ...options }).format(new Date(`${date}T12:00:00`));
+}
+
+function calendarDaysForMode(mode: "day" | "week" | "month", anchorDate: string) {
+  if (mode === "day") return [{ label: dateLabel(anchorDate, { weekday: "long" }), date: anchorDate }];
+  const length = mode === "week" ? 7 : 30;
+  const startOffset = mode === "week" ? 0 : -14;
+  return Array.from({ length }, (_, index) => {
+    const date = addDays(anchorDate, startOffset + index);
+    return { label: dateLabel(date), date };
+  });
+}
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -467,8 +489,25 @@ function Jobs({ customers, jobs, onJobClick, onJobUpdate }: { customers: Custome
 
 function Calendar({ customers, jobs, onJobClick }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void }) {
   const [mode, setMode] = useState<"day" | "week" | "month">("week");
-  const days = mode === "day" ? [{ label: "Today", date: today }] : mode === "week" ? weekDays : monthDays;
-  return <Section title="Scheduling calendar" kicker="Date-matched spreadsheet schedule" action={<div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div>}><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address || "No address listed"}</span><span className="text-xs">Unassigned</span><Badge status={job.status} /></button>)}</div>; })}</div></Section>;
+  const [anchorDate, setAnchorDate] = useState(today);
+  const days = calendarDaysForMode(mode, anchorDate);
+  const step = mode === "day" ? 1 : mode === "week" ? 7 : 30;
+  const rangeLabel = mode === "day" ? dateLabel(anchorDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : `${days[0].date.slice(5)} to ${days[days.length - 1].date.slice(5)}`;
+  const action = (
+    <div className="calendar-toolbar">
+      <div className="calendar-nav">
+        <button className="icon-button" onClick={() => setAnchorDate(addDays(anchorDate, -step))} title={`Previous ${mode}`}>
+          <ChevronLeft size={18} />
+        </button>
+        <button className="text-button" onClick={() => setAnchorDate(today)}>Today</button>
+        <button className="icon-button" onClick={() => setAnchorDate(addDays(anchorDate, step))} title={`Next ${mode}`}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+      <div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div>
+    </div>
+  );
+  return <Section title="Scheduling calendar" kicker={`Date-matched spreadsheet schedule: ${rangeLabel}`} action={action}><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address || "No address listed"}</span><span className="text-xs">Unassigned</span><Badge status={job.status} /></button>)}</div>; })}</div></Section>;
 }
 
 function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => boolean | void }) {

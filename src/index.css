@@ -103,6 +103,14 @@ select {
   @apply bg-lagoon text-white;
 }
 
+.calendar-toolbar {
+  @apply flex flex-wrap items-center justify-end gap-2;
+}
+
+.calendar-nav {
+  @apply inline-flex items-center gap-2;
+}
+
 .calendar-grid {
   @apply grid gap-3 lg:grid-cols-7;
 }
