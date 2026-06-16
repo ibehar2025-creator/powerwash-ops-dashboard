@@ -1,4 +1,4 @@
-import type { BusinessSettings, CrewMember, Customer, Expense, Invoice, Job, Lead, Payment, ServicePlan } from "../types/business";
+import type { BusinessSettings, CrewMember, Customer, Expense, Invoice, Job, Lead, Payment, PaymentStatus, ServicePlan } from "../types/business";
 
 type SheetJobRow = {
   name: string;
@@ -19,6 +19,9 @@ type RecurringPlanRow = {
   frequency: string;
   renewalDate: string;
   phone?: string;
+  servicesIncluded?: string;
+  paymentStatus?: PaymentStatus;
+  notes?: string;
 };
 
 const actualToday = new Intl.DateTimeFormat("en-CA", {
@@ -80,10 +83,10 @@ const sheetRows: SheetJobRow[] = [
 ];
 
 const recurringPlanRows: RecurringPlanRow[] = [
-  { name: "Mark", price: 175, frequency: "3 months", renewalDate: "September", phone: "832-405-4440" },
-  { name: "Michelle", price: 230, frequency: "6 weeks", renewalDate: "July 20th" },
-  { name: "Hannah", price: 250, frequency: "Yearly", renewalDate: "6/11/27" },
-  { name: "Vallone", price: 275, frequency: "Yearly", renewalDate: "" },
+  { name: "Mark", price: 175, frequency: "3 months", renewalDate: "September", phone: "832-405-4440", servicesIncluded: "Recurring power washing", paymentStatus: "unpaid" },
+  { name: "Michelle", price: 230, frequency: "6 weeks", renewalDate: "July 20th", servicesIncluded: "Recurring power washing", paymentStatus: "unpaid" },
+  { name: "Hannah", price: 250, frequency: "Yearly", renewalDate: "6/11/27", servicesIncluded: "Recurring power washing", paymentStatus: "unpaid" },
+  { name: "Vallone", price: 275, frequency: "Yearly", renewalDate: "", servicesIncluded: "Recurring power washing", paymentStatus: "unpaid" },
 ];
 
 export const spreadsheetImportNotice =
@@ -134,12 +137,8 @@ function rowsMatchingPlanName(planName: string) {
   return sheetRows.filter((row) => matchesPlanName(row.name, planName));
 }
 
-function matchingCustomerId(plan: RecurringPlanRow) {
-  const matchingRows = rowsMatchingPlanName(plan.name);
-  const priceMatchIndex = sheetRows.findIndex((row) => matchesPlanName(row.name, plan.name) && row.price === plan.price);
-  const nameMatchIndex = matchingRows.length === 1 ? sheetRows.findIndex((row) => matchesPlanName(row.name, plan.name)) : -1;
-  const matchIndex = priceMatchIndex >= 0 ? priceMatchIndex : nameMatchIndex;
-  return matchIndex >= 0 ? customerId(sheetRows[matchIndex], matchIndex) : customerId(sheetRows[0], 0);
+function recurringCustomerId(index: number) {
+  return `recurring-c-${String(index + 1).padStart(3, "0")}`;
 }
 
 function matchingPlanForRow(row: SheetJobRow) {
@@ -155,7 +154,7 @@ function planIdForRow(row: SheetJobRow) {
   return index >= 0 ? `sp-${String(index + 1).padStart(3, "0")}` : undefined;
 }
 
-export const customers: Customer[] = sheetRows.map((row, index) => {
+const jobCustomers: Customer[] = sheetRows.map((row, index) => {
   const completed = normalizedStatus(row.status).startsWith("complete");
   const matchingPlan = matchingPlanForRow(row);
 
@@ -170,6 +169,19 @@ export const customers: Customer[] = sheetRows.map((row, index) => {
     insights: completed ? ["repeat customer"] : row.date < actualToday ? ["overdue payment"] : ["inactive customer"],
   };
 });
+
+const recurringCustomers: Customer[] = recurringPlanRows.map((plan, index) => ({
+  id: recurringCustomerId(index),
+  name: plan.name,
+  phone: plan.phone ?? "",
+  email: "",
+  address: "",
+  notes: `Imported directly from Recurring Jobs. Frequency: ${plan.frequency}.`,
+  subscribedPlanId: `sp-${String(index + 1).padStart(3, "0")}`,
+  insights: ["repeat customer"],
+}));
+
+export const customers: Customer[] = [...jobCustomers, ...recurringCustomers];
 
 export const jobs: Job[] = sheetRows.map((row, index) => {
   const status = jobStatus(row);
@@ -229,13 +241,13 @@ export const payments: Payment[] = invoices
 export const servicePlans: ServicePlan[] = recurringPlanRows.map((plan, index) => ({
   id: `sp-${String(index + 1).padStart(3, "0")}`,
   type: planType(plan.frequency),
-  customerId: matchingCustomerId(plan),
+  customerId: recurringCustomerId(index),
   discountPct: 0,
   renewalDate: plan.renewalDate || "Not listed",
-  servicesIncluded: ["Recurring power washing", plan.frequency],
+  servicesIncluded: [plan.servicesIncluded || "Recurring power washing", plan.frequency],
   price: plan.price,
-  paymentStatus: "unpaid",
-  notes: `Imported from Recurring Jobs sheet: ${plan.name}, $${plan.price}, ${plan.frequency}, next predicted date ${plan.renewalDate || "not listed"}${plan.phone ? `, phone ${plan.phone}` : ""}.`,
+  paymentStatus: plan.paymentStatus ?? "unpaid",
+  notes: plan.notes || `Imported from Recurring Jobs sheet: ${plan.name}, $${plan.price}, ${plan.frequency}, next predicted date ${plan.renewalDate || "not listed"}${plan.phone ? `, phone ${plan.phone}` : ""}.`,
 }));
 
 export const expenses: Expense[] = [];
