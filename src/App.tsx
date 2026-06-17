@@ -75,6 +75,16 @@ type AddClientJobInput = {
   serviceType: string;
   notes: string;
 };
+type AddServicePlanInput = {
+  name: string;
+  phone: string;
+  price: number;
+  frequency: string;
+  renewalDate: string;
+  servicesIncluded: string;
+  paymentStatus: PaymentStatus;
+  notes: string;
+};
 
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -595,6 +605,26 @@ export default function App() {
     window.setTimeout(() => void syncSheets(false), 1500);
   }
 
+  async function createServicePlan(input: AddServicePlanInput) {
+    if (!syncEndpoint) throw new Error("Live sheet saving needs VITE_SHEETS_SYNC_URL on Render.");
+    const response = await fetch(syncEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "addServicePlan", row: input }),
+    });
+    if (!response.ok) throw new Error(`Sheet save failed with ${response.status}`);
+    const payload = (await response.json().catch(() => ({}))) as SyncPayload & { ok?: boolean; error?: string };
+    if (payload.ok === false) throw new Error(payload.error ?? "Sheet save failed.");
+    if (payload.customers) setCustomers(customersFromSyncPayload(payload));
+    if (payload.jobs) setJobs(normalizeSyncedJobs(payload.jobs));
+    if (payload.invoices) setInvoices(payload.invoices);
+    if (payload.expenses) setExpenses(payload.expenses);
+    if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
+    if (payload.reviews) setReviews(payload.reviews);
+    setSyncStatus(`Saved ${input.name} to Recurring Jobs at ${new Date().toLocaleTimeString()}.`);
+    window.setTimeout(() => void syncSheets(false), 1500);
+  }
+
   function chooseTab(tabId: TabId) {
     setActiveTab(tabId);
     setMobileMenuOpen(false);
@@ -656,7 +686,7 @@ export default function App() {
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
-            {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
+            {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} onPlanCreate={createServicePlan} />}
             {activeTab === "contracts" && <Contracts />}
             {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
@@ -855,10 +885,111 @@ function Invoices({ customers, invoices, onInvoiceUpdate, onInvoiceCreate }: { c
   );
 }
 
-function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void }) {
+function Plans({ customers, plans, onPlanUpdate, onPlanCreate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void; onPlanCreate: (input: AddServicePlanInput) => Promise<void> }) {
   const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
   const plan = plans.find((item) => item.id === selectedId) ?? plans[0];
-  return <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]"><Section title="Service plans" kicker="Imported from Recurring Jobs"><div className="space-y-2">{plans.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", plan?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}><div className="flex items-center justify-between gap-3"><strong className="capitalize text-ink dark:text-white">{item.type} plan</strong><Badge status={item.paymentStatus} /></div><p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - renews {item.renewalDate}</p></button>)}</div></Section>{plan && <Section title="Plan editor" kicker="Subscription status, renewal, services, pricing"><div className="settings-grid"><Field label="Customer"><select value={plan.customerId} onChange={(event) => onPlanUpdate(plan.id, { customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Plan type"><select value={String(plan.type)} onChange={(event) => onPlanUpdate(plan.id, { type: event.target.value as ServicePlan["type"] })}>{planTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field><Field label="Plan price">{moneyInput(plan.price, (value) => onPlanUpdate(plan.id, { price: value }))}</Field><Field label="Discount %">{moneyInput(plan.discountPct, (value) => onPlanUpdate(plan.id, { discountPct: value }))}</Field><Field label="Renewal date"><input value={plan.renewalDate} onChange={(event) => onPlanUpdate(plan.id, { renewalDate: event.target.value })} /></Field><Field label="Payment status"><select value={plan.paymentStatus} onChange={(event) => onPlanUpdate(plan.id, { paymentStatus: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={plan.notes} onChange={(event) => onPlanUpdate(plan.id, { notes: event.target.value })} /></label></div><div className="mt-4 flex flex-wrap gap-2">{plan.servicesIncluded.map((service) => <span key={service} className="tag">{service}</span>)}</div></Section>}</div>;
+  return (
+    <div className="space-y-4">
+      <AddServicePlanForm onCreate={onPlanCreate} />
+      <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+        <Section title="Service plans" kicker="Imported from Recurring Jobs">
+          <div className="space-y-2">
+            {plans.map((item) => (
+              <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", plan?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}>
+                <div className="flex items-center justify-between gap-3">
+                  <strong className="capitalize text-ink dark:text-white">{item.type} plan</strong>
+                  <Badge status={item.paymentStatus} />
+                </div>
+                <p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - renews {item.renewalDate}</p>
+              </button>
+            ))}
+          </div>
+        </Section>
+        {plan && (
+          <Section title="Plan editor" kicker="Subscription status, renewal, services, pricing">
+            <div className="settings-grid">
+              <Field label="Customer"><select value={plan.customerId} onChange={(event) => onPlanUpdate(plan.id, { customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field>
+              <Field label="Plan type"><select value={String(plan.type)} onChange={(event) => onPlanUpdate(plan.id, { type: event.target.value as ServicePlan["type"] })}>{planTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field>
+              <Field label="Plan price">{moneyInput(plan.price, (value) => onPlanUpdate(plan.id, { price: value }))}</Field>
+              <Field label="Discount %">{moneyInput(plan.discountPct, (value) => onPlanUpdate(plan.id, { discountPct: value }))}</Field>
+              <Field label="Renewal date"><input value={plan.renewalDate} onChange={(event) => onPlanUpdate(plan.id, { renewalDate: event.target.value })} /></Field>
+              <Field label="Payment status"><select value={plan.paymentStatus} onChange={(event) => onPlanUpdate(plan.id, { paymentStatus: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field>
+              <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={plan.notes} onChange={(event) => onPlanUpdate(plan.id, { notes: event.target.value })} /></label>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">{plan.servicesIncluded.map((service) => <span key={service} className="tag">{service}</span>)}</div>
+          </Section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddServicePlanForm({ onCreate }: { onCreate: (input: AddServicePlanInput) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [price, setPrice] = useState("");
+  const [frequency, setFrequency] = useState("Monthly");
+  const [renewalDate, setRenewalDate] = useState("");
+  const [servicesIncluded, setServicesIncluded] = useState("Recurring power washing");
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("unpaid");
+  const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("");
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setStatus("Add the customer name first.");
+      return;
+    }
+    try {
+      setSaving(true);
+      await onCreate({
+        name: cleanName,
+        phone: phone.trim(),
+        price: Number(price.replace(/[^0-9.]/g, "")) || 0,
+        frequency: frequency.trim() || "Monthly",
+        renewalDate: renewalDate.trim(),
+        servicesIncluded: servicesIncluded.trim() || "Recurring power washing",
+        paymentStatus,
+        notes: notes.trim(),
+      });
+      setName("");
+      setPhone("");
+      setPrice("");
+      setFrequency("Monthly");
+      setRenewalDate("");
+      setServicesIncluded("Recurring power washing");
+      setPaymentStatus("unpaid");
+      setNotes("");
+      setStatus("Saved to Recurring Jobs.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not save to Recurring Jobs.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Section title="Add recurring plan" kicker="Saves a complete row to Recurring Jobs">
+      <form className="settings-grid" onSubmit={submit}>
+        <Field label="Customer name"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer name" required /></Field>
+        <Field label="Phone"><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="713-000-0000" /></Field>
+        <Field label="Price"><input value={price} onChange={(event) => setPrice(event.target.value)} placeholder="$250" inputMode="decimal" /></Field>
+        <Field label="Frequency"><input value={frequency} onChange={(event) => setFrequency(event.target.value)} placeholder="Monthly, 6 weeks, yearly" /></Field>
+        <Field label="Renewal date"><input value={renewalDate} onChange={(event) => setRenewalDate(event.target.value)} placeholder="2026-07-20 or July 20" /></Field>
+        <Field label="Payment status"><select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((item) => <option key={item} value={item}>{item}</option>)}</select></Field>
+        <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Services included<input value={servicesIncluded} onChange={(event) => setServicesIncluded(event.target.value)} placeholder="Driveway, sidewalks, patio" /></label>
+        <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Contract notes, gate access, reminders, etc." /></label>
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving" : "Save to Recurring Jobs"}</button>
+          {status && <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status}</p>}
+        </div>
+      </form>
+    </Section>
+  );
 }
 
 function Contracts() {
@@ -952,7 +1083,7 @@ function Reports({ customers, jobs, invoices, expenses }: { customers: Customer[
   const maxRevenue = Math.max(...revenue.map((item) => item.revenue), 1);
   const averageJob = jobs.length ? jobs.reduce((sum, job) => sum + job.price, 0) / jobs.length : 0;
   const repeatStats = repeatCustomerStats(customers, jobs);
-  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Jobs past due" value={`${metrics.pastDueJobs}`} detail="Needs action" icon={FileText} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomers} customers: ${repeatStats.recurringCustomers} recurring plans, ${repeatStats.multiJobCustomers} booked 2+ jobs`} icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Paid vs unpaid" kicker="Invoice mix, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Unpaid invoices</span><strong>{invoices.filter((invoice) => invoice.status !== "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
+  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Jobs past due" value={`${metrics.pastDueJobs}`} detail="Needs action" icon={FileText} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomers} customers are active Recurring Jobs plans`} icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Paid vs unpaid" kicker="Invoice mix, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Unpaid invoices</span><strong>{invoices.filter((invoice) => invoice.status !== "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
 }
 
 function Reviews({ reviews }: { reviews: ReviewRow[] }) {

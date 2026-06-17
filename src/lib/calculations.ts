@@ -165,7 +165,7 @@ export function repeatCustomerStats(customers: Customer[], jobs: Job[]) {
   }
 
   const allCustomers = Array.from(identities.values());
-  const repeatCustomers = allCustomers.filter((identity) => identity.jobCount >= 2 || identity.hasRecurringPlan).length;
+  const repeatCustomers = allCustomers.filter((identity) => identity.hasRecurringPlan).length;
   const multiJobCustomers = allCustomers.filter((identity) => identity.jobCount >= 2).length;
   const recurringCustomers = allCustomers.filter((identity) => identity.hasRecurringPlan).length;
   const totalCustomers = allCustomers.length;
