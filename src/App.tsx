@@ -14,7 +14,9 @@ import {
   FileText,
   ImagePlus,
   LayoutDashboard,
+  Mail,
   Menu,
+  MessageSquare,
   Moon,
   ReceiptText,
   Sparkles,
@@ -687,7 +689,7 @@ export default function App() {
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} onPlanCreate={createServicePlan} />}
-            {activeTab === "contracts" && <Contracts />}
+            {activeTab === "contracts" && <Contracts customers={customers} invoices={invoices} />}
             {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
           </div>
@@ -818,6 +820,45 @@ function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { custome
 function invoiceDisplayName(invoice: Invoice, customers: Customer[]) {
   const customer = findCustomer(customers, invoice.customerId);
   return `${customer.name} - ${invoice.serviceDescription || "Power washing"}`;
+}
+
+function cleanPhoneForSms(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  return digits ? `+${digits}` : "";
+}
+
+function invoiceTotal(invoice: Invoice) {
+  return invoice.price - invoice.discount + invoice.tip;
+}
+
+function invoiceMessage(invoice: Invoice, customer: Customer) {
+  const owed = amountOwed(invoice);
+  return `Hi ${customer.name},
+
+Here is your invoice from ${businessSettings.businessName}.
+
+Service: ${invoice.serviceDescription}
+Total: ${currency.format(invoiceTotal(invoice))}
+Paid: ${currency.format(invoice.amountPaid)}
+Amount due: ${currency.format(owed)}
+Due date: ${invoice.dueDate}
+
+You can pay by ${invoice.paymentMethod ?? "your preferred payment method"}. Please reply here if you have any questions.
+
+Thank you,
+${businessSettings.businessName}
+${businessSettings.phone}`;
+}
+
+function invoiceMailtoHref(invoice: Invoice, customer: Customer) {
+  const subject = `Invoice from ${businessSettings.businessName}: ${invoiceDisplayName(invoice, [customer])}`;
+  return `mailto:${encodeURIComponent(customer.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(invoiceMessage(invoice, customer))}`;
+}
+
+function invoiceSmsHref(invoice: Invoice, customer: Customer) {
+  const phone = cleanPhoneForSms(customer.phone);
+  return `sms:${encodeURIComponent(phone)}?&body=${encodeURIComponent(invoiceMessage(invoice, customer))}`;
 }
 
 function Invoices({ customers, invoices, onInvoiceUpdate, onInvoiceCreate }: { customers: Customer[]; invoices: Invoice[]; onInvoiceUpdate: (invoiceId: string, patch: Partial<Invoice>) => void; onInvoiceCreate: () => void }) {
@@ -992,17 +1033,21 @@ function AddServicePlanForm({ onCreate }: { onCreate: (input: AddServicePlanInpu
   );
 }
 
-function Contracts() {
+function Contracts({ customers, invoices }: { customers: Customer[]; invoices: Invoice[] }) {
   const [customerName, setCustomerName] = useState("");
   const [dealType, setDealType] = useState<"recurring" | "standard">("recurring");
   const [planFrequency, setPlanFrequency] = useState("");
   const [includedServices, setIncludedServices] = useState("");
   const [price, setPrice] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState(invoices[0]?.id ?? "");
+  const [invoiceCopyStatus, setInvoiceCopyStatus] = useState("");
   const cleanName = customerName.trim() || "[Customer Name]";
   const cleanFrequency = planFrequency.trim() || "[Plan frequency]";
   const cleanServices = includedServices.trim() || "[Services included]";
   const cleanPrice = price.trim() || "[Price]";
+  const selectedInvoice = invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? invoices[0];
+  const selectedCustomer = selectedInvoice ? findCustomer(customers, selectedInvoice.customerId) : customers[0];
   const contractTitle = dealType === "recurring" ? "Recurring Power Washing Service Agreement" : "Power Washing Service Agreement";
   const contractDraft = `${contractTitle}
 
@@ -1033,6 +1078,10 @@ Customer: ${cleanName}
 
 The Powerwashing Pros: ______________________________`;
 
+  useEffect(() => {
+    if (!selectedInvoiceId && invoices[0]) setSelectedInvoiceId(invoices[0].id);
+  }, [invoices, selectedInvoiceId]);
+
   async function copyContract() {
     try {
       await navigator.clipboard.writeText(contractDraft);
@@ -1042,36 +1091,78 @@ The Powerwashing Pros: ______________________________`;
     }
   }
 
+  async function copyInvoiceMessage() {
+    if (!selectedInvoice || !selectedCustomer) return;
+    try {
+      await navigator.clipboard.writeText(invoiceMessage(selectedInvoice, selectedCustomer));
+      setInvoiceCopyStatus("Invoice message copied.");
+    } catch {
+      setInvoiceCopyStatus("Copy failed. Select the invoice message and copy it manually.");
+    }
+  }
+
   return (
-    <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-      <Section title="Contract draft" kicker="Name, deal type, frequency, included work, and price">
-        <div className="settings-grid">
-          <Field label="Customer name">
-            <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer name" />
-          </Field>
-          <Field label="Deal type">
-            <select value={dealType} onChange={(event) => setDealType(event.target.value as "recurring" | "standard")}>
-              <option value="recurring">Recurring plan</option>
-              <option value="standard">Normal power washing deal</option>
-            </select>
-          </Field>
-          <Field label="Amount they will pay">
-            <input value={price} onChange={(event) => setPrice(event.target.value)} placeholder="$250" />
-          </Field>
-          {dealType === "recurring" && (
-            <Field label="Plan frequency">
-              <input value={planFrequency} onChange={(event) => setPlanFrequency(event.target.value)} placeholder="Every 6 weeks" />
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <Section title="Contract draft" kicker="Name, deal type, frequency, included work, and price">
+          <div className="settings-grid">
+            <Field label="Customer name">
+              <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer name" />
             </Field>
-          )}
-          <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
-            Included in the deal
-            <textarea value={includedServices} onChange={(event) => setIncludedServices(event.target.value)} placeholder="Example: driveway, front walkway, sidewalks, and back patio" />
-          </label>
-        </div>
-      </Section>
-      <Section title={contractTitle} kicker="Generated draft" action={<button className="text-button" onClick={copyContract}><Copy size={16} /> Copy draft</button>}>
-        <pre className="contract-preview">{contractDraft}</pre>
-        {copyStatus && <p className="mt-3 text-sm font-semibold text-lagoon dark:text-cyan-300">{copyStatus}</p>}
+            <Field label="Deal type">
+              <select value={dealType} onChange={(event) => setDealType(event.target.value as "recurring" | "standard")}>
+                <option value="recurring">Recurring plan</option>
+                <option value="standard">Normal power washing deal</option>
+              </select>
+            </Field>
+            <Field label="Amount they will pay">
+              <input value={price} onChange={(event) => setPrice(event.target.value)} placeholder="$250" />
+            </Field>
+            {dealType === "recurring" && (
+              <Field label="Plan frequency">
+                <input value={planFrequency} onChange={(event) => setPlanFrequency(event.target.value)} placeholder="Every 6 weeks" />
+              </Field>
+            )}
+            <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+              Included in the deal
+              <textarea value={includedServices} onChange={(event) => setIncludedServices(event.target.value)} placeholder="Example: driveway, front walkway, sidewalks, and back patio" />
+            </label>
+          </div>
+        </Section>
+        <Section title={contractTitle} kicker="Generated draft" action={<button className="text-button" onClick={copyContract}><Copy size={16} /> Copy draft</button>}>
+          <pre className="contract-preview">{contractDraft}</pre>
+          {copyStatus && <p className="mt-3 text-sm font-semibold text-lagoon dark:text-cyan-300">{copyStatus}</p>}
+        </Section>
+      </div>
+      <Section title="Send invoice" kicker="Draft an email or text from an existing invoice">
+        {selectedInvoice && selectedCustomer ? (
+          <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="space-y-4">
+              <Field label="Invoice">
+                <select value={selectedInvoice.id} onChange={(event) => { setSelectedInvoiceId(event.target.value); setInvoiceCopyStatus(""); }}>
+                  {invoices.map((invoice) => (
+                    <option key={invoice.id} value={invoice.id}>{invoiceDisplayName(invoice, customers)} - {currency.format(amountOwed(invoice))} due</option>
+                  ))}
+                </select>
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="metric-mini"><span>Customer</span><strong>{selectedCustomer.name}</strong></div>
+                <div className="metric-mini"><span>Amount due</span><strong>{currency.format(amountOwed(selectedInvoice))}</strong></div>
+                <div className="metric-mini"><span>Email</span><strong>{selectedCustomer.email || "No email"}</strong></div>
+                <div className="metric-mini"><span>Phone</span><strong>{selectedCustomer.phone || "No phone"}</strong></div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <a className={cx("text-button", !selectedCustomer.email && "pointer-events-none opacity-50")} href={selectedCustomer.email ? invoiceMailtoHref(selectedInvoice, selectedCustomer) : undefined}><Mail size={16} /> Email invoice</a>
+                <a className={cx("text-button", !cleanPhoneForSms(selectedCustomer.phone) && "pointer-events-none opacity-50")} href={cleanPhoneForSms(selectedCustomer.phone) ? invoiceSmsHref(selectedInvoice, selectedCustomer) : undefined}><MessageSquare size={16} /> Text invoice</a>
+                <button className="text-button" onClick={copyInvoiceMessage}><Copy size={16} /> Copy message</button>
+              </div>
+              {invoiceCopyStatus && <p className="text-sm font-semibold text-lagoon dark:text-cyan-300">{invoiceCopyStatus}</p>}
+            </div>
+            <pre className="contract-preview">{invoiceMessage(selectedInvoice, selectedCustomer)}</pre>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-slate-400">No invoices are available yet. Create one in the Invoices tab first.</p>
+        )}
       </Section>
     </div>
   );
