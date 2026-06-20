@@ -44,7 +44,6 @@ import {
   currency,
   customerSpend,
   jobsForCustomer,
-  paymentHistory,
   paymentMethodTotals,
   revenueByDay,
   repeatCustomerStats,
@@ -54,7 +53,7 @@ import {
 import type { Customer, Expense, Invoice, Job, Lead, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
+type TabId = "dashboard" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
 type SyncPayload = Partial<{
   customers: Customer[];
   jobs: Job[];
@@ -91,7 +90,6 @@ type AddServicePlanInput = {
 
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "customers", label: "Customers", icon: Users },
   { id: "leads", label: "Leads", icon: Sparkles },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
@@ -687,7 +685,6 @@ export default function App() {
           )}
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
             {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
-            {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} />}
             {activeTab === "leads" && <Leads leads={leads} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
@@ -778,10 +775,6 @@ function AddClientJobForm({ onCreate }: { onCreate: (input: AddClientJobInput) =
   );
 }
 
-function Customers({ customers, jobs, invoices }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[] }) {
-  return <Section title="Customer management" kicker="Profiles, spend, payments, and jobs"><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Past / Upcoming</th><th>Total spent</th><th>Plan</th><th>Insights</th><th>Payment history</th></tr></thead><tbody>{customers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || job.status === "past due").length; const upcoming = customerJobs.filter((job) => job.status === "scheduled" || job.status === "in progress").length; return <tr key={customer.id}><td><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address || "No address listed"}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td>{customer.phone || ""}<br />{customer.email || ""}</td><td>{past} past / {upcoming} upcoming</td><td>{currency.format(customerSpend(customer.id, jobs))}</td><td>{customer.subscribedPlanId ? <Badge status="paid" /> : <Badge status="unpaid" />}</td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}</td><td>{paymentHistory(customer.id, invoices).map((invoice) => `${invoice.id}: ${currency.format(invoice.amountPaid)}`).join(", ") || "No invoices yet"}</td></tr>; })}</tbody></table></DataTable></Section>;
-}
-
 function Leads({ leads }: { leads: Lead[] }) {
   const wins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
   const conversion = leads.length ? Math.round((wins / leads.length) * 100) : 0;
@@ -789,7 +782,94 @@ function Leads({ leads }: { leads: Lead[] }) {
 }
 
 function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult>; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
-  return <div className="space-y-4"><AddClientJobForm onCreate={onClientJobCreate} /><Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={job.status} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><PhotoChip label="Before" value={job.beforePhoto} /><PhotoChip label="After" value={job.afterPhoto} /></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section></div>;
+  return (
+    <div className="space-y-4">
+      <AddClientJobForm onCreate={onClientJobCreate} />
+      <Section title="Jobs management" kicker="Click any job row for details, photos, and payment info">
+        <DataTable>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Service</th>
+                <th>Status</th>
+                <th>Assignment</th>
+                <th>Price / Paid / Tip</th>
+                <th>Payment</th>
+                <th>Photos</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map((job) => (
+                <tr
+                  key={job.id}
+                  className="clickable-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onJobClick(job)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onJobClick(job);
+                    }
+                  }}
+                  aria-label={`Open job for ${findCustomer(customers, job.customerId).name} on ${job.date}`}
+                >
+                  <td>{job.date}<br />{job.time}</td>
+                  <td>
+                    <p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p>
+                  </td>
+                  <td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td>
+                  <td><Badge status={job.status} /></td>
+                  <td>Unassigned</td>
+                  <td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td>
+                  <td><Badge status={job.paymentStatus} /></td>
+                  <td><PhotoChip label="Before" value={job.beforePhoto} /><PhotoChip label="After" value={job.afterPhoto} /></td>
+                  <td>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="icon-button"
+                        title="Mark complete"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price });
+                        }}
+                      >
+                        <CheckCircle2 size={16} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        title="Mark past due"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" });
+                        }}
+                      >
+                        <FileText size={16} />
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onJobClick(job);
+                        }}
+                      >
+                        Details
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DataTable>
+      </Section>
+    </div>
+  );
 }
 
 function Calendar({ customers, jobs, onJobClick }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void }) {
