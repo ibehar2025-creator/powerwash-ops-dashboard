@@ -211,6 +211,7 @@ export const leads: Lead[] = [
   { id: "lead-checkup-001", name: "Unknown", contact: "", address: "3719 turnberry circle", source: "Check-Ups sheet", status: "new", estimatedValue: 175, followUpDate: "2026-11-01", notes: "November check-up probability 20%." },
   { id: "lead-checkup-002", name: "Wendy", contact: "", address: "4150 Southwestern", source: "Check-Ups sheet", status: "contacted", estimatedValue: 250, followUpDate: "2026-06-01", notes: "June check-up probability 80%." },
   { id: "lead-checkup-003", name: "Lauren", contact: "", address: "3615 BlueBonnet", source: "Check-Ups sheet", status: "new", estimatedValue: 175, followUpDate: "2026-11-01", notes: "November check-up, probability blank in sheet." },
+  { id: "lead-checkup-004", name: "Ms.morris", contact: "", address: "4019 underwood", source: "Check-Ups sheet", status: "new", estimatedValue: 0, followUpDate: "2026-08-01", notes: "August check-up probability Eventually." },
 ];
 
 export const invoices: Invoice[] = jobs.map((job, index) => ({

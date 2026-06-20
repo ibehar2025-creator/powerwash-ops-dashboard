@@ -32,7 +32,7 @@ import {
   expenses as importedExpenses,
   invoices as importedInvoices,
   jobs as importedJobs,
-  leads,
+  leads as importedLeads,
   servicePlans as importedServicePlans,
   spreadsheetImportNotice,
 } from "./data/googleSheetData";
@@ -51,7 +51,7 @@ import {
   serviceBreakdown,
   today,
 } from "./lib/calculations";
-import type { Customer, Expense, Invoice, Job, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
+import type { Customer, Expense, Invoice, Job, Lead, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
 type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
@@ -60,6 +60,7 @@ type SyncPayload = Partial<{
   jobs: Job[];
   invoices: Invoice[];
   expenses: Expense[];
+  leads: Lead[];
   servicePlans: Array<ServicePlan & { customer?: Customer }>;
   reviews: ReviewRow[];
 }>;
@@ -453,6 +454,7 @@ export default function App() {
   const [jobs, setJobs] = useState<Job[]>(() => normalizeSyncedJobs(importedJobs));
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
   const [expenses, setExpenses] = useState<Expense[]>(importedExpenses);
+  const [leads, setLeads] = useState<Lead[]>(importedLeads);
   const [plans, setPlans] = useState<ServicePlan[]>(importedServicePlans);
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -478,6 +480,7 @@ export default function App() {
       if (payload.jobs) setJobs(normalizeSyncedJobs(payload.jobs));
       if (payload.invoices) setInvoices(payload.invoices);
       if (payload.expenses) setExpenses(payload.expenses);
+      if (payload.leads) setLeads(payload.leads);
       if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
       if (payload.reviews) setReviews(payload.reviews);
       setSyncStatus(`Synced from Google Sheets at ${new Date().toLocaleTimeString()}.`);
@@ -570,6 +573,7 @@ export default function App() {
     if (payload.jobs) setJobs(normalizeSyncedJobs(payload.jobs));
     if (payload.invoices) setInvoices(payload.invoices);
     if (payload.expenses) setExpenses(payload.expenses);
+    if (payload.leads) setLeads(payload.leads);
     if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
     if (payload.reviews) setReviews(payload.reviews);
     if (!payload.jobs) {
@@ -621,6 +625,7 @@ export default function App() {
     if (payload.jobs) setJobs(normalizeSyncedJobs(payload.jobs));
     if (payload.invoices) setInvoices(payload.invoices);
     if (payload.expenses) setExpenses(payload.expenses);
+    if (payload.leads) setLeads(payload.leads);
     if (payload.servicePlans) setPlans(cleanServicePlans(payload.servicePlans));
     if (payload.reviews) setReviews(payload.reviews);
     setSyncStatus(`Saved ${input.name} to Recurring Jobs at ${new Date().toLocaleTimeString()}.`);
@@ -681,16 +686,16 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
+            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} />}
-            {activeTab === "leads" && <Leads />}
+            {activeTab === "leads" && <Leads leads={leads} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
-            {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} onJobUpdate={updateJob} />}
+            {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} onPlanCreate={createServicePlan} />}
             {activeTab === "contracts" && <Contracts customers={customers} invoices={invoices} />}
-            {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} />}
+            {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
           </div>
         </main>
@@ -700,7 +705,7 @@ export default function App() {
   );
 }
 
-function Dashboard({ customers, jobs, invoices, expenses, reviews, onJobClick, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; reviews: ReviewRow[]; onJobClick: (job: Job) => void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
+function Dashboard({ customers, jobs, invoices, expenses, leads, reviews, onJobClick, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[]; reviews: ReviewRow[]; onJobClick: (job: Job) => void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const upcoming = jobs.filter((job) => job.status === "scheduled" || job.status === "in progress").slice(0, 6);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
@@ -777,9 +782,10 @@ function Customers({ customers, jobs, invoices }: { customers: Customer[]; jobs:
   return <Section title="Customer management" kicker="Profiles, spend, payments, and jobs"><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Past / Upcoming</th><th>Total spent</th><th>Plan</th><th>Insights</th><th>Payment history</th></tr></thead><tbody>{customers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || job.status === "past due").length; const upcoming = customerJobs.filter((job) => job.status === "scheduled" || job.status === "in progress").length; return <tr key={customer.id}><td><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address || "No address listed"}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td>{customer.phone || ""}<br />{customer.email || ""}</td><td>{past} past / {upcoming} upcoming</td><td>{currency.format(customerSpend(customer.id, jobs))}</td><td>{customer.subscribedPlanId ? <Badge status="paid" /> : <Badge status="unpaid" />}</td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}</td><td>{paymentHistory(customer.id, invoices).map((invoice) => `${invoice.id}: ${currency.format(invoice.amountPaid)}`).join(", ") || "No invoices yet"}</td></tr>; })}</tbody></table></DataTable></Section>;
 }
 
-function Leads() {
+function Leads({ leads }: { leads: Lead[] }) {
   const wins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
-  return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
+  const conversion = leads.length ? Math.round((wins / leads.length) * 100) : 0;
+  return <Section title="Leads & prospects" kicker={`${conversion}% conversion tracked from Check-Ups`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.length ? leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>) : <tr><td colSpan={6}>No leads found in the Check-Ups sheet.</td></tr>}</tbody></table></DataTable></Section>;
 }
 
 function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult>; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
@@ -809,7 +815,7 @@ function Calendar({ customers, jobs, onJobClick }: { customers: Customer[]; jobs
   return <Section title="Scheduling calendar" kicker={`Date-matched spreadsheet schedule: ${rangeLabel}`} action={action}><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address || "No address listed"}</span><span className="text-xs">Unassigned</span><Badge status={job.status} /></button>)}</div>; })}</div></Section>;
 }
 
-function Finance({ customers, jobs, invoices, expenses, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult> }) {
+function Finance({ customers, jobs, invoices, expenses, leads, onJobUpdate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[]; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult> }) {
   const [selectedId, setSelectedId] = useState(customers[0]?.id ?? "");
   const customer = findCustomer(customers, selectedId);
   const selectedJobs = jobsForCustomer(customer.id, jobs);
@@ -1168,7 +1174,7 @@ The Powerwashing Pros: ______________________________`;
   );
 }
 
-function Reports({ customers, jobs, invoices, expenses }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[] }) {
+function Reports({ customers, jobs, invoices, expenses, leads }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[] }) {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const revenue = revenueByDay(jobs);
   const maxRevenue = Math.max(...revenue.map((item) => item.revenue), 1);

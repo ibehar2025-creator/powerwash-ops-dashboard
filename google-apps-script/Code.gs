@@ -1,6 +1,7 @@
 const SPREADSHEET_ID = "19LNiR-1HTfT8wwdAZtGnqXlCJh6y-HbxeuqZuo95p2Q";
 const REVIEWS_SHEET_ID = "1x4MrwSPwwn_bqNP__skWQGcUtxSH88vtag1VesWUbRU";
 const UPCOMING_JOBS_TAB = "Upcoming Jobs";
+const CHECK_UPS_TAB = "Check-Ups";
 const RECURRING_JOBS_TAB = "Recurring Jobs";
 const EXPENSES_TAB = "Expenses";
 const TIME_ZONE = "America/Chicago";
@@ -47,6 +48,7 @@ function readPayload() {
     jobs: jobData.jobs,
     invoices: buildInvoices(jobData.jobs),
     expenses: readExpenses(),
+    leads: readLeads(),
     servicePlans: readServicePlans(),
     reviews: readReviews(),
   };
@@ -188,6 +190,73 @@ function readExpenses() {
   } catch (error) {
     return [];
   }
+}
+
+function readLeads() {
+  try {
+    const sheet = getSheet(SPREADSHEET_ID, [CHECK_UPS_TAB]);
+    const values = sheet.getDataRange().getDisplayValues();
+    return values.slice(1).filter(row => clean(row[0]) || clean(row[1]) || clean(row[2]) || clean(row[3])).map((row, index) => {
+      const name = clean(row[0]) || "Unknown";
+      const address = clean(row[1]);
+      const dateText = clean(row[2]);
+      const probability = clean(row[3]);
+      return {
+        id: "lead-checkup-" + String(index + 1).padStart(3, "0"),
+        name: name,
+        contact: "",
+        address: address,
+        source: "Check-Ups sheet",
+        status: leadStatusFromProbability(probability),
+        estimatedValue: estimatedLeadValue(probability),
+        followUpDate: leadFollowUpDate(dateText),
+        notes: (dateText || "No date listed") + " check-up" + (probability ? " probability " + probability : ", probability blank in sheet") + ".",
+      };
+    });
+  } catch (error) {
+    return [];
+  }
+}
+
+function leadStatusFromProbability(probability) {
+  const numeric = Number(clean(probability).replace(/[^0-9.]/g, ""));
+  return numeric >= 70 ? "contacted" : "new";
+}
+
+function estimatedLeadValue(probability) {
+  const numeric = Number(clean(probability).replace(/[^0-9.]/g, ""));
+  if (numeric >= 70) return 250;
+  if (numeric > 0) return 175;
+  return 0;
+}
+
+function leadFollowUpDate(value) {
+  const normalized = normalizeDateText(value);
+  if (normalized) return normalized;
+
+  const text = clean(value).toLowerCase();
+  const months = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12,
+  };
+
+  for (const monthName in months) {
+    if (text.indexOf(monthName) >= 0) {
+      return isoDate(new Date().getFullYear(), months[monthName], 1);
+    }
+  }
+
+  return todayString();
 }
 
 function readReviews() {
