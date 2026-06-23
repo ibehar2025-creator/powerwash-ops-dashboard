@@ -828,12 +828,15 @@ function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRo
   const mapInstance = useRef<any>(null);
   const markers = useRef<any[]>([]);
   const routeLayer = useRef<any>(null);
+  const lastFitKey = useRef("");
   const [status, setStatus] = useState("Loading map...");
   const [selectedRouteJob, setSelectedRouteJob] = useState<Job | undefined>(focusedJob);
   const [routing, setRouting] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
   const geocodedIds = useRef<Set<string>>(new Set());
   const visibleJobs = useMemo(() => jobs.filter((job) => jobAddressForGeocode(job)), [jobs]);
   const locatedJobs = useMemo(() => visibleJobs.filter(hasJobLocation), [visibleJobs]);
+  const missingLocationJobs = useMemo(() => visibleJobs.filter((job) => !hasJobLocation(job) && !geocodedIds.current.has(job.id)), [visibleJobs]);
 
   useEffect(() => {
     setSelectedRouteJob(focusedJob);
@@ -842,7 +845,7 @@ function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRo
   useEffect(() => {
     let canceled = false;
 
-    loadLeaflet().then(async (L) => {
+    loadLeaflet().then((L) => {
       if (canceled || !mapRef.current) return;
       const fallbackCenter: [number, number] = [29.7604, -95.3698];
       const firstLocated = locatedJobs[0];
@@ -857,22 +860,30 @@ function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRo
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         }).addTo(mapInstance.current);
       }
-
-      for (const job of visibleJobs) {
-        if (canceled) return;
-        if (hasJobLocation(job) || geocodedIds.current.has(job.id)) continue;
-        geocodedIds.current.add(job.id);
-        const location = await geocodeJobAddress(job);
-        if (location) await onJobLocationUpdate(job.id, location).catch(() => undefined);
-        await new Promise((resolve) => window.setTimeout(resolve, 1100));
-      }
-      setStatus("");
+      window.setTimeout(() => mapInstance.current?.invalidateSize(), 150);
+      setStatus(locatedJobs.length ? "" : "No pinned jobs yet.");
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Map failed to load."));
 
     return () => {
       canceled = true;
     };
-  }, [visibleJobs, locatedJobs, onJobLocationUpdate]);
+  }, [locatedJobs]);
+
+  useEffect(() => {
+    if (!focusedJob || hasJobLocation(focusedJob) || geocodedIds.current.has(focusedJob.id)) return;
+    let canceled = false;
+    geocodedIds.current.add(focusedJob.id);
+    setStatus("Finding this job location...");
+    void geocodeJobAddress(focusedJob).then((location) => {
+      if (!canceled && location) return onJobLocationUpdate(focusedJob.id, location);
+      return undefined;
+    }).catch(() => undefined).finally(() => {
+      if (!canceled) setStatus("");
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [focusedJob, onJobLocationUpdate]);
 
   useEffect(() => {
     const L = window.L;
@@ -892,6 +903,9 @@ function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRo
       markers.current.push(marker);
     }
 
+    const fitKey = locatedJobs.map((job) => `${job.id}:${job.lat},${job.lng}`).join("|");
+    if (lastFitKey.current === fitKey) return;
+    lastFitKey.current = fitKey;
     if (locatedJobs.length === 1) {
       mapInstance.current.setView([locatedJobs[0].lat, locatedJobs[0].lng], 15);
     } else if (locatedJobs.length > 1) {
@@ -899,6 +913,25 @@ function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRo
       mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
     }
   }, [customers, locatedJobs, onJobClick]);
+
+  async function findMissingPins() {
+    const batch = missingLocationJobs.slice(0, 5);
+    if (!batch.length) return;
+    setGeocoding(true);
+    setStatus(`Finding ${batch.length} missing job pins...`);
+    let found = 0;
+    for (const job of batch) {
+      geocodedIds.current.add(job.id);
+      const location = await geocodeJobAddress(job).catch(() => undefined);
+      if (location) {
+        found += 1;
+        await onJobLocationUpdate(job.id, location).catch(() => undefined);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    }
+    setGeocoding(false);
+    setStatus(found ? `Added ${found} job pin${found === 1 ? "" : "s"}.` : "No new pins found from those addresses.");
+  }
 
   async function routeToJob() {
     const L = window.L;
@@ -947,6 +980,7 @@ function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRo
         <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status || `${locatedJobs.length} job pins shown`}</p>
         {showRouteControls && routeJob && (
           <div className="flex flex-wrap gap-2">
+            {missingLocationJobs.length > 0 && <button className="text-button" onClick={findMissingPins} disabled={geocoding}>{geocoding ? "Finding pins" : `Find ${Math.min(missingLocationJobs.length, 5)} missing pins`}</button>}
             <button className="primary-button" onClick={routeToJob} disabled={routing || !hasJobLocation(routeJob)}><Navigation size={16} /> {routing ? "Routing" : "Route from my location"}</button>
             <a className="text-button" href={directionsUrl} target="_blank" rel="noreferrer">Open in OpenStreetMap</a>
           </div>
