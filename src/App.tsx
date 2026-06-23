@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, FormEvent, ReactNode } from "react";
 import {
   BadgeDollarSign,
@@ -14,9 +14,11 @@ import {
   FileText,
   LayoutDashboard,
   Mail,
+  MapPin,
   Menu,
   MessageSquare,
   Moon,
+  Navigation,
   ReceiptText,
   Sparkles,
   Star,
@@ -52,7 +54,7 @@ import {
 import type { Customer, Expense, Invoice, Job, Lead, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
+type TabId = "dashboard" | "leads" | "jobs" | "map" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
 type SyncPayload = Partial<{
   customers: Customer[];
   jobs: Job[];
@@ -64,6 +66,8 @@ type SyncPayload = Partial<{
 }>;
 type JobSaveResult = { ok: boolean; message?: string };
 type PersistedJobPatch = Pick<Job, "status" | "paymentStatus" | "amountPaid" | "tipAmount" | "paymentMethod" | "price">;
+type MapJobFilter = "all" | "upcoming" | "today" | "completed";
+type JobLocation = { lat: number; lng: number };
 type AddClientJobInput = {
   name: string;
   phone: string;
@@ -89,6 +93,7 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "leads", label: "Leads", icon: Sparkles },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
+  { id: "map", label: "Map", icon: MapPin },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "finance", label: "Finance", icon: WalletCards },
   { id: "invoices", label: "Invoices", icon: ReceiptText },
@@ -120,6 +125,14 @@ const monthDays = [
 ];
 const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
+const DEFAULT_GEOCODE_SUFFIX = "Houston, TX";
+let googleMapsPromise: Promise<any> | undefined;
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
 function addDays(date: string, days: number) {
   const next = new Date(`${date}T12:00:00`);
@@ -151,6 +164,57 @@ function findCustomer(customers: Customer[], customerId: string) {
 
 function localId(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "new-client";
+}
+
+function hasJobLocation(job: Job): job is Job & JobLocation {
+  return Number.isFinite(job.lat) && Number.isFinite(job.lng);
+}
+
+function jobAddressForGeocode(job: Job) {
+  const address = job.address?.trim();
+  if (!address || /^unknown$/i.test(address) || /no address/i.test(address)) return "";
+  if (/[A-Z]{2}\b/.test(address) || /\bHouston\b/i.test(address)) return address;
+  return `${address}, ${DEFAULT_GEOCODE_SUFFIX}`;
+}
+
+function loadGoogleMaps(apiKey: string) {
+  if (typeof window === "undefined") return Promise.reject(new Error("Maps only run in the browser."));
+  if (window.google?.maps) return Promise.resolve(window.google);
+  if (!apiKey) return Promise.reject(new Error("Add VITE_GOOGLE_MAPS_API_KEY on Render to enable maps."));
+  if (!googleMapsPromise) {
+    googleMapsPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>("script[data-google-maps]");
+      if (existing) {
+        existing.addEventListener("load", () => resolve(window.google));
+        existing.addEventListener("error", () => reject(new Error("Google Maps failed to load.")));
+        return;
+      }
+      const script = document.createElement("script");
+      script.dataset.googleMaps = "true";
+      script.async = true;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
+      script.onload = () => resolve(window.google);
+      script.onerror = () => reject(new Error("Google Maps failed to load."));
+      document.head.appendChild(script);
+    });
+  }
+  return googleMapsPromise;
+}
+
+function geocodeJobAddress(google: any, job: Job): Promise<JobLocation | undefined> {
+  const address = jobAddressForGeocode(job);
+  if (!address) return Promise.resolve(undefined);
+  const geocoder = new google.maps.Geocoder();
+  return new Promise((resolve) => {
+    geocoder.geocode({ address }, (results: any[], status: string) => {
+      if (status !== "OK" || !results?.[0]) {
+        resolve(undefined);
+        return;
+      }
+      const location = results[0].geometry.location;
+      resolve({ lat: location.lat(), lng: location.lng() });
+    });
+  });
 }
 
 function timeFromOriginalDateText(notes?: string) {
@@ -290,6 +354,7 @@ export default function App() {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const activeLabel = useMemo(() => tabs.find((tab) => tab.id === activeTab)?.label ?? "Dashboard", [activeTab]);
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
+  const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 
   const syncSheets = useCallback(async (showNoEndpointMessage = true) => {
     if (!syncEndpoint) {
@@ -363,6 +428,22 @@ export default function App() {
     setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...patch } : job));
     setSelectedJob((current) => current?.id === jobId ? { ...current, ...patch } : current);
     return saveResult ?? { ok: true };
+  }
+
+  async function updateJobLocation(jobId: string, location: JobLocation) {
+    setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...location } : job));
+    setSelectedJob((current) => current?.id === jobId ? { ...current, ...location } : current);
+    if (!syncEndpoint) return;
+    const rowNumber = sheetRowNumberFromJobId(jobId);
+    if (!rowNumber) return;
+    const response = await fetch(syncEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "updateJobLocation", jobId, rowNumber, location }),
+    });
+    if (!response.ok) throw new Error(`Location save failed with ${response.status}`);
+    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (payload.ok === false) throw new Error(payload.error ?? "Location save failed.");
   }
 
   function updateInvoice(invoiceId: string, patch: Partial<Invoice>) {
@@ -502,6 +583,7 @@ export default function App() {
             {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "leads" && <Leads leads={leads} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
+            {activeTab === "map" && <MapTab customers={customers} jobs={jobs} mapsApiKey={mapsApiKey} onJobClick={setSelectedJob} onJobLocationUpdate={updateJobLocation} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
@@ -512,7 +594,7 @@ export default function App() {
           </div>
         </main>
       </div>
-      {selectedJob && <JobModal customers={customers} job={selectedJob} onClose={() => setSelectedJob(null)} />}
+      {selectedJob && <JobModal customers={customers} job={selectedJob} mapsApiKey={mapsApiKey} onClose={() => setSelectedJob(null)} onJobLocationUpdate={updateJobLocation} />}
     </div>
   );
 }
@@ -689,6 +771,179 @@ function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: {
           </table>
         </DataTable>
       </Section>
+    </div>
+  );
+}
+
+function MapTab({ customers, jobs, mapsApiKey, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; mapsApiKey?: string; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
+  const [filter, setFilter] = useState<MapJobFilter>("upcoming");
+  const filteredJobs = jobs.filter((job) => {
+    if (filter === "today") return job.date === today;
+    if (filter === "upcoming") return job.status === "scheduled" || job.status === "in progress";
+    if (filter === "completed") return job.status === "completed";
+    return true;
+  });
+  const missing = filteredJobs.filter((job) => !jobAddressForGeocode(job));
+
+  return (
+    <div className="space-y-4">
+      <Section
+        title="Job map"
+        kicker="Pins, job details, and route planning"
+        action={<div className="segmented">{(["all", "upcoming", "today", "completed"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={cx(filter === item && "active")}>{item}</button>)}</div>}
+      >
+        <JobMapPanel
+          customers={customers}
+          jobs={filteredJobs}
+          mapsApiKey={mapsApiKey}
+          heightClass="h-[620px]"
+          showRouteControls
+          onJobClick={onJobClick}
+          onJobLocationUpdate={onJobLocationUpdate}
+        />
+      </Section>
+      {missing.length > 0 && (
+        <Section title="Missing addresses" kicker="These jobs need an address before they can be pinned">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {missing.map((job) => <button key={job.id} className="rounded-lg border border-slate-200 p-3 text-left text-sm transition hover:border-lagoon dark:border-slate-800" onClick={() => onJobClick(job)}><span className="block font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</span><span className="text-slate-500">{job.date} at {job.time}</span></button>)}
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function JobMapPanel({ customers, jobs, mapsApiKey, heightClass = "h-80", focusedJob, showRouteControls = false, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; mapsApiKey?: string; heightClass?: string; focusedJob?: Job; showRouteControls?: boolean; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstance = useRef<any>(null);
+  const markers = useRef<any[]>([]);
+  const directionsRenderer = useRef<any>(null);
+  const [status, setStatus] = useState("Loading map...");
+  const [selectedRouteJob, setSelectedRouteJob] = useState<Job | undefined>(focusedJob);
+  const [routing, setRouting] = useState(false);
+  const geocodedIds = useRef<Set<string>>(new Set());
+  const visibleJobs = useMemo(() => jobs.filter((job) => jobAddressForGeocode(job)), [jobs]);
+  const locatedJobs = useMemo(() => visibleJobs.filter(hasJobLocation), [visibleJobs]);
+
+  useEffect(() => {
+    setSelectedRouteJob(focusedJob);
+  }, [focusedJob]);
+
+  useEffect(() => {
+    let canceled = false;
+    if (!mapsApiKey) {
+      setStatus("Add VITE_GOOGLE_MAPS_API_KEY on Render to enable the map.");
+      return;
+    }
+
+    loadGoogleMaps(mapsApiKey).then(async (google) => {
+      if (canceled || !mapRef.current) return;
+      const fallbackCenter = { lat: 29.7604, lng: -95.3698 };
+      const firstLocated = locatedJobs[0];
+      if (!mapInstance.current) {
+        mapInstance.current = new google.maps.Map(mapRef.current, {
+          center: firstLocated ? { lat: firstLocated.lat, lng: firstLocated.lng } : fallbackCenter,
+          zoom: firstLocated ? 13 : 11,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+        });
+        directionsRenderer.current = new google.maps.DirectionsRenderer({ suppressMarkers: false, preserveViewport: true });
+        directionsRenderer.current.setMap(mapInstance.current);
+      }
+
+      for (const job of visibleJobs) {
+        if (canceled) return;
+        if (hasJobLocation(job) || geocodedIds.current.has(job.id)) continue;
+        geocodedIds.current.add(job.id);
+        const location = await geocodeJobAddress(google, job);
+        if (location) await onJobLocationUpdate(job.id, location).catch(() => undefined);
+      }
+      setStatus("");
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Google Maps failed to load."));
+
+    return () => {
+      canceled = true;
+    };
+  }, [mapsApiKey, visibleJobs, locatedJobs, onJobLocationUpdate]);
+
+  useEffect(() => {
+    if (!mapInstance.current || !window.google?.maps) return;
+    for (const marker of markers.current) marker.setMap(null);
+    markers.current = [];
+    const bounds = new window.google.maps.LatLngBounds();
+
+    for (const job of locatedJobs) {
+      const customer = findCustomer(customers, job.customerId);
+      const marker = new window.google.maps.Marker({
+        position: { lat: job.lat, lng: job.lng },
+        map: mapInstance.current,
+        title: customer.name,
+      });
+      marker.addListener("click", () => {
+        setSelectedRouteJob(job);
+        onJobClick(job);
+      });
+      markers.current.push(marker);
+      bounds.extend(marker.getPosition());
+    }
+
+    if (locatedJobs.length === 1) {
+      mapInstance.current.setCenter({ lat: locatedJobs[0].lat, lng: locatedJobs[0].lng });
+      mapInstance.current.setZoom(15);
+    } else if (locatedJobs.length > 1) {
+      mapInstance.current.fitBounds(bounds, 60);
+    }
+  }, [customers, locatedJobs, onJobClick]);
+
+  async function routeToJob() {
+    const google = window.google;
+    const job = selectedRouteJob ?? focusedJob ?? locatedJobs[0];
+    if (!google?.maps || !job || !hasJobLocation(job)) return;
+    if (!navigator.geolocation) {
+      setStatus("Current location is not available in this browser.");
+      return;
+    }
+    setRouting(true);
+    setStatus("Requesting current location...");
+    navigator.geolocation.getCurrentPosition((position) => {
+      const directions = new google.maps.DirectionsService();
+      directions.route({
+        origin: { lat: position.coords.latitude, lng: position.coords.longitude },
+        destination: { lat: job.lat, lng: job.lng },
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (result: any, routeStatus: string) => {
+        setRouting(false);
+        if (routeStatus === "OK" && result) {
+          directionsRenderer.current?.setDirections(result);
+          setStatus(`Route to ${findCustomer(customers, job.customerId).name} is ready.`);
+        } else {
+          setStatus("Could not draw the route. Use the external directions link.");
+        }
+      });
+    }, () => {
+      setRouting(false);
+      setStatus("Location permission was denied. Use the external directions link.");
+    }, { enableHighAccuracy: true, timeout: 12000 });
+  }
+
+  const routeJob = selectedRouteJob ?? focusedJob ?? locatedJobs[0];
+  const directionsUrl = routeJob ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(jobAddressForGeocode(routeJob))}` : "";
+
+  return (
+    <div className="space-y-3">
+      <div className={cx("map-shell", heightClass)} ref={mapRef}>
+        {!mapsApiKey && <div className="map-placeholder">Add VITE_GOOGLE_MAPS_API_KEY on Render to enable Google Maps.</div>}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status || `${locatedJobs.length} job pins shown`}</p>
+        {showRouteControls && routeJob && (
+          <div className="flex flex-wrap gap-2">
+            <button className="primary-button" onClick={routeToJob} disabled={routing || !hasJobLocation(routeJob)}><Navigation size={16} /> {routing ? "Routing" : "Route from my location"}</button>
+            <a className="text-button" href={directionsUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1089,10 +1344,10 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
-function JobModal({ customers, job, onClose }: { customers: Customer[]; job: Job; onClose: () => void }) {
+function JobModal({ customers, job, mapsApiKey, onClose, onJobLocationUpdate }: { customers: Customer[]; job: Job; mapsApiKey?: string; onClose: () => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Job details</p>
@@ -1109,6 +1364,19 @@ function JobModal({ customers, job, onClose }: { customers: Customer[]; job: Job
           <div className="detail-row"><span>Price</span><strong>{currency.format(job.price)}</strong></div>
           <div className="detail-row"><span>Paid / tip</span><strong>{currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</strong></div>
           <div className="detail-row md:col-span-2"><span>Notes</span><strong>{job.notes}</strong></div>
+        </div>
+        <div className="mt-5">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Job location</p>
+          <JobMapPanel
+            customers={customers}
+            jobs={[job]}
+            mapsApiKey={mapsApiKey}
+            focusedJob={job}
+            heightClass="h-80"
+            showRouteControls
+            onJobClick={() => undefined}
+            onJobLocationUpdate={onJobLocationUpdate}
+          />
         </div>
       </div>
     </div>

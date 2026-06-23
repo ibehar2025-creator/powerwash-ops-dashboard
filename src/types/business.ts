@@ -31,6 +31,8 @@ export interface Job {
   paymentStatus: PaymentStatus;
   paymentMethod?: PaymentMethod;
   notes: string;
+  lat?: number;
+  lng?: number;
   source: "mock" | "spreadsheet-import";
 }
 

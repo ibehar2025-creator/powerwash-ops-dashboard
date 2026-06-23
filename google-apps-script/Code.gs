@@ -29,8 +29,8 @@ function doPost(e) {
       return jsonResponse({ ok: true });
     }
 
-    if (body.action === "updateJobPhotos") {
-      updateJob({ rowNumber: body.rowNumber, patch: body.photos || {} });
+    if (body.action === "updateJobLocation") {
+      updateJobLocation(body);
       return jsonResponse({ ok: true });
     }
 
@@ -105,8 +105,8 @@ function readJobs(sheet) {
       paymentStatus: paymentStatus,
       paymentMethod: normalizePaymentMethod(row[14]),
       notes: "Spreadsheet status: " + (clean(row[4]) || "blank") + ". Original date: " + clean(row[2] || row[7]) + ".",
-      beforePhoto: cleanPhoto(row[9]),
-      afterPhoto: cleanPhoto(row[10]),
+      lat: numberOrUndefined(row[9]),
+      lng: numberOrUndefined(row[10]),
       source: "spreadsheet-import",
     });
   }
@@ -327,13 +327,28 @@ function updateJob(body) {
 
   if (has(patch, "price")) sheet.getRange(rowNumber, 4).setValue(money(patch.price));
   if (has(patch, "status")) sheet.getRange(rowNumber, 5).setValue(displayJobStatus(patch.status));
-  if (has(patch, "beforePhoto")) sheet.getRange(rowNumber, 10).setValue(clean(patch.beforePhoto));
-  if (has(patch, "afterPhoto")) sheet.getRange(rowNumber, 11).setValue(clean(patch.afterPhoto));
   if (has(patch, "paymentStatus")) sheet.getRange(rowNumber, 12).setValue(normalizePaymentStatus(patch.paymentStatus));
   if (has(patch, "amountPaid")) sheet.getRange(rowNumber, 13).setValue(money(patch.amountPaid));
   if (has(patch, "tipAmount")) sheet.getRange(rowNumber, 14).setValue(money(patch.tipAmount));
   if (has(patch, "paymentMethod")) sheet.getRange(rowNumber, 15).setValue(normalizePaymentMethod(patch.paymentMethod));
   if (Object.keys(patch).length) sheet.getRange(rowNumber, 16).setValue(now);
+}
+
+function updateJobLocation(body) {
+  const sheet = getSheet(SPREADSHEET_ID, [UPCOMING_JOBS_TAB]);
+  const rowNumber = Number(body.rowNumber);
+  if (!rowNumber || rowNumber < 2 || rowNumber > sheet.getLastRow()) {
+    throw new Error("Could not match that job to a row in Upcoming Jobs.");
+  }
+  const location = body.location || {};
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error("Location must include numeric lat and lng.");
+  }
+  sheet.getRange(rowNumber, 10).setValue(lat);
+  sheet.getRange(rowNumber, 11).setValue(lng);
+  sheet.getRange(rowNumber, 16).setValue(new Date().toISOString());
 }
 
 function getSheet(spreadsheetId, names) {
@@ -463,14 +478,14 @@ function clean(value) {
   return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
 }
 
-function cleanPhoto(value) {
-  const text = clean(value);
-  if (!text || /placeholder/i.test(text)) return "";
-  return text;
-}
-
 function money(value) {
   return Number(String(value == null ? "" : value).replace(/[^0-9.-]/g, "")) || 0;
+}
+
+function numberOrUndefined(value) {
+  if (!hasValue(value)) return undefined;
+  const number = Number(String(value == null ? "" : value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function hasValue(value) {
