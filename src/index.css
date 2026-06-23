@@ -61,6 +61,10 @@ select {
   @apply cursor-pointer transition hover:bg-mist/60 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-lagoon dark:hover:bg-slate-800/70 dark:focus:ring-cyan-300;
 }
 
+.job-link {
+  @apply text-left font-semibold text-lagoon underline-offset-2 hover:underline dark:text-cyan-300;
+}
+
 .icon-button {
   @apply inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-cyan-300 dark:hover:text-cyan-200;
 }
@@ -76,23 +80,6 @@ select {
 
 .primary-button {
   @apply bg-lagoon text-white hover:bg-marine;
-}
-
-.photo-chip {
-  @apply mr-1 inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300;
-}
-
-.photo-field {
-  @apply rounded-lg border border-slate-200 p-3 dark:border-slate-800;
-}
-
-.photo-field input:not([type="file"]),
-.photo-field textarea {
-  @apply mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white;
-}
-
-.photo-field textarea {
-  @apply min-h-24;
 }
 
 .segmented {
@@ -175,10 +162,6 @@ select {
 
 .detail-row strong {
   @apply mt-1 block text-sm text-ink dark:text-white;
-}
-
-.photo-box {
-  @apply mt-3 grid h-52 place-items-center overflow-hidden rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400;
 }
 
 .contract-preview {

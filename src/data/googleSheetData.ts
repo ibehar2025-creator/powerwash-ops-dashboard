@@ -9,8 +9,6 @@ type SheetJobRow = {
   price: number;
   status: string;
   notes?: string;
-  beforePhoto?: string;
-  afterPhoto?: string;
 };
 
 type RecurringPlanRow = {
@@ -90,7 +88,7 @@ const recurringPlanRows: RecurringPlanRow[] = [
 ];
 
 export const spreadsheetImportNotice =
-  "Google Sheets data imported from Upcoming Jobs, Check-Ups, Recurring Jobs, and Expenses. Add expense rows or before/after photo URLs in the spreadsheet, then sync sheets.";
+  "Google Sheets data imported from Upcoming Jobs, Check-Ups, Recurring Jobs, and Expenses. Add expense rows in the spreadsheet, then sync sheets.";
 
 export const crewMembers: CrewMember[] = [];
 
@@ -201,8 +199,6 @@ export const jobs: Job[] = sheetRows.map((row, index) => {
     tipAmount: 0,
     paymentStatus: paymentStatus(row),
     notes: `Spreadsheet status: ${row.status || "blank"}. Original date text: ${row.originalDate}.`,
-    beforePhoto: row.beforePhoto,
-    afterPhoto: row.afterPhoto,
     source: "spreadsheet-import",
   };
 });
