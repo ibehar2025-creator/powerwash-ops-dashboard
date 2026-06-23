@@ -122,6 +122,15 @@ select {
   @apply relative min-h-80 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-950;
 }
 
+.map-shell .leaflet-container {
+  @apply h-full w-full;
+}
+
+.map-shell .leaflet-popup-content-wrapper,
+.map-shell .leaflet-popup-tip {
+  @apply rounded-lg;
+}
+
 .map-placeholder {
   @apply absolute inset-0 grid place-items-center p-6 text-center text-sm font-semibold text-slate-500 dark:text-slate-400;
 }

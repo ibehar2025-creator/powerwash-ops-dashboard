@@ -126,11 +126,11 @@ const monthDays = [
 const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
 const DEFAULT_GEOCODE_SUFFIX = "Houston, TX";
-let googleMapsPromise: Promise<any> | undefined;
+let leafletPromise: Promise<any> | undefined;
 
 declare global {
   interface Window {
-    google?: any;
+    L?: any;
   }
 }
 
@@ -177,44 +177,56 @@ function jobAddressForGeocode(job: Job) {
   return `${address}, ${DEFAULT_GEOCODE_SUFFIX}`;
 }
 
-function loadGoogleMaps(apiKey: string) {
+function loadLeaflet() {
   if (typeof window === "undefined") return Promise.reject(new Error("Maps only run in the browser."));
-  if (window.google?.maps) return Promise.resolve(window.google);
-  if (!apiKey) return Promise.reject(new Error("Add VITE_GOOGLE_MAPS_API_KEY on Render to enable maps."));
-  if (!googleMapsPromise) {
-    googleMapsPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector<HTMLScriptElement>("script[data-google-maps]");
+  if (window.L) return Promise.resolve(window.L);
+  if (!leafletPromise) {
+    leafletPromise = new Promise((resolve, reject) => {
+      if (!document.querySelector<HTMLLinkElement>("link[data-leaflet-css]")) {
+        const css = document.createElement("link");
+        css.dataset.leafletCss = "true";
+        css.rel = "stylesheet";
+        css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+        css.integrity = "sha256-p4NxAoJBhIINfQfuLqZVVQmWAc9UOGqB4Q9+ufh2EY0=";
+        css.crossOrigin = "";
+        document.head.appendChild(css);
+      }
+      const existing = document.querySelector<HTMLScriptElement>("script[data-leaflet]");
       if (existing) {
-        existing.addEventListener("load", () => resolve(window.google));
-        existing.addEventListener("error", () => reject(new Error("Google Maps failed to load.")));
+        existing.addEventListener("load", () => resolve(window.L));
+        existing.addEventListener("error", () => reject(new Error("Map library failed to load.")));
         return;
       }
       const script = document.createElement("script");
-      script.dataset.googleMaps = "true";
+      script.dataset.leaflet = "true";
       script.async = true;
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
-      script.onload = () => resolve(window.google);
-      script.onerror = () => reject(new Error("Google Maps failed to load."));
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
+      script.crossOrigin = "";
+      script.onload = () => resolve(window.L);
+      script.onerror = () => reject(new Error("Map library failed to load."));
       document.head.appendChild(script);
     });
   }
-  return googleMapsPromise;
+  return leafletPromise;
 }
 
-function geocodeJobAddress(google: any, job: Job): Promise<JobLocation | undefined> {
+async function geocodeJobAddress(job: Job): Promise<JobLocation | undefined> {
   const address = jobAddressForGeocode(job);
-  if (!address) return Promise.resolve(undefined);
-  const geocoder = new google.maps.Geocoder();
-  return new Promise((resolve) => {
-    geocoder.geocode({ address }, (results: any[], status: string) => {
-      if (status !== "OK" || !results?.[0]) {
-        resolve(undefined);
-        return;
-      }
-      const location = results[0].geometry.location;
-      resolve({ lat: location.lat(), lng: location.lng() });
-    });
+  if (!address) return undefined;
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("countrycodes", "us");
+  url.searchParams.set("q", address);
+  const response = await fetch(url.toString(), {
+    headers: { Accept: "application/json" },
   });
+  if (!response.ok) return undefined;
+  const [result] = (await response.json()) as Array<{ lat?: string; lon?: string }>;
+  const lat = Number(result?.lat);
+  const lng = Number(result?.lon);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined;
 }
 
 function timeFromOriginalDateText(notes?: string) {
@@ -354,7 +366,6 @@ export default function App() {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const activeLabel = useMemo(() => tabs.find((tab) => tab.id === activeTab)?.label ?? "Dashboard", [activeTab]);
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
-  const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 
   const syncSheets = useCallback(async (showNoEndpointMessage = true) => {
     if (!syncEndpoint) {
@@ -583,7 +594,7 @@ export default function App() {
             {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "leads" && <Leads leads={leads} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
-            {activeTab === "map" && <MapTab customers={customers} jobs={jobs} mapsApiKey={mapsApiKey} onJobClick={setSelectedJob} onJobLocationUpdate={updateJobLocation} />}
+            {activeTab === "map" && <MapTab customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobLocationUpdate={updateJobLocation} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
@@ -594,7 +605,7 @@ export default function App() {
           </div>
         </main>
       </div>
-      {selectedJob && <JobModal customers={customers} job={selectedJob} mapsApiKey={mapsApiKey} onClose={() => setSelectedJob(null)} onJobLocationUpdate={updateJobLocation} />}
+      {selectedJob && <JobModal customers={customers} job={selectedJob} onClose={() => setSelectedJob(null)} onJobLocationUpdate={updateJobLocation} />}
     </div>
   );
 }
@@ -775,7 +786,7 @@ function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: {
   );
 }
 
-function MapTab({ customers, jobs, mapsApiKey, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; mapsApiKey?: string; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
+function MapTab({ customers, jobs, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
   const [filter, setFilter] = useState<MapJobFilter>("upcoming");
   const filteredJobs = jobs.filter((job) => {
     if (filter === "today") return job.date === today;
@@ -795,7 +806,6 @@ function MapTab({ customers, jobs, mapsApiKey, onJobClick, onJobLocationUpdate }
         <JobMapPanel
           customers={customers}
           jobs={filteredJobs}
-          mapsApiKey={mapsApiKey}
           heightClass="h-[620px]"
           showRouteControls
           onJobClick={onJobClick}
@@ -813,11 +823,11 @@ function MapTab({ customers, jobs, mapsApiKey, onJobClick, onJobLocationUpdate }
   );
 }
 
-function JobMapPanel({ customers, jobs, mapsApiKey, heightClass = "h-80", focusedJob, showRouteControls = false, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; mapsApiKey?: string; heightClass?: string; focusedJob?: Job; showRouteControls?: boolean; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
+function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRouteControls = false, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; heightClass?: string; focusedJob?: Job; showRouteControls?: boolean; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<any>(null);
   const markers = useRef<any[]>([]);
-  const directionsRenderer = useRef<any>(null);
+  const routeLayer = useRef<any>(null);
   const [status, setStatus] = useState("Loading map...");
   const [selectedRouteJob, setSelectedRouteJob] = useState<Job | undefined>(focusedJob);
   const [routing, setRouting] = useState(false);
@@ -831,96 +841,96 @@ function JobMapPanel({ customers, jobs, mapsApiKey, heightClass = "h-80", focuse
 
   useEffect(() => {
     let canceled = false;
-    if (!mapsApiKey) {
-      setStatus("Add VITE_GOOGLE_MAPS_API_KEY on Render to enable the map.");
-      return;
-    }
 
-    loadGoogleMaps(mapsApiKey).then(async (google) => {
+    loadLeaflet().then(async (L) => {
       if (canceled || !mapRef.current) return;
-      const fallbackCenter = { lat: 29.7604, lng: -95.3698 };
+      const fallbackCenter: [number, number] = [29.7604, -95.3698];
       const firstLocated = locatedJobs[0];
       if (!mapInstance.current) {
-        mapInstance.current = new google.maps.Map(mapRef.current, {
-          center: firstLocated ? { lat: firstLocated.lat, lng: firstLocated.lng } : fallbackCenter,
+        mapInstance.current = L.map(mapRef.current, {
+          center: firstLocated ? [firstLocated.lat, firstLocated.lng] : fallbackCenter,
           zoom: firstLocated ? 13 : 11,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
+          scrollWheelZoom: true,
         });
-        directionsRenderer.current = new google.maps.DirectionsRenderer({ suppressMarkers: false, preserveViewport: true });
-        directionsRenderer.current.setMap(mapInstance.current);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        }).addTo(mapInstance.current);
       }
 
       for (const job of visibleJobs) {
         if (canceled) return;
         if (hasJobLocation(job) || geocodedIds.current.has(job.id)) continue;
         geocodedIds.current.add(job.id);
-        const location = await geocodeJobAddress(google, job);
+        const location = await geocodeJobAddress(job);
         if (location) await onJobLocationUpdate(job.id, location).catch(() => undefined);
+        await new Promise((resolve) => window.setTimeout(resolve, 1100));
       }
       setStatus("");
-    }).catch((error) => setStatus(error instanceof Error ? error.message : "Google Maps failed to load."));
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Map failed to load."));
 
     return () => {
       canceled = true;
     };
-  }, [mapsApiKey, visibleJobs, locatedJobs, onJobLocationUpdate]);
+  }, [visibleJobs, locatedJobs, onJobLocationUpdate]);
 
   useEffect(() => {
-    if (!mapInstance.current || !window.google?.maps) return;
-    for (const marker of markers.current) marker.setMap(null);
+    const L = window.L;
+    if (!mapInstance.current || !L) return;
+    for (const marker of markers.current) marker.remove();
     markers.current = [];
-    const bounds = new window.google.maps.LatLngBounds();
 
     for (const job of locatedJobs) {
       const customer = findCustomer(customers, job.customerId);
-      const marker = new window.google.maps.Marker({
-        position: { lat: job.lat, lng: job.lng },
-        map: mapInstance.current,
-        title: customer.name,
-      });
-      marker.addListener("click", () => {
+      const marker = L.marker([job.lat, job.lng], { title: customer.name })
+        .addTo(mapInstance.current)
+        .bindPopup(`<strong>${customer.name}</strong><br>${job.date} at ${job.time}<br>${job.serviceType}<br>${job.address || ""}`);
+      marker.on("click", () => {
         setSelectedRouteJob(job);
         onJobClick(job);
       });
       markers.current.push(marker);
-      bounds.extend(marker.getPosition());
     }
 
     if (locatedJobs.length === 1) {
-      mapInstance.current.setCenter({ lat: locatedJobs[0].lat, lng: locatedJobs[0].lng });
-      mapInstance.current.setZoom(15);
+      mapInstance.current.setView([locatedJobs[0].lat, locatedJobs[0].lng], 15);
     } else if (locatedJobs.length > 1) {
-      mapInstance.current.fitBounds(bounds, 60);
+      const bounds = L.latLngBounds(locatedJobs.map((job) => [job.lat, job.lng]));
+      mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
     }
   }, [customers, locatedJobs, onJobClick]);
 
   async function routeToJob() {
-    const google = window.google;
+    const L = window.L;
     const job = selectedRouteJob ?? focusedJob ?? locatedJobs[0];
-    if (!google?.maps || !job || !hasJobLocation(job)) return;
+    if (!L || !mapInstance.current || !job || !hasJobLocation(job)) return;
     if (!navigator.geolocation) {
       setStatus("Current location is not available in this browser.");
       return;
     }
     setRouting(true);
     setStatus("Requesting current location...");
-    navigator.geolocation.getCurrentPosition((position) => {
-      const directions = new google.maps.DirectionsService();
-      directions.route({
-        origin: { lat: position.coords.latitude, lng: position.coords.longitude },
-        destination: { lat: job.lat, lng: job.lng },
-        travelMode: google.maps.TravelMode.DRIVING,
-      }, (result: any, routeStatus: string) => {
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      try {
+        const origin = `${position.coords.longitude},${position.coords.latitude}`;
+        const destination = `${job.lng},${job.lat}`;
+        const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${origin};${destination}?overview=full&geometries=geojson`);
+        const data = await response.json() as { routes?: Array<{ geometry?: { coordinates?: [number, number][] }; distance?: number; duration?: number }> };
+        const route = data.routes?.[0];
+        const coordinates = route?.geometry?.coordinates;
+        if (!response.ok || !route || !coordinates?.length) throw new Error("Route unavailable");
+        if (routeLayer.current) routeLayer.current.remove();
+        const latLngs = coordinates.map(([lng, lat]) => [lat, lng]);
+        routeLayer.current = L.polyline(latLngs, { color: "#0891b2", weight: 5, opacity: 0.85 }).addTo(mapInstance.current);
+        mapInstance.current.fitBounds(routeLayer.current.getBounds(), { padding: [40, 40] });
+        const miles = route.distance ? route.distance / 1609.344 : undefined;
+        const minutes = route.duration ? Math.round(route.duration / 60) : undefined;
         setRouting(false);
-        if (routeStatus === "OK" && result) {
-          directionsRenderer.current?.setDirections(result);
-          setStatus(`Route to ${findCustomer(customers, job.customerId).name} is ready.`);
-        } else {
-          setStatus("Could not draw the route. Use the external directions link.");
-        }
-      });
+        setStatus(`Route to ${findCustomer(customers, job.customerId).name}${miles ? `: ${miles.toFixed(1)} mi` : ""}${minutes ? `, about ${minutes} min` : ""}.`);
+      } catch {
+        setRouting(false);
+        setStatus("Could not draw the route. Use the external directions link.");
+      }
     }, () => {
       setRouting(false);
       setStatus("Location permission was denied. Use the external directions link.");
@@ -928,19 +938,17 @@ function JobMapPanel({ customers, jobs, mapsApiKey, heightClass = "h-80", focuse
   }
 
   const routeJob = selectedRouteJob ?? focusedJob ?? locatedJobs[0];
-  const directionsUrl = routeJob ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(jobAddressForGeocode(routeJob))}` : "";
+  const directionsUrl = routeJob && hasJobLocation(routeJob) ? `https://www.openstreetmap.org/?mlat=${routeJob.lat}&mlon=${routeJob.lng}#map=16/${routeJob.lat}/${routeJob.lng}` : "";
 
   return (
     <div className="space-y-3">
-      <div className={cx("map-shell", heightClass)} ref={mapRef}>
-        {!mapsApiKey && <div className="map-placeholder">Add VITE_GOOGLE_MAPS_API_KEY on Render to enable Google Maps.</div>}
-      </div>
+      <div className={cx("map-shell", heightClass)} ref={mapRef} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status || `${locatedJobs.length} job pins shown`}</p>
         {showRouteControls && routeJob && (
           <div className="flex flex-wrap gap-2">
             <button className="primary-button" onClick={routeToJob} disabled={routing || !hasJobLocation(routeJob)}><Navigation size={16} /> {routing ? "Routing" : "Route from my location"}</button>
-            <a className="text-button" href={directionsUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>
+            <a className="text-button" href={directionsUrl} target="_blank" rel="noreferrer">Open in OpenStreetMap</a>
           </div>
         )}
       </div>
@@ -1344,7 +1352,7 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
-function JobModal({ customers, job, mapsApiKey, onClose, onJobLocationUpdate }: { customers: Customer[]; job: Job; mapsApiKey?: string; onClose: () => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
+function JobModal({ customers, job, onClose, onJobLocationUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4">
       <div className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
@@ -1370,7 +1378,6 @@ function JobModal({ customers, job, mapsApiKey, onClose, onJobLocationUpdate }: 
           <JobMapPanel
             customers={customers}
             jobs={[job]}
-            mapsApiKey={mapsApiKey}
             focusedJob={job}
             heightClass="h-80"
             showRouteControls
