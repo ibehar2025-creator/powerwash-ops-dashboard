@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ElementType, FormEvent, ReactNode } from "react";
 import {
   BadgeDollarSign,
@@ -14,11 +14,9 @@ import {
   FileText,
   LayoutDashboard,
   Mail,
-  MapPin,
   Menu,
   MessageSquare,
   Moon,
-  Navigation,
   ReceiptText,
   Sparkles,
   Star,
@@ -54,7 +52,7 @@ import {
 import type { Customer, Expense, Invoice, Job, Lead, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "leads" | "jobs" | "map" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
+type TabId = "dashboard" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
 type SyncPayload = Partial<{
   customers: Customer[];
   jobs: Job[];
@@ -66,8 +64,6 @@ type SyncPayload = Partial<{
 }>;
 type JobSaveResult = { ok: boolean; message?: string };
 type PersistedJobPatch = Pick<Job, "status" | "paymentStatus" | "amountPaid" | "tipAmount" | "paymentMethod" | "price">;
-type MapJobFilter = "all" | "upcoming" | "today" | "completed";
-type JobLocation = { lat: number; lng: number };
 type AddClientJobInput = {
   name: string;
   phone: string;
@@ -93,7 +89,6 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "leads", label: "Leads", icon: Sparkles },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
-  { id: "map", label: "Map", icon: MapPin },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "finance", label: "Finance", icon: WalletCards },
   { id: "invoices", label: "Invoices", icon: ReceiptText },
@@ -125,14 +120,6 @@ const monthDays = [
 ];
 const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
-const DEFAULT_GEOCODE_SUFFIX = "Houston, TX";
-let leafletPromise: Promise<any> | undefined;
-
-declare global {
-  interface Window {
-    L?: any;
-  }
-}
 
 function addDays(date: string, days: number) {
   const next = new Date(`${date}T12:00:00`);
@@ -164,69 +151,6 @@ function findCustomer(customers: Customer[], customerId: string) {
 
 function localId(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "new-client";
-}
-
-function hasJobLocation(job: Job): job is Job & JobLocation {
-  return Number.isFinite(job.lat) && Number.isFinite(job.lng);
-}
-
-function jobAddressForGeocode(job: Job) {
-  const address = job.address?.trim();
-  if (!address || /^unknown$/i.test(address) || /no address/i.test(address)) return "";
-  if (/[A-Z]{2}\b/.test(address) || /\bHouston\b/i.test(address)) return address;
-  return `${address}, ${DEFAULT_GEOCODE_SUFFIX}`;
-}
-
-function loadLeaflet() {
-  if (typeof window === "undefined") return Promise.reject(new Error("Maps only run in the browser."));
-  if (window.L) return Promise.resolve(window.L);
-  if (!leafletPromise) {
-    leafletPromise = new Promise((resolve, reject) => {
-      if (!document.querySelector<HTMLLinkElement>("link[data-leaflet-css]")) {
-        const css = document.createElement("link");
-        css.dataset.leafletCss = "true";
-        css.rel = "stylesheet";
-        css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-        css.integrity = "sha256-p4NxAoJBhIINfQfuLqZVVQmWAc9UOGqB4Q9+ufh2EY0=";
-        css.crossOrigin = "";
-        document.head.appendChild(css);
-      }
-      const existing = document.querySelector<HTMLScriptElement>("script[data-leaflet]");
-      if (existing) {
-        existing.addEventListener("load", () => resolve(window.L));
-        existing.addEventListener("error", () => reject(new Error("Map library failed to load.")));
-        return;
-      }
-      const script = document.createElement("script");
-      script.dataset.leaflet = "true";
-      script.async = true;
-      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
-      script.crossOrigin = "";
-      script.onload = () => resolve(window.L);
-      script.onerror = () => reject(new Error("Map library failed to load."));
-      document.head.appendChild(script);
-    });
-  }
-  return leafletPromise;
-}
-
-async function geocodeJobAddress(job: Job): Promise<JobLocation | undefined> {
-  const address = jobAddressForGeocode(job);
-  if (!address) return undefined;
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("countrycodes", "us");
-  url.searchParams.set("q", address);
-  const response = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) return undefined;
-  const [result] = (await response.json()) as Array<{ lat?: string; lon?: string }>;
-  const lat = Number(result?.lat);
-  const lng = Number(result?.lon);
-  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined;
 }
 
 function timeFromOriginalDateText(notes?: string) {
@@ -441,22 +365,6 @@ export default function App() {
     return saveResult ?? { ok: true };
   }
 
-  async function updateJobLocation(jobId: string, location: JobLocation) {
-    setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...location } : job));
-    setSelectedJob((current) => current?.id === jobId ? { ...current, ...location } : current);
-    if (!syncEndpoint) return;
-    const rowNumber = sheetRowNumberFromJobId(jobId);
-    if (!rowNumber) return;
-    const response = await fetch(syncEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action: "updateJobLocation", jobId, rowNumber, location }),
-    });
-    if (!response.ok) throw new Error(`Location save failed with ${response.status}`);
-    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    if (payload.ok === false) throw new Error(payload.error ?? "Location save failed.");
-  }
-
   function updateInvoice(invoiceId: string, patch: Partial<Invoice>) {
     setInvoices((current) => current.map((invoice) => invoice.id === invoiceId ? { ...invoice, ...patch } : invoice));
   }
@@ -594,7 +502,6 @@ export default function App() {
             {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "leads" && <Leads leads={leads} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
-            {activeTab === "map" && <MapTab customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobLocationUpdate={updateJobLocation} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
@@ -605,7 +512,7 @@ export default function App() {
           </div>
         </main>
       </div>
-      {selectedJob && <JobModal customers={customers} job={selectedJob} onClose={() => setSelectedJob(null)} onJobLocationUpdate={updateJobLocation} />}
+      {selectedJob && <JobModal customers={customers} job={selectedJob} onClose={() => setSelectedJob(null)} />}
     </div>
   );
 }
@@ -782,210 +689,6 @@ function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: {
           </table>
         </DataTable>
       </Section>
-    </div>
-  );
-}
-
-function MapTab({ customers, jobs, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
-  const [filter, setFilter] = useState<MapJobFilter>("upcoming");
-  const filteredJobs = jobs.filter((job) => {
-    if (filter === "today") return job.date === today;
-    if (filter === "upcoming") return job.status === "scheduled" || job.status === "in progress";
-    if (filter === "completed") return job.status === "completed";
-    return true;
-  });
-  const missing = filteredJobs.filter((job) => !jobAddressForGeocode(job));
-
-  return (
-    <div className="space-y-4">
-      <Section
-        title="Job map"
-        kicker="Pins, job details, and route planning"
-        action={<div className="segmented">{(["all", "upcoming", "today", "completed"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={cx(filter === item && "active")}>{item}</button>)}</div>}
-      >
-        <JobMapPanel
-          customers={customers}
-          jobs={filteredJobs}
-          heightClass="h-[620px]"
-          showRouteControls
-          onJobClick={onJobClick}
-          onJobLocationUpdate={onJobLocationUpdate}
-        />
-      </Section>
-      {missing.length > 0 && (
-        <Section title="Missing addresses" kicker="These jobs need an address before they can be pinned">
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {missing.map((job) => <button key={job.id} className="rounded-lg border border-slate-200 p-3 text-left text-sm transition hover:border-lagoon dark:border-slate-800" onClick={() => onJobClick(job)}><span className="block font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</span><span className="text-slate-500">{job.date} at {job.time}</span></button>)}
-          </div>
-        </Section>
-      )}
-    </div>
-  );
-}
-
-function JobMapPanel({ customers, jobs, heightClass = "h-80", focusedJob, showRouteControls = false, onJobClick, onJobLocationUpdate }: { customers: Customer[]; jobs: Job[]; heightClass?: string; focusedJob?: Job; showRouteControls?: boolean; onJobClick: (job: Job) => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const mapInstance = useRef<any>(null);
-  const markers = useRef<any[]>([]);
-  const routeLayer = useRef<any>(null);
-  const lastFitKey = useRef("");
-  const [status, setStatus] = useState("Loading map...");
-  const [selectedRouteJob, setSelectedRouteJob] = useState<Job | undefined>(focusedJob);
-  const [routing, setRouting] = useState(false);
-  const [geocoding, setGeocoding] = useState(false);
-  const geocodedIds = useRef<Set<string>>(new Set());
-  const visibleJobs = useMemo(() => jobs.filter((job) => jobAddressForGeocode(job)), [jobs]);
-  const locatedJobs = useMemo(() => visibleJobs.filter(hasJobLocation), [visibleJobs]);
-  const missingLocationJobs = useMemo(() => visibleJobs.filter((job) => !hasJobLocation(job) && !geocodedIds.current.has(job.id)), [visibleJobs]);
-
-  useEffect(() => {
-    setSelectedRouteJob(focusedJob);
-  }, [focusedJob]);
-
-  useEffect(() => {
-    let canceled = false;
-
-    loadLeaflet().then((L) => {
-      if (canceled || !mapRef.current) return;
-      const fallbackCenter: [number, number] = [29.7604, -95.3698];
-      const firstLocated = locatedJobs[0];
-      if (!mapInstance.current) {
-        mapInstance.current = L.map(mapRef.current, {
-          center: firstLocated ? [firstLocated.lat, firstLocated.lng] : fallbackCenter,
-          zoom: firstLocated ? 13 : 11,
-          scrollWheelZoom: true,
-        });
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        }).addTo(mapInstance.current);
-      }
-      window.setTimeout(() => mapInstance.current?.invalidateSize(), 150);
-      setStatus(locatedJobs.length ? "" : "No pinned jobs yet.");
-    }).catch((error) => setStatus(error instanceof Error ? error.message : "Map failed to load."));
-
-    return () => {
-      canceled = true;
-    };
-  }, [locatedJobs]);
-
-  useEffect(() => {
-    if (!focusedJob || hasJobLocation(focusedJob) || geocodedIds.current.has(focusedJob.id)) return;
-    let canceled = false;
-    geocodedIds.current.add(focusedJob.id);
-    setStatus("Finding this job location...");
-    void geocodeJobAddress(focusedJob).then((location) => {
-      if (!canceled && location) return onJobLocationUpdate(focusedJob.id, location);
-      return undefined;
-    }).catch(() => undefined).finally(() => {
-      if (!canceled) setStatus("");
-    });
-    return () => {
-      canceled = true;
-    };
-  }, [focusedJob, onJobLocationUpdate]);
-
-  useEffect(() => {
-    const L = window.L;
-    if (!mapInstance.current || !L) return;
-    for (const marker of markers.current) marker.remove();
-    markers.current = [];
-
-    for (const job of locatedJobs) {
-      const customer = findCustomer(customers, job.customerId);
-      const marker = L.marker([job.lat, job.lng], { title: customer.name })
-        .addTo(mapInstance.current)
-        .bindPopup(`<strong>${customer.name}</strong><br>${job.date} at ${job.time}<br>${job.serviceType}<br>${job.address || ""}`);
-      marker.on("click", () => {
-        setSelectedRouteJob(job);
-        onJobClick(job);
-      });
-      markers.current.push(marker);
-    }
-
-    const fitKey = locatedJobs.map((job) => `${job.id}:${job.lat},${job.lng}`).join("|");
-    if (lastFitKey.current === fitKey) return;
-    lastFitKey.current = fitKey;
-    if (locatedJobs.length === 1) {
-      mapInstance.current.setView([locatedJobs[0].lat, locatedJobs[0].lng], 15);
-    } else if (locatedJobs.length > 1) {
-      const bounds = L.latLngBounds(locatedJobs.map((job) => [job.lat, job.lng]));
-      mapInstance.current.fitBounds(bounds, { padding: [40, 40] });
-    }
-  }, [customers, locatedJobs, onJobClick]);
-
-  async function findMissingPins() {
-    const batch = missingLocationJobs.slice(0, 5);
-    if (!batch.length) return;
-    setGeocoding(true);
-    setStatus(`Finding ${batch.length} missing job pins...`);
-    let found = 0;
-    for (const job of batch) {
-      geocodedIds.current.add(job.id);
-      const location = await geocodeJobAddress(job).catch(() => undefined);
-      if (location) {
-        found += 1;
-        await onJobLocationUpdate(job.id, location).catch(() => undefined);
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 1200));
-    }
-    setGeocoding(false);
-    setStatus(found ? `Added ${found} job pin${found === 1 ? "" : "s"}.` : "No new pins found from those addresses.");
-  }
-
-  async function routeToJob() {
-    const L = window.L;
-    const job = selectedRouteJob ?? focusedJob ?? locatedJobs[0];
-    if (!L || !mapInstance.current || !job || !hasJobLocation(job)) return;
-    if (!navigator.geolocation) {
-      setStatus("Current location is not available in this browser.");
-      return;
-    }
-    setRouting(true);
-    setStatus("Requesting current location...");
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      try {
-        const origin = `${position.coords.longitude},${position.coords.latitude}`;
-        const destination = `${job.lng},${job.lat}`;
-        const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${origin};${destination}?overview=full&geometries=geojson`);
-        const data = await response.json() as { routes?: Array<{ geometry?: { coordinates?: [number, number][] }; distance?: number; duration?: number }> };
-        const route = data.routes?.[0];
-        const coordinates = route?.geometry?.coordinates;
-        if (!response.ok || !route || !coordinates?.length) throw new Error("Route unavailable");
-        if (routeLayer.current) routeLayer.current.remove();
-        const latLngs = coordinates.map(([lng, lat]) => [lat, lng]);
-        routeLayer.current = L.polyline(latLngs, { color: "#0891b2", weight: 5, opacity: 0.85 }).addTo(mapInstance.current);
-        mapInstance.current.fitBounds(routeLayer.current.getBounds(), { padding: [40, 40] });
-        const miles = route.distance ? route.distance / 1609.344 : undefined;
-        const minutes = route.duration ? Math.round(route.duration / 60) : undefined;
-        setRouting(false);
-        setStatus(`Route to ${findCustomer(customers, job.customerId).name}${miles ? `: ${miles.toFixed(1)} mi` : ""}${minutes ? `, about ${minutes} min` : ""}.`);
-      } catch {
-        setRouting(false);
-        setStatus("Could not draw the route. Use the external directions link.");
-      }
-    }, () => {
-      setRouting(false);
-      setStatus("Location permission was denied. Use the external directions link.");
-    }, { enableHighAccuracy: true, timeout: 12000 });
-  }
-
-  const routeJob = selectedRouteJob ?? focusedJob ?? locatedJobs[0];
-  const directionsUrl = routeJob && hasJobLocation(routeJob) ? `https://www.openstreetmap.org/?mlat=${routeJob.lat}&mlon=${routeJob.lng}#map=16/${routeJob.lat}/${routeJob.lng}` : "";
-
-  return (
-    <div className="space-y-3">
-      <div className={cx("map-shell", heightClass)} ref={mapRef} />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status || `${locatedJobs.length} job pins shown`}</p>
-        {showRouteControls && routeJob && (
-          <div className="flex flex-wrap gap-2">
-            {missingLocationJobs.length > 0 && <button className="text-button" onClick={findMissingPins} disabled={geocoding}>{geocoding ? "Finding pins" : `Find ${Math.min(missingLocationJobs.length, 5)} missing pins`}</button>}
-            <button className="primary-button" onClick={routeToJob} disabled={routing || !hasJobLocation(routeJob)}><Navigation size={16} /> {routing ? "Routing" : "Route from my location"}</button>
-            <a className="text-button" href={directionsUrl} target="_blank" rel="noreferrer">Open in OpenStreetMap</a>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -1386,7 +1089,7 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
-function JobModal({ customers, job, onClose, onJobLocationUpdate }: { customers: Customer[]; job: Job; onClose: () => void; onJobLocationUpdate: (jobId: string, location: JobLocation) => Promise<void> }) {
+function JobModal({ customers, job, onClose }: { customers: Customer[]; job: Job; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4">
       <div className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900">
@@ -1406,18 +1109,6 @@ function JobModal({ customers, job, onClose, onJobLocationUpdate }: { customers:
           <div className="detail-row"><span>Price</span><strong>{currency.format(job.price)}</strong></div>
           <div className="detail-row"><span>Paid / tip</span><strong>{currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</strong></div>
           <div className="detail-row md:col-span-2"><span>Notes</span><strong>{job.notes}</strong></div>
-        </div>
-        <div className="mt-5">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Job location</p>
-          <JobMapPanel
-            customers={customers}
-            jobs={[job]}
-            focusedJob={job}
-            heightClass="h-80"
-            showRouteControls
-            onJobClick={() => undefined}
-            onJobLocationUpdate={onJobLocationUpdate}
-          />
         </div>
       </div>
     </div>
