@@ -69,7 +69,7 @@ function readJobs(sheet) {
     const price = money(row[3]);
     const notes = clean(row[5]);
 
-    if (!name && !address && !dateInfo.date && !price && !notes) continue;
+    if (!name) continue;
 
     const index = jobs.length + 1;
     const customerId = "sheet-c-" + String(index).padStart(3, "0");
@@ -81,7 +81,7 @@ function readJobs(sheet) {
 
     customers.push({
       id: customerId,
-      name: name || "Customer",
+      name: name,
       phone: phoneFromNotes(notes),
       email: "",
       address: address,
