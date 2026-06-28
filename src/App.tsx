@@ -597,97 +597,107 @@ function Leads({ leads }: { leads: Lead[] }) {
 }
 
 function Jobs({ customers, jobs, onJobClick, onJobUpdate, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => JobSaveResult | Promise<JobSaveResult>; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
+  const incompleteJobs = jobs.filter((job) => job.status !== "completed");
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const renderJobsTable = (rows: Job[], emptyMessage: string) => (
+    <DataTable>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Customer</th>
+            <th>Service</th>
+            <th>Status</th>
+            <th>Assignment</th>
+            <th>Price / Paid / Tip</th>
+            <th>Payment</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan={8}>{emptyMessage}</td></tr>}
+          {rows.map((job) => (
+            <tr
+              key={job.id}
+              className="clickable-row"
+              role="button"
+              tabIndex={0}
+              onClick={() => onJobClick(job)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onJobClick(job);
+                }
+              }}
+              aria-label={`Open job for ${findCustomer(customers, job.customerId).name} on ${job.date}`}
+            >
+              <td>{job.date}<br />{job.time}</td>
+              <td>
+                <button
+                  className="job-link"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onJobClick(job);
+                  }}
+                >
+                  {findCustomer(customers, job.customerId).name}
+                </button>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p>
+              </td>
+              <td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td>
+              <td><Badge status={job.status} /></td>
+              <td>Unassigned</td>
+              <td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td>
+              <td><Badge status={job.paymentStatus} /></td>
+              <td>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="icon-button"
+                    title="Mark complete"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price });
+                    }}
+                  >
+                    <CheckCircle2 size={16} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title="Mark past due"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" });
+                    }}
+                  >
+                    <FileText size={16} />
+                  </button>
+                  <button
+                    className="primary-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onJobClick(job);
+                    }}
+                  >
+                    Open
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  );
+
   return (
     <div className="space-y-4">
       <AddClientJobForm onCreate={onClientJobCreate} />
-      <Section title="Jobs management" kicker="Tap Open or any job row for details and payment info">
-        <DataTable>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Customer</th>
-                <th>Service</th>
-                <th>Status</th>
-                <th>Assignment</th>
-                <th>Price / Paid / Tip</th>
-                <th>Payment</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr
-                  key={job.id}
-                  className="clickable-row"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onJobClick(job)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onJobClick(job);
-                    }
-                  }}
-                  aria-label={`Open job for ${findCustomer(customers, job.customerId).name} on ${job.date}`}
-                >
-                  <td>{job.date}<br />{job.time}</td>
-                  <td>
-                    <button
-                      className="job-link"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onJobClick(job);
-                      }}
-                    >
-                      {findCustomer(customers, job.customerId).name}
-                    </button>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p>
-                  </td>
-                  <td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td>
-                  <td><Badge status={job.status} /></td>
-                  <td>Unassigned</td>
-                  <td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td>
-                  <td><Badge status={job.paymentStatus} /></td>
-                  <td>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        className="icon-button"
-                        title="Mark complete"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price });
-                        }}
-                      >
-                        <CheckCircle2 size={16} />
-                      </button>
-                      <button
-                        className="icon-button"
-                        title="Mark past due"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" });
-                        }}
-                      >
-                        <FileText size={16} />
-                      </button>
-                      <button
-                        className="primary-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onJobClick(job);
-                        }}
-                      >
-                        Open
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </DataTable>
+      <Section title="Incomplete jobs" kicker={`${incompleteJobs.length} jobs still need attention`}>
+        {renderJobsTable(incompleteJobs, "No incomplete jobs right now.")}
+      </Section>
+      <Section title="Completed jobs" kicker={`${completedJobs.length} finished jobs`}>
+        {renderJobsTable(completedJobs, "No completed jobs yet.")}
       </Section>
     </div>
   );
