@@ -202,6 +202,16 @@ function cleanServicePlans(plans: Array<ServicePlan & { customer?: Customer }>) 
   });
 }
 
+function storedState<T>(key: string, fallback: T) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function moneyInput(value: number, onChange: (value: number) => void) {
   return <input type="number" value={value} onChange={(event) => onChange(Number.parseFloat(event.target.value) || 0)} />;
 }
@@ -269,8 +279,8 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
   const [jobs, setJobs] = useState<Job[]>(() => normalizeSyncedJobs(importedJobs));
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
-  const [estimates, setEstimates] = useState<Estimate[]>(importedEstimates);
-  const [pricebook, setPricebook] = useState<PricebookItem[]>(importedPricebookItems);
+  const [estimates, setEstimates] = useState<Estimate[]>(() => storedState("powerwash-estimates", importedEstimates));
+  const [pricebook, setPricebook] = useState<PricebookItem[]>(() => storedState("powerwash-pricebook", importedPricebookItems));
   const [expenses, setExpenses] = useState<Expense[]>(importedExpenses);
   const [leads, setLeads] = useState<Lead[]>(importedLeads);
   const [plans, setPlans] = useState<ServicePlan[]>(importedServicePlans);
@@ -315,6 +325,14 @@ export default function App() {
     const interval = window.setInterval(() => void syncSheets(false), 60_000);
     return () => window.clearInterval(interval);
   }, [syncEndpoint, syncSheets]);
+
+  useEffect(() => {
+    window.localStorage.setItem("powerwash-estimates", JSON.stringify(estimates));
+  }, [estimates]);
+
+  useEffect(() => {
+    window.localStorage.setItem("powerwash-pricebook", JSON.stringify(pricebook));
+  }, [pricebook]);
 
   async function saveJobPatch(jobId: string, patch: Partial<PersistedJobPatch>): Promise<JobSaveResult> {
     if (!syncEndpoint) {
