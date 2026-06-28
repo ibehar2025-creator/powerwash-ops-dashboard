@@ -4,6 +4,37 @@ export type LeadStatus = "new" | "contacted" | "quoted" | "scheduled" | "won" | 
 export type PaymentMethod = "Zelle" | "cash" | "card" | "check" | "other";
 export type CustomerInsight = "repeat customer" | "high-value customer" | "overdue payment" | "inactive customer";
 export type PlanType = "monthly" | "6-week" | "3-month" | "6-month" | "yearly";
+export type EstimateStatus = "draft" | "sent" | "approved" | "scheduled" | "invoiced" | "lost";
+
+export interface PricebookItem {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  defaultPrice: number;
+  estimatedCost: number;
+}
+
+export interface EstimateLineItem {
+  pricebookItemId?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface Estimate {
+  id: string;
+  customerName: string;
+  phone: string;
+  email: string;
+  address: string;
+  status: EstimateStatus;
+  createdDate: string;
+  followUpDate: string;
+  lineItems: EstimateLineItem[];
+  discount: number;
+  notes: string;
+}
 
 export interface Customer {
   id: string;

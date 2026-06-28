@@ -61,6 +61,11 @@ select {
   @apply cursor-pointer transition hover:bg-mist/60 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-lagoon dark:hover:bg-slate-800/70 dark:focus:ring-cyan-300;
 }
 
+.data-table input,
+.data-table select {
+  @apply w-full min-w-28 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white;
+}
+
 .job-link {
   @apply text-left font-semibold text-lagoon underline-offset-2 hover:underline dark:text-cyan-300;
 }

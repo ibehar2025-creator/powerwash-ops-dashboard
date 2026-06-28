@@ -1,4 +1,4 @@
-import type { BusinessSettings, CrewMember, Customer, Expense, Invoice, Job, Lead, Payment, PaymentStatus, ServicePlan } from "../types/business";
+import type { BusinessSettings, CrewMember, Customer, Estimate, Expense, Invoice, Job, Lead, Payment, PaymentStatus, PricebookItem, ServicePlan } from "../types/business";
 
 type SheetJobRow = {
   name: string;
@@ -248,6 +248,17 @@ export const servicePlans: ServicePlan[] = recurringPlanRows.map((plan, index) =
 }));
 
 export const expenses: Expense[] = [];
+
+export const pricebookItems: PricebookItem[] = [
+  { id: "price-driveway", name: "Driveway wash", category: "Concrete", description: "Standard driveway surface cleaning", defaultPrice: 175, estimatedCost: 25 },
+  { id: "price-sidewalks", name: "Sidewalks and walkway", category: "Concrete", description: "Front sidewalk, walkway, and entry path", defaultPrice: 125, estimatedCost: 20 },
+  { id: "price-patio", name: "Patio wash", category: "Outdoor living", description: "Back patio or pool deck cleaning", defaultPrice: 150, estimatedCost: 25 },
+  { id: "price-full-property", name: "Full property wash", category: "Package", description: "Driveway, sidewalks, walkway, patio, and common exterior surfaces", defaultPrice: 349, estimatedCost: 55 },
+  { id: "price-windows", name: "Exterior windows", category: "Add-on", description: "Exterior window rinse and detail add-on", defaultPrice: 150, estimatedCost: 20 },
+  { id: "price-recurring", name: "Recurring maintenance visit", category: "Recurring", description: "Scheduled maintenance wash for plan customers", defaultPrice: 250, estimatedCost: 35 },
+];
+
+export const estimates: Estimate[] = [];
 
 export const businessSettings: BusinessSettings = {
   businessName: "The Powerwashing Pros",

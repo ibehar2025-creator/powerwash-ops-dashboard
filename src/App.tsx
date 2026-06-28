@@ -28,10 +28,12 @@ import {
 import {
   businessSettings,
   customers as importedCustomers,
+  estimates as importedEstimates,
   expenses as importedExpenses,
   invoices as importedInvoices,
   jobs as importedJobs,
   leads as importedLeads,
+  pricebookItems as importedPricebookItems,
   servicePlans as importedServicePlans,
   spreadsheetImportNotice,
 } from "./data/googleSheetData";
@@ -42,17 +44,21 @@ import {
   businessMetrics,
   currency,
   customerSpend,
+  estimatePipeline,
+  estimateTotal,
   jobsForCustomer,
+  leadSourceBreakdown,
+  monthlyRevenueBreakdown,
   paymentMethodTotals,
   revenueByDay,
   repeatCustomerStats,
-  serviceBreakdown,
+  serviceProfitBreakdown,
   today,
 } from "./lib/calculations";
-import type { Customer, Expense, Invoice, Job, Lead, PaymentMethod, PaymentStatus, ServicePlan } from "./types/business";
+import type { Customer, Estimate, EstimateLineItem, EstimateStatus, Expense, Invoice, Job, Lead, PaymentMethod, PaymentStatus, PricebookItem, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "leads" | "jobs" | "calendar" | "finance" | "invoices" | "plans" | "contracts" | "reports" | "reviews";
+type TabId = "dashboard" | "leads" | "estimates" | "jobs" | "calendar" | "finance" | "invoices" | "pricebook" | "plans" | "contracts" | "reports" | "reviews";
 type SyncPayload = Partial<{
   customers: Customer[];
   jobs: Job[];
@@ -88,37 +94,18 @@ type AddServicePlanInput = {
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "leads", label: "Leads", icon: Sparkles },
+  { id: "estimates", label: "Estimates", icon: FileText },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "finance", label: "Finance", icon: WalletCards },
   { id: "invoices", label: "Invoices", icon: ReceiptText },
+  { id: "pricebook", label: "Pricebook", icon: BadgeDollarSign },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "contracts", label: "Contracts", icon: FileText },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "reviews", label: "Reviews", icon: Star },
 ];
 
-const monthDays = [
-  { label: "Mon 8", date: "2026-06-08" },
-  { label: "Tue 9", date: "2026-06-09" },
-  { label: "Wed 10", date: "2026-06-10" },
-  { label: "Thu 11", date: "2026-06-11" },
-  { label: "Fri 12", date: "2026-06-12" },
-  { label: "Sat 13", date: "2026-06-13" },
-  { label: "Sun 14", date: "2026-06-14" },
-  { label: "Mon 15", date: "2026-06-15" },
-  { label: "Tue 16", date: "2026-06-16" },
-  { label: "Wed 17", date: "2026-06-17" },
-  { label: "Thu 18", date: "2026-06-18" },
-  { label: "Fri 19", date: "2026-06-19" },
-  { label: "Sat 20", date: "2026-06-20" },
-  { label: "Sun 21", date: "2026-06-21" },
-  { label: "Tue 23", date: "2026-06-23" },
-  { label: "Fri 26", date: "2026-06-26" },
-  { label: "Tue 30", date: "2026-06-30" },
-  { label: "Wed 1", date: "2026-07-01" },
-];
-const weekDays = monthDays.slice(7, 14);
 const planTypes: ServicePlan["type"][] = ["monthly", "6-week", "3-month", "6-month", "yearly"];
 
 function addDays(date: string, days: number) {
@@ -209,7 +196,10 @@ function customersFromSyncPayload(payload: SyncPayload) {
 }
 
 function cleanServicePlans(plans: Array<ServicePlan & { customer?: Customer }>) {
-  return plans.map(({ customer: _customer, ...plan }) => plan);
+  return plans.map(({ customer, ...plan }) => {
+    void customer;
+    return plan;
+  });
 }
 
 function moneyInput(value: number, onChange: (value: number) => void) {
@@ -279,6 +269,8 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
   const [jobs, setJobs] = useState<Job[]>(() => normalizeSyncedJobs(importedJobs));
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
+  const [estimates, setEstimates] = useState<Estimate[]>(importedEstimates);
+  const [pricebook, setPricebook] = useState<PricebookItem[]>(importedPricebookItems);
   const [expenses, setExpenses] = useState<Expense[]>(importedExpenses);
   const [leads, setLeads] = useState<Lead[]>(importedLeads);
   const [plans, setPlans] = useState<ServicePlan[]>(importedServicePlans);
@@ -367,6 +359,121 @@ export default function App() {
 
   function updateInvoice(invoiceId: string, patch: Partial<Invoice>) {
     setInvoices((current) => current.map((invoice) => invoice.id === invoiceId ? { ...invoice, ...patch } : invoice));
+  }
+
+  function updateEstimate(estimateId: string, patch: Partial<Estimate>) {
+    setEstimates((current) => current.map((estimate) => estimate.id === estimateId ? { ...estimate, ...patch } : estimate));
+  }
+
+  function createEstimate(input: Omit<Estimate, "id" | "createdDate" | "status">) {
+    const createdAt = Date.now();
+    const estimate: Estimate = {
+      ...input,
+      id: `est-${localId(input.customerName)}-${createdAt}`,
+      createdDate: today,
+      status: "draft",
+    };
+    setEstimates((current) => [estimate, ...current]);
+    setSyncStatus(`Draft estimate created for ${input.customerName}.`);
+  }
+
+  function updatePricebookItem(itemId: string, patch: Partial<PricebookItem>) {
+    setPricebook((current) => current.map((item) => item.id === itemId ? { ...item, ...patch } : item));
+  }
+
+  function createPricebookItem() {
+    const createdAt = Date.now();
+    setPricebook((current) => [{
+      id: `price-custom-${createdAt}`,
+      name: "New service",
+      category: "Custom",
+      description: "Describe what is included",
+      defaultPrice: 0,
+      estimatedCost: 0,
+    }, ...current]);
+  }
+
+  function customerIdForEstimate(estimate: Estimate) {
+    const existing = customers.find((customer) => customer.name.toLowerCase() === estimate.customerName.toLowerCase() || (!!estimate.address && customer.address.toLowerCase() === estimate.address.toLowerCase()));
+    if (existing) return existing.id;
+
+    const customerId = `estimate-c-${localId(estimate.customerName)}-${Date.now()}`;
+    const newCustomer: Customer = {
+      id: customerId,
+      name: estimate.customerName,
+      phone: estimate.phone,
+      email: estimate.email,
+      address: estimate.address,
+      notes: `Created from estimate ${estimate.id}. ${estimate.notes}`,
+      insights: ["inactive customer"],
+    };
+    setCustomers((current) => current.some((customer) => customer.id === customerId) ? current : [newCustomer, ...current]);
+    return customerId;
+  }
+
+  function createInvoiceFromEstimate(estimate: Estimate) {
+    const customerId = customerIdForEstimate(estimate);
+    const nextId = `inv-est-${String(invoices.length + 1).padStart(3, "0")}`;
+    setInvoices((current) => [{
+      id: nextId,
+      customerId,
+      jobId: "",
+      serviceDescription: estimate.lineItems.map((item) => item.description).join(", ") || "Power washing estimate",
+      price: estimate.lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
+      discount: estimate.discount,
+      tip: 0,
+      paymentMethod: "Zelle",
+      status: "unpaid",
+      amountPaid: 0,
+      dueDate: today,
+      issuedDate: today,
+    }, ...current]);
+    updateEstimate(estimate.id, { status: "invoiced" });
+    setSyncStatus(`Invoice created from estimate for ${estimate.customerName}.`);
+  }
+
+  function addLocalJobFromEstimate(estimate: Estimate, date: string, time: string) {
+    const customerId = customerIdForEstimate(estimate);
+    const createdAt = Date.now();
+    const total = estimateTotal(estimate);
+    const newJob: Job = {
+      id: `estimate-j-${createdAt}`,
+      date,
+      time,
+      customerId,
+      address: estimate.address,
+      serviceType: estimate.lineItems.map((item) => item.description).join(", ") || "Power washing service",
+      status: "scheduled",
+      crewIds: [],
+      price: total,
+      amountPaid: 0,
+      tipAmount: 0,
+      paymentStatus: "unpaid",
+      notes: estimate.notes || `Created from estimate ${estimate.id}.`,
+      source: "spreadsheet-import",
+    };
+    setJobs((current) => [newJob, ...current]);
+  }
+
+  async function scheduleEstimateJob(estimate: Estimate, date: string, time: string) {
+    const total = estimateTotal(estimate);
+    const input: AddClientJobInput = {
+      name: estimate.customerName,
+      phone: estimate.phone,
+      address: estimate.address,
+      date,
+      time,
+      price: total,
+      serviceType: estimate.lineItems.map((item) => item.description).join(", ") || "Power washing service",
+      notes: estimate.notes,
+    };
+    if (syncEndpoint) {
+      await createClientJob(input);
+    } else {
+      addLocalJobFromEstimate(estimate, date, time);
+    }
+    updateEstimate(estimate.id, { status: "scheduled" });
+    setSyncStatus(`Scheduled ${estimate.customerName} from estimate.`);
   }
 
   function updatePlan(planId: string, patch: Partial<ServicePlan>) {
@@ -501,13 +608,15 @@ export default function App() {
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
             {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "leads" && <Leads leads={leads} />}
+            {activeTab === "estimates" && <Estimates estimates={estimates} pricebook={pricebook} onEstimateCreate={createEstimate} onEstimateUpdate={updateEstimate} onInvoiceCreate={createInvoiceFromEstimate} onJobCreate={scheduleEstimateJob} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
             {activeTab === "finance" && <Finance customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} onJobUpdate={updateJob} />}
             {activeTab === "invoices" && <Invoices customers={customers} invoices={invoices} onInvoiceUpdate={updateInvoice} onInvoiceCreate={createInvoice} />}
+            {activeTab === "pricebook" && <Pricebook items={pricebook} onItemUpdate={updatePricebookItem} onItemCreate={createPricebookItem} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} onPlanCreate={createServicePlan} />}
             {activeTab === "contracts" && <Contracts customers={customers} invoices={invoices} />}
-            {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} />}
+            {activeTab === "reports" && <Reports customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} estimates={estimates} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
           </div>
         </main>
@@ -833,6 +942,172 @@ function Invoices({ customers, invoices, onInvoiceUpdate, onInvoiceCreate }: { c
   );
 }
 
+const estimateStatuses: EstimateStatus[] = ["draft", "sent", "approved", "scheduled", "invoiced", "lost"];
+
+function Estimates({ estimates, pricebook, onEstimateCreate, onEstimateUpdate, onInvoiceCreate, onJobCreate }: { estimates: Estimate[]; pricebook: PricebookItem[]; onEstimateCreate: (input: Omit<Estimate, "id" | "createdDate" | "status">) => void; onEstimateUpdate: (estimateId: string, patch: Partial<Estimate>) => void; onInvoiceCreate: (estimate: Estimate) => void; onJobCreate: (estimate: Estimate, date: string, time: string) => Promise<void> }) {
+  const [customerName, setCustomerName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [selectedItemId, setSelectedItemId] = useState(pricebook[0]?.id ?? "");
+  const selectedItem = pricebook.find((item) => item.id === selectedItemId) ?? pricebook[0];
+  const [quantity, setQuantity] = useState(1);
+  const [customDescription, setCustomDescription] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [followUpDate, setFollowUpDate] = useState(addDays(today, 2));
+  const [notes, setNotes] = useState("");
+  const [scheduleDate, setScheduleDate] = useState(today);
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [status, setStatus] = useState("");
+  const selectedEstimate = estimates[0];
+  const pipeline = estimatePipeline(estimates);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("");
+    const cleanName = customerName.trim();
+    if (!cleanName) {
+      setStatus("Add the customer name first.");
+      return;
+    }
+    const description = customDescription.trim() || selectedItem?.name || "Power washing service";
+    const unitPrice = Number(customPrice.replace(/[^0-9.]/g, "")) || selectedItem?.defaultPrice || 0;
+    const lineItems: EstimateLineItem[] = [{ pricebookItemId: selectedItem?.id, description, quantity: Math.max(quantity, 1), unitPrice }];
+    onEstimateCreate({
+      customerName: cleanName,
+      phone: phone.trim(),
+      email: email.trim(),
+      address: address.trim(),
+      followUpDate,
+      lineItems,
+      discount: Number(discount.replace(/[^0-9.]/g, "")) || 0,
+      notes: notes.trim(),
+    });
+    setCustomerName("");
+    setPhone("");
+    setEmail("");
+    setAddress("");
+    setQuantity(1);
+    setCustomDescription("");
+    setCustomPrice("");
+    setDiscount("");
+    setNotes("");
+    setStatus("Estimate draft created.");
+  }
+
+  async function schedule(estimate: Estimate) {
+    setStatus("");
+    try {
+      await onJobCreate(estimate, scheduleDate, scheduleTime);
+      setStatus("Job scheduled from estimate.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not schedule job.");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Stat label="Open estimate value" value={currency.format(pipeline.openValue)} detail="Draft and sent quotes" icon={FileText} />
+        <Stat label="Approved value" value={currency.format(pipeline.approvedValue)} detail="Approved, scheduled, or invoiced" icon={CheckCircle2} />
+        <Stat label="Estimate close rate" value={`${pipeline.closeRate}%`} detail="Approved out of sent estimates" icon={BarChart3} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <Section title="Create estimate" kicker="Quote builder from saved services">
+          <form className="settings-grid" onSubmit={submit}>
+            <Field label="Customer name"><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer name" required /></Field>
+            <Field label="Phone"><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="713-000-0000" /></Field>
+            <Field label="Email"><input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="customer@email.com" /></Field>
+            <Field label="Address"><input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Job address" /></Field>
+            <Field label="Saved service"><select value={selectedItemId} onChange={(event) => { setSelectedItemId(event.target.value); setCustomPrice(""); }}>{pricebook.map((item) => <option key={item.id} value={item.id}>{item.name} - {currency.format(item.defaultPrice)}</option>)}</select></Field>
+            <Field label="Quantity"><input type="number" min={1} value={quantity} onChange={(event) => setQuantity(Number(event.target.value) || 1)} /></Field>
+            <Field label="Custom description"><input value={customDescription} onChange={(event) => setCustomDescription(event.target.value)} placeholder={selectedItem?.description ?? "Service description"} /></Field>
+            <Field label="Custom unit price"><input value={customPrice} onChange={(event) => setCustomPrice(event.target.value)} placeholder={selectedItem ? currency.format(selectedItem.defaultPrice) : "$0"} inputMode="decimal" /></Field>
+            <Field label="Discount"><input value={discount} onChange={(event) => setDiscount(event.target.value)} placeholder="$0" inputMode="decimal" /></Field>
+            <Field label="Follow-up date"><input type="date" value={followUpDate} onChange={(event) => setFollowUpDate(event.target.value)} /></Field>
+            <label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Gate access, upsell ideas, customer details" /></label>
+            <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+              <button className="primary-button" type="submit">Create estimate</button>
+              {status && <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{status}</p>}
+            </div>
+          </form>
+        </Section>
+        <Section title="Estimate pipeline" kicker="Approve, invoice, or schedule">
+          <div className="space-y-3">
+            {estimates.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">No estimates yet. Create one from the quote builder.</p>}
+            {estimates.map((estimate) => (
+              <article key={estimate.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-ink dark:text-white">{estimate.customerName}</h3>
+                    <p className="text-sm text-slate-500">{estimate.address || "No address listed"} - follow up {estimate.followUpDate}</p>
+                  </div>
+                  <Badge status={estimate.status} />
+                </div>
+                <div className="mt-3 grid gap-2 text-sm">
+                  {estimate.lineItems.map((item, index) => <div key={`${estimate.id}-${index}`} className="flex justify-between gap-3"><span>{item.quantity}x {item.description}</span><strong>{currency.format(item.quantity * item.unitPrice)}</strong></div>)}
+                  {estimate.discount > 0 && <div className="flex justify-between gap-3 text-coral"><span>Discount</span><strong>-{currency.format(estimate.discount)}</strong></div>}
+                  <div className="flex justify-between border-t border-slate-200 pt-2 dark:border-slate-800"><span>Total</span><strong>{currency.format(estimateTotal(estimate))}</strong></div>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                  <select value={estimate.status} onChange={(event) => onEstimateUpdate(estimate.id, { status: event.target.value as EstimateStatus })}>{estimateStatuses.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+                  <button className="text-button" onClick={() => onInvoiceCreate(estimate)}>Create invoice</button>
+                  <button className="primary-button" onClick={() => void schedule(estimate)}>Schedule</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </Section>
+      </div>
+      {selectedEstimate && (
+        <Section title="Schedule settings" kicker="Used when scheduling an estimate">
+          <div className="settings-grid">
+            <Field label="Job date"><input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} /></Field>
+            <Field label="Job time"><input type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} /></Field>
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function Pricebook({ items, onItemUpdate, onItemCreate }: { items: PricebookItem[]; onItemUpdate: (itemId: string, patch: Partial<PricebookItem>) => void; onItemCreate: () => void }) {
+  const totalDefaultValue = items.reduce((sum, item) => sum + item.defaultPrice, 0);
+  const averageMargin = items.length ? Math.round(items.reduce((sum, item) => sum + (item.defaultPrice ? ((item.defaultPrice - item.estimatedCost) / item.defaultPrice) * 100 : 0), 0) / items.length) : 0;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Stat label="Saved services" value={`${items.length}`} detail="Reusable quote line items" icon={ClipboardList} />
+        <Stat label="Average margin" value={`${averageMargin}%`} detail="Default price minus estimated cost" icon={BadgeDollarSign} />
+        <Stat label="Pricebook value" value={currency.format(totalDefaultValue)} detail="Sum of default prices" icon={BarChart3} />
+      </div>
+      <Section title="Pricebook" kicker="Default services, packages, add-ons, and cost estimates" action={<button className="primary-button" onClick={onItemCreate}>Add service</button>}>
+        <DataTable>
+          <table className="data-table">
+            <thead><tr><th>Service</th><th>Category</th><th>Description</th><th>Price</th><th>Cost</th><th>Margin</th></tr></thead>
+            <tbody>
+              {items.map((item) => {
+                const margin = item.defaultPrice ? Math.round(((item.defaultPrice - item.estimatedCost) / item.defaultPrice) * 100) : 0;
+                return (
+                  <tr key={item.id}>
+                    <td><input value={item.name} onChange={(event) => onItemUpdate(item.id, { name: event.target.value })} /></td>
+                    <td><input value={item.category} onChange={(event) => onItemUpdate(item.id, { category: event.target.value })} /></td>
+                    <td><input value={item.description} onChange={(event) => onItemUpdate(item.id, { description: event.target.value })} /></td>
+                    <td>{moneyInput(item.defaultPrice, (value) => onItemUpdate(item.id, { defaultPrice: value }))}</td>
+                    <td>{moneyInput(item.estimatedCost, (value) => onItemUpdate(item.id, { estimatedCost: value }))}</td>
+                    <td><Badge status={`${margin}%`} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </DataTable>
+      </Section>
+    </div>
+  );
+}
+
 function Plans({ customers, plans, onPlanUpdate, onPlanCreate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void; onPlanCreate: (input: AddServicePlanInput) => Promise<void> }) {
   const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
   const plan = plans.find((item) => item.id === selectedId) ?? plans[0];
@@ -1075,13 +1350,75 @@ The Powerwashing Pros: ______________________________`;
   );
 }
 
-function Reports({ customers, jobs, invoices, expenses, leads }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[] }) {
+function Reports({ customers, jobs, invoices, expenses, leads, estimates }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[]; estimates: Estimate[] }) {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const revenue = revenueByDay(jobs);
   const maxRevenue = Math.max(...revenue.map((item) => item.revenue), 1);
   const averageJob = jobs.length ? jobs.reduce((sum, job) => sum + job.price, 0) / jobs.length : 0;
   const repeatStats = repeatCustomerStats(customers, jobs);
-  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} /><Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} /><Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomers} customers are active Recurring Jobs plans`} icon={Users} /></div><div className="grid gap-4 xl:grid-cols-2"><Section title="Revenue over time" kicker="Daily and monthly revenue"><div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div></Section><Section title="Most common services" kicker="Service types and revenue"><DataTable><table className="data-table"><thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th></tr></thead><tbody>{serviceBreakdown(jobs).map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td></tr>)}</tbody></table></DataTable></Section><Section title="Best customers" kicker="Spend and retention"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div></Section><Section title="Finance mix" kicker="Invoices, expenses, lead conversion"><div className="grid gap-3 sm:grid-cols-2"><div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div><div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div><div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div><div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div><div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div></div></Section></div></div>;
+  const pipeline = estimatePipeline(estimates);
+  const monthly = monthlyRevenueBreakdown(jobs, expenses);
+  const sources = leadSourceBreakdown(leads);
+  const serviceProfit = serviceProfitBreakdown(jobs, expenses);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Jobs completed" value={`${metrics.completedJobs}`} detail={`${metrics.upcomingJobs} scheduled or active`} icon={CheckCircle2} />
+        <Stat label="Average job value" value={currency.format(averageJob)} detail="Across imported jobs" icon={BadgeDollarSign} />
+        <Stat label="Repeat customer rate" value={`${repeatStats.rate}%`} detail={`${repeatStats.repeatCustomers} of ${repeatStats.totalCustomers} customers are active Recurring Jobs plans`} icon={Users} />
+        <Stat label="Estimate close rate" value={`${pipeline.closeRate}%`} detail={`${currency.format(pipeline.approvedValue)} approved quote value`} icon={BarChart3} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Section title="Revenue over time" kicker="Daily job value">
+          <div className="space-y-3">{revenue.map((item) => <div key={item.date}><div className="mb-1 flex justify-between text-sm"><span>{item.date}</span><strong>{currency.format(item.revenue)}</strong></div><div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-3 rounded-full bg-lagoon" style={{ width: `${Math.max(5, (item.revenue / maxRevenue) * 100)}%` }} /></div></div>)}</div>
+        </Section>
+        <Section title="Quote pipeline" kicker="Drafts, approvals, lost value">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="metric-mini"><span>Open quotes</span><strong>{currency.format(pipeline.openValue)}</strong></div>
+            <div className="metric-mini"><span>Approved quotes</span><strong>{currency.format(pipeline.approvedValue)}</strong></div>
+            <div className="metric-mini"><span>Lost quotes</span><strong>{currency.format(pipeline.lostValue)}</strong></div>
+          </div>
+        </Section>
+        <Section title="Service profitability" kicker="Revenue minus allocated expenses">
+          <DataTable>
+            <table className="data-table">
+              <thead><tr><th>Service</th><th>Jobs</th><th>Revenue</th><th>Est. cost</th><th>Est. profit</th></tr></thead>
+              <tbody>{serviceProfit.map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.count}</td><td>{currency.format(service.revenue)}</td><td>{currency.format(service.estimatedCost)}</td><td>{currency.format(service.estimatedProfit)}</td></tr>)}</tbody>
+            </table>
+          </DataTable>
+        </Section>
+        <Section title="Monthly performance" kicker="Revenue, expenses, profit">
+          <DataTable>
+            <table className="data-table">
+              <thead><tr><th>Month</th><th>Jobs</th><th>Revenue</th><th>Expenses</th><th>Profit</th></tr></thead>
+              <tbody>{monthly.map((item) => <tr key={item.month}><td>{item.month}</td><td>{item.jobs}</td><td>{currency.format(item.revenue)}</td><td>{currency.format(item.expenses)}</td><td>{currency.format(item.profit)}</td></tr>)}</tbody>
+            </table>
+          </DataTable>
+        </Section>
+        <Section title="Lead source performance" kicker="Which sources turn into jobs">
+          <DataTable>
+            <table className="data-table">
+              <thead><tr><th>Source</th><th>Leads</th><th>Won</th><th>Quoted</th><th>Est. value</th><th>Close rate</th></tr></thead>
+              <tbody>{sources.map((source) => <tr key={source.source}><td>{source.source}</td><td>{source.leads}</td><td>{source.won}</td><td>{source.quoted}</td><td>{currency.format(source.estimatedValue)}</td><td>{source.closeRate}%</td></tr>)}</tbody>
+            </table>
+          </DataTable>
+        </Section>
+        <Section title="Best customers" kicker="Spend and retention">
+          <div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="font-semibold text-ink dark:text-white">{customer.name}</span><span>{currency.format(customer.spent)}</span></div>)}</div>
+        </Section>
+        <Section title="Finance mix" kicker="Invoices, expenses, lead conversion">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="metric-mini"><span>Paid invoices</span><strong>{invoices.filter((invoice) => invoice.status === "paid").length}</strong></div>
+            <div className="metric-mini"><span>Tips earned</span><strong>{currency.format(metrics.totalTips)}</strong></div>
+            <div className="metric-mini"><span>Expenses</span><strong>{currency.format(metrics.expenses)}</strong></div>
+            <div className="metric-mini"><span>Lead conversion</span><strong>{metrics.conversionRate}%</strong></div>
+            <div className="metric-mini"><span>Jobs scheduled</span><strong>{metrics.upcomingJobs}</strong></div>
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
 }
 
 function Reviews({ reviews }: { reviews: ReviewRow[] }) {
