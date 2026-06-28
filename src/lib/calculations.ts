@@ -1,4 +1,4 @@
-import type { CrewMember, Customer, Estimate, Expense, Invoice, Job, Lead, PaymentMethod } from "../types/business";
+import type { CrewMember, Customer, Expense, Invoice, Job, Lead, PaymentMethod } from "../types/business";
 
 export const today = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Chicago",
@@ -15,14 +15,6 @@ export const currency = new Intl.NumberFormat("en-US", {
 
 export function amountOwed(invoice: Invoice) {
   return Math.max(invoice.price - invoice.discount + invoice.tip - invoice.amountPaid, 0);
-}
-
-export function estimateSubtotal(estimate: Estimate) {
-  return estimate.lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-}
-
-export function estimateTotal(estimate: Estimate) {
-  return Math.max(estimateSubtotal(estimate) - estimate.discount, 0);
 }
 
 export function jobsForCustomer(customerId: string, jobs: Job[]) {
@@ -116,65 +108,6 @@ export function serviceBreakdown(jobs: Job[]) {
       return acc;
     }, {}),
   );
-}
-
-export function serviceProfitBreakdown(jobs: Job[], expenses: Expense[]) {
-  const revenue = serviceBreakdown(jobs);
-  const expenseTotal = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const allocatedCostPerJob = jobs.length ? expenseTotal / jobs.length : 0;
-
-  return revenue.map((service) => ({
-    ...service,
-    estimatedCost: service.count * allocatedCostPerJob,
-    estimatedProfit: service.revenue - service.count * allocatedCostPerJob,
-  })).sort((a, b) => b.revenue - a.revenue);
-}
-
-export function monthlyRevenueBreakdown(jobs: Job[], expenses: Expense[]) {
-  const expenseByMonth = expenses.reduce<Record<string, number>>((acc, expense) => {
-    const month = expense.date.slice(0, 7);
-    acc[month] = (acc[month] ?? 0) + expense.amount;
-    return acc;
-  }, {});
-
-  return Object.values(
-    jobs.reduce<Record<string, { month: string; jobs: number; revenue: number; expenses: number; profit: number }>>((acc, job) => {
-      const month = job.date.slice(0, 7);
-      acc[month] ??= { month, jobs: 0, revenue: 0, expenses: expenseByMonth[month] ?? 0, profit: 0 };
-      acc[month].jobs += 1;
-      acc[month].revenue += jobRevenue(job);
-      acc[month].profit = acc[month].revenue - acc[month].expenses;
-      return acc;
-    }, {}),
-  ).sort((a, b) => b.month.localeCompare(a.month));
-}
-
-export function leadSourceBreakdown(leads: Lead[]) {
-  return Object.values(
-    leads.reduce<Record<string, { source: string; leads: number; won: number; quoted: number; estimatedValue: number; closeRate: number }>>((acc, lead) => {
-      acc[lead.source] ??= { source: lead.source, leads: 0, won: 0, quoted: 0, estimatedValue: 0, closeRate: 0 };
-      acc[lead.source].leads += 1;
-      acc[lead.source].estimatedValue += lead.estimatedValue;
-      if (lead.status === "won" || lead.status === "scheduled") acc[lead.source].won += 1;
-      if (lead.status === "quoted") acc[lead.source].quoted += 1;
-      acc[lead.source].closeRate = Math.round((acc[lead.source].won / acc[lead.source].leads) * 100);
-      return acc;
-    }, {}),
-  ).sort((a, b) => b.estimatedValue - a.estimatedValue);
-}
-
-export function estimatePipeline(estimates: Estimate[]) {
-  const open = estimates.filter((estimate) => estimate.status === "draft" || estimate.status === "sent");
-  const approved = estimates.filter((estimate) => estimate.status === "approved" || estimate.status === "scheduled" || estimate.status === "invoiced");
-  const lost = estimates.filter((estimate) => estimate.status === "lost");
-  const sent = estimates.filter((estimate) => estimate.status !== "draft");
-
-  return {
-    openValue: open.reduce((sum, estimate) => sum + estimateTotal(estimate), 0),
-    approvedValue: approved.reduce((sum, estimate) => sum + estimateTotal(estimate), 0),
-    lostValue: lost.reduce((sum, estimate) => sum + estimateTotal(estimate), 0),
-    closeRate: sent.length ? Math.round((approved.length / sent.length) * 100) : 0,
-  };
 }
 
 export function paymentMethodTotals(jobs: Job[]) {
