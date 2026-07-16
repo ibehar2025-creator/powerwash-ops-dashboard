@@ -131,6 +131,25 @@ function dateLabel(date: string, options: Intl.DateTimeFormatOptions = { weekday
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", ...options }).format(new Date(`${date}T12:00:00`));
 }
 
+function monthlyRunRateProjection(jobs: Job[]) {
+  const eligibleJobs = jobs.filter((job) => job.status !== "canceled" && job.price > 0);
+  const currentMonth = today.slice(0, 7);
+  const months = Array.from(new Set(eligibleJobs.map((job) => job.date.slice(0, 7)))).sort();
+  const targetMonth = months.includes(currentMonth) ? currentMonth : months.find((month) => month > currentMonth) ?? months[months.length - 1] ?? currentMonth;
+  const monthJobs = eligibleJobs.filter((job) => job.date.startsWith(targetMonth));
+  const bookedRevenue = monthJobs.reduce((sum, job) => sum + job.price + job.tipAmount, 0);
+  const bookedDays = new Set(monthJobs.map((job) => job.date)).size;
+  const [, month] = targetMonth.split("-").map(Number);
+  const daysInMonth = new Date(Number(targetMonth.slice(0, 4)), month, 0).getDate();
+  const averageDailyRevenue = bookedDays ? bookedRevenue / bookedDays : 0;
+
+  return {
+    month: dateLabel(`${targetMonth}-01`, { month: "long", year: "numeric" }),
+    bookedDays,
+    value: averageDailyRevenue * daysInMonth,
+  };
+}
+
 function calendarDaysForMode(mode: "day" | "week" | "month", anchorDate: string) {
   if (mode === "day") return [{ label: dateLabel(anchorDate, { weekday: "long" }), date: anchorDate }];
   const length = mode === "week" ? 7 : 30;
@@ -499,7 +518,7 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} reviews={reviews} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
+            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} invoices={invoices} expenses={expenses} leads={leads} onJobClick={setSelectedJob} onClientJobCreate={createClientJob} />}
             {activeTab === "leads" && <Leads leads={leads} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} onJobClick={setSelectedJob} onJobUpdate={updateJob} onClientJobCreate={createClientJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} onJobClick={setSelectedJob} />}
@@ -517,11 +536,11 @@ export default function App() {
   );
 }
 
-function Dashboard({ customers, jobs, invoices, expenses, leads, reviews, onJobClick, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[]; reviews: ReviewRow[]; onJobClick: (job: Job) => void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
+function Dashboard({ customers, jobs, invoices, expenses, leads, onJobClick, onClientJobCreate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; leads: Lead[]; onJobClick: (job: Job) => void; onClientJobCreate: (input: AddClientJobInput) => Promise<void> }) {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, []);
   const upcoming = jobs.filter((job) => job.status === "scheduled" || job.status === "in progress").slice(0, 6);
-  const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
-  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Total price of jobs scheduled today" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(metrics.dailyPay)} detail="Crew payroll is not configured" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Month-to-date job value" icon={BarChart3} /><Stat label="Projected monthly" value={currency.format(metrics.projectedMonthlyRevenue)} detail="Includes upcoming jobs this month" icon={Sparkles} /><Stat label="Total booked income" value={currency.format(metrics.totalBookedIncome)} detail="All non-canceled jobs, including future jobs" icon={BadgeDollarSign} /><Stat label="Expenses" value={currency.format(metrics.expenses)} detail="From the Expenses sheet" icon={CreditCard} /><Stat label="Reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} /></div></Section><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></button>)}</div></Section><AddClientJobForm onCreate={onClientJobCreate} /></div></div>;
+  const runRate = monthlyRunRateProjection(jobs);
+  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Total price of jobs scheduled today" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(metrics.dailyPay)} detail="Crew payroll is not configured" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Month-to-date job value" icon={BarChart3} /><Stat label="Projected monthly" value={currency.format(metrics.projectedMonthlyRevenue)} detail="Includes upcoming jobs this month" icon={Sparkles} /><Stat label="Total booked income" value={currency.format(metrics.totalBookedIncome)} detail="All non-canceled jobs, including future jobs" icon={BadgeDollarSign} /><Stat label="Expenses" value={currency.format(metrics.expenses)} detail="From the Expenses sheet" icon={CreditCard} /><Stat label="Projected run rate" value={currency.format(runRate.value)} detail={`${runRate.month}: average from ${runRate.bookedDays} booked job days`} icon={BarChart3} /></div></Section><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address || "No address listed"}</p></button>)}</div></Section><AddClientJobForm onCreate={onClientJobCreate} /></div></div>;
 }
 
 function AddClientJobForm({ onCreate }: { onCreate: (input: AddClientJobInput) => Promise<void> }) {
