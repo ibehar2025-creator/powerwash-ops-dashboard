@@ -57,14 +57,6 @@ select {
   @apply border-b border-slate-100 last:border-0 dark:border-slate-800;
 }
 
-.data-table tbody tr.clickable-row {
-  @apply cursor-pointer transition hover:bg-mist/60 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-lagoon dark:hover:bg-slate-800/70 dark:focus:ring-cyan-300;
-}
-
-.job-link {
-  @apply text-left font-semibold text-lagoon underline-offset-2 hover:underline dark:text-cyan-300;
-}
-
 .icon-button {
   @apply inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-cyan-300 dark:hover:text-cyan-200;
 }
@@ -79,7 +71,11 @@ select {
 }
 
 .primary-button {
-  @apply gap-2 bg-lagoon text-white hover:bg-marine disabled:cursor-not-allowed disabled:opacity-60;
+  @apply bg-lagoon text-white hover:bg-marine;
+}
+
+.photo-chip {
+  @apply mr-1 inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300;
 }
 
 .segmented {
@@ -92,14 +88,6 @@ select {
 
 .segmented button.active {
   @apply bg-lagoon text-white;
-}
-
-.calendar-toolbar {
-  @apply flex flex-wrap items-center justify-end gap-2;
-}
-
-.calendar-nav {
-  @apply inline-flex items-center gap-2;
 }
 
 .calendar-grid {
@@ -164,8 +152,8 @@ select {
   @apply mt-1 block text-sm text-ink dark:text-white;
 }
 
-.contract-preview {
-  @apply max-h-[620px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200;
+.photo-box {
+  @apply grid h-36 place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400;
 }
 
 @media (max-width: 640px) {

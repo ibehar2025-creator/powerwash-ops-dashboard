@@ -1,4 +1,4 @@
-# PowerWash Ops Dashboard
+# The Powerwashing Pros Dashboard
 
 A clean full-stack-ready React, TypeScript, and Tailwind CSS dashboard for running a pressure washing business. The current version uses local mock data, with data boundaries and comments in place so jobs, customers, invoices, payments, and settings can later move to a database/API.
 
@@ -85,8 +85,43 @@ npm install && npm run build
 Start command:
 
 ```bash
-npm run preview -- --host 0.0.0.0 --port $PORT
+npm start
 ```
+
+## Database
+
+The app now includes a Render/Postgres-ready backend in `server/`.
+
+1. Create a PostgreSQL database in Render.
+2. Copy its internal database URL.
+3. Add it to the dashboard web service as:
+
+```bash
+DATABASE_URL=postgresql://...
+NODE_ENV=production
+```
+
+4. Run the migration once:
+
+```bash
+npm run db:migrate
+```
+
+5. Import the current Google Sheets snapshot once:
+
+```bash
+SHEETS_SYNC_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec npm run db:seed:sheets
+```
+
+The schema is in `server/schema.sql`. The backend exposes:
+
+- `GET /api/bootstrap`
+- `PATCH /api/leads/:id`
+- `PATCH /api/jobs/:id`
+- `PATCH /api/invoices/:id`
+- `PATCH /api/service-plans/:id`
+
+The browser should never receive the database password. Render keeps `DATABASE_URL` server-side.
 
 The app was developed with:
 
