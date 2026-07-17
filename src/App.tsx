@@ -197,18 +197,23 @@ function DataTable({ children }: { children: ReactNode }) {
 }
 
 function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job[] }) {
-  const chartData = jobs
+  const completedJobs = jobs
     .filter((job) => job.status === "completed")
-    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
-    .map((job) => ({
-      date: job.date,
-      customer: findCustomer(customers, job.customerId).name,
-      revenue: job.price,
-      service: job.serviceType,
-    }));
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  const revenueByDate = completedJobs.reduce((totals, job) => {
+    totals.set(job.date, (totals.get(job.date) ?? 0) + job.price);
+    return totals;
+  }, new Map<string, number>());
+  let cumulativeRevenue = 0;
+  const chartData = Array.from(revenueByDate.entries()).map(([date, revenue]) => {
+    cumulativeRevenue += revenue;
+    return { date, revenue: cumulativeRevenue };
+  });
+  const totalRevenue = chartData.at(-1)?.revenue ?? 0;
+  const completedCustomerCount = new Set(completedJobs.map((job) => findCustomer(customers, job.customerId).name)).size;
 
   return (
-    <Section title="Job Revenue Over Time" kicker="Completed job revenue">
+    <Section title="Job Revenue Over Time" kicker="Cumulative completed revenue">
       {chartData.length ? (
         <div className="h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -217,11 +222,11 @@ function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job
               <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={22} />
               <YAxis tickFormatter={(value) => currency.format(Number(value))} tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} axisLine={false} width={64} />
               <Tooltip
-                formatter={(value) => [currency.format(Number(value)), "Revenue"]}
-                labelFormatter={(label) => `Job date: ${label}`}
+                formatter={(value) => [currency.format(Number(value)), "Total Revenue"]}
+                labelFormatter={(label) => `Through: ${label}`}
                 contentStyle={{ borderRadius: 8, borderColor: "#dbe5ea", boxShadow: "0 18px 40px rgba(21, 33, 47, 0.08)" }}
               />
-              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#087f8c" strokeWidth={3} dot={{ r: 4, fill: "#087f8c", strokeWidth: 2, stroke: "#ffffff" }} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="revenue" name="Total Revenue" stroke="#087f8c" strokeWidth={3} dot={{ r: 4, fill: "#087f8c", strokeWidth: 2, stroke: "#ffffff" }} activeDot={{ r: 6 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -231,9 +236,9 @@ function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job
         </div>
       )}
       <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-3">
-        <span>{chartData.length} completed jobs</span>
-        <span>{currency.format(chartData.reduce((sum, item) => sum + item.revenue, 0))} completed revenue</span>
-        <span>Sorted by job date ascending</span>
+        <span>{completedJobs.length} completed jobs</span>
+        <span>{currency.format(totalRevenue)} total completed revenue</span>
+        <span>Running total by date across {completedCustomerCount} customers</span>
       </div>
     </Section>
   );
