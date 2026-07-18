@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, ReactNode } from "react";
 import {
   BadgeDollarSign,
@@ -48,7 +48,7 @@ import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePl
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
 type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "plans" | "reviews";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[] }>;
-type SyncOptions = { background?: boolean; showSkeleton?: boolean };
+type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
@@ -202,15 +202,15 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
   const [syncing, setSyncing] = useState(false);
   const [showCalendarSkeleton, setShowCalendarSkeleton] = useState(false);
+  const calendarSkeletonShown = useRef(false);
+  const calendarSkeletonTimer = useRef<number | null>(null);
   const [currentDate, setCurrentDate] = useState(() => isoToday());
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const activeLabel = useMemo(() => tabs.find((tab) => tab.id === activeTab)?.label ?? "Dashboard", [activeTab]);
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
 
-  const syncSheets = useCallback(async ({ background = false, showSkeleton = false }: SyncOptions = {}) => {
-    const syncStartedAt = Date.now();
+  const syncSheets = useCallback(async ({ background = false }: SyncOptions = {}) => {
     if (!background) setSyncing(true);
-    if (showSkeleton) setShowCalendarSkeleton(true);
     if (!background) setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
     try {
       let payload = await syncSheetsToDatabase() as SyncPayload | null;
@@ -230,11 +230,6 @@ export default function App() {
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
     } finally {
-      if (showSkeleton) {
-        const remainingSkeletonTime = 500 - (Date.now() - syncStartedAt);
-        if (remainingSkeletonTime > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingSkeletonTime));
-        setShowCalendarSkeleton(false);
-      }
       if (!background) setSyncing(false);
     }
   }, [syncEndpoint]);
@@ -267,13 +262,14 @@ export default function App() {
 
   useEffect(() => {
     if (!syncEndpoint) return;
-    const skeletonStorageKey = "powerwashing-calendar-initial-skeleton-shown";
-    const showInitialSkeleton = window.sessionStorage.getItem(skeletonStorageKey) !== "true";
-    if (showInitialSkeleton) window.sessionStorage.setItem(skeletonStorageKey, "true");
-    void syncSheets({ showSkeleton: showInitialSkeleton });
+    void syncSheets({ background: true });
     const interval = window.setInterval(() => void syncSheets({ background: true }), 60_000);
     return () => window.clearInterval(interval);
   }, [syncEndpoint, syncSheets]);
+
+  useEffect(() => () => {
+    if (calendarSkeletonTimer.current !== null) window.clearTimeout(calendarSkeletonTimer.current);
+  }, []);
 
   function updateJob(jobId: string, patch: Partial<Job>) {
     setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...patch } : job));
@@ -297,6 +293,11 @@ export default function App() {
   }
 
   function chooseTab(tabId: TabId) {
+    if (tabId === "calendar" && !calendarSkeletonShown.current) {
+      calendarSkeletonShown.current = true;
+      setShowCalendarSkeleton(true);
+      calendarSkeletonTimer.current = window.setTimeout(() => setShowCalendarSkeleton(false), 500);
+    }
     setActiveTab(tabId);
     setMobileMenuOpen(false);
   }
