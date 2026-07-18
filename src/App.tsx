@@ -48,6 +48,7 @@ import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePl
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
 type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "plans" | "reviews";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[] }>;
+type SyncOptions = { background?: boolean; showSkeleton?: boolean };
 type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType }[] = [
@@ -200,21 +201,18 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
   const [syncing, setSyncing] = useState(false);
+  const [showCalendarSkeleton, setShowCalendarSkeleton] = useState(false);
   const [currentDate, setCurrentDate] = useState(() => isoToday());
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const activeLabel = useMemo(() => tabs.find((tab) => tab.id === activeTab)?.label ?? "Dashboard", [activeTab]);
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
 
-  const syncSheets = useCallback(async (showNoEndpointMessage = true) => {
+  const syncSheets = useCallback(async ({ background = false, showSkeleton = false }: SyncOptions = {}) => {
     const syncStartedAt = Date.now();
-    if (!syncEndpoint && showNoEndpointMessage) {
-      setSyncStatus("Syncing through the database...");
-    } else if (!syncEndpoint) {
-      if (showNoEndpointMessage) setSyncStatus("Live sync needs VITE_SHEETS_SYNC_URL on Render. Current data is the latest bundled import.");
-    }
+    if (!background) setSyncing(true);
+    if (showSkeleton) setShowCalendarSkeleton(true);
+    if (!background) setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
     try {
-      setSyncing(true);
-      setSyncStatus("Syncing Google Sheets...");
       let payload = await syncSheetsToDatabase() as SyncPayload | null;
       if (!payload && syncEndpoint) {
         const response = await fetch(syncEndpoint);
@@ -232,9 +230,12 @@ export default function App() {
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
     } finally {
-      const remainingSkeletonTime = 500 - (Date.now() - syncStartedAt);
-      if (remainingSkeletonTime > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingSkeletonTime));
-      setSyncing(false);
+      if (showSkeleton) {
+        const remainingSkeletonTime = 500 - (Date.now() - syncStartedAt);
+        if (remainingSkeletonTime > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingSkeletonTime));
+        setShowCalendarSkeleton(false);
+      }
+      if (!background) setSyncing(false);
     }
   }, [syncEndpoint]);
 
@@ -266,8 +267,8 @@ export default function App() {
 
   useEffect(() => {
     if (!syncEndpoint) return;
-    void syncSheets(false);
-    const interval = window.setInterval(() => void syncSheets(false), 60_000);
+    void syncSheets({ showSkeleton: true });
+    const interval = window.setInterval(() => void syncSheets({ background: true }), 60_000);
     return () => window.clearInterval(interval);
   }, [syncEndpoint, syncSheets]);
 
@@ -331,7 +332,7 @@ export default function App() {
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
             {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} currentDate={currentDate} onJobClick={setSelectedJob} onJobUpdate={updateJob} />}
-            {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} syncing={syncing} onJobClick={setSelectedJob} />}
+            {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
           </div>
@@ -362,7 +363,7 @@ function Jobs({ customers, jobs, currentDate, onJobClick, onJobUpdate }: { custo
   return <Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={jobDisplayStatus(job, currentDate)} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><span className="photo-chip">Before</span><span className="photo-chip">After</span></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section>;
 }
 
-function Calendar({ customers, jobs, currentDate, syncing, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; syncing: boolean; onJobClick: (job: Job) => void }) {
+function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void }) {
   const [mode, setMode] = useState<"day" | "week" | "month">("week");
   const [anchorIso, setAnchorIso] = useState(currentDate);
   const anchorDate = dateFromIso(anchorIso);
@@ -371,7 +372,7 @@ function Calendar({ customers, jobs, currentDate, syncing, onJobClick }: { custo
     const next = mode === "month" ? addMonths(anchorDate, direction) : addDays(anchorDate, direction * (mode === "week" ? 7 : 1));
     setAnchorIso(isoFromDate(next));
   };
-  if (syncing) {
+  if (loading) {
     return (
       <Section
         title="Scheduling calendar"
