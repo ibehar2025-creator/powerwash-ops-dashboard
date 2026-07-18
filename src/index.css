@@ -186,7 +186,7 @@ select {
 }
 
 @media (max-width: 640px) {
-  .daily-pay-stat {
+  .mobile-hidden-stat {
     display: none;
   }
 

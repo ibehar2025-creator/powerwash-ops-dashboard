@@ -171,7 +171,7 @@ function Section({ title, kicker, action, children }: { title: string; kicker?: 
 
 function Stat({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: ElementType }) {
   return (
-    <Card className={cx("min-h-[122px]", label === "Daily pay" && "daily-pay-stat")}>
+    <Card className={cx("min-h-[122px]", (label === "Daily pay" || label === "Past due jobs") && "mobile-hidden-stat")}>
       <div className="flex items-start justify-between gap-3">
         <div><p className="text-sm text-slate-500 dark:text-slate-400">{label}</p><p className="mt-2 text-2xl font-bold text-ink dark:text-white">{value}</p></div>
         <div className="grid h-10 w-10 place-items-center rounded-lg bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"><Icon size={20} /></div>
