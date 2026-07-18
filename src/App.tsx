@@ -22,15 +22,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import {
   customers as importedCustomers,
   expenses,
   invoices as importedInvoices,
@@ -196,49 +187,6 @@ function DataTable({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">{children}</div>;
 }
 
-function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job[] }) {
-  const chartData = jobs
-    .filter((job) => job.status === "completed")
-    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
-    .map((job) => ({
-      date: job.date,
-      customer: findCustomer(customers, job.customerId).name,
-      revenue: job.price,
-      service: job.serviceType,
-    }));
-
-  return (
-    <Section title="Job Revenue Over Time" kicker="Completed job revenue">
-      {chartData.length ? (
-        <div className="h-[320px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 12, right: 18, bottom: 8, left: 0 }}>
-              <CartesianGrid stroke="#dbe5ea" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={22} />
-              <YAxis tickFormatter={(value) => currency.format(Number(value))} tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} axisLine={false} width={64} />
-              <Tooltip
-                formatter={(value) => [currency.format(Number(value)), "Revenue"]}
-                labelFormatter={(label) => `Job date: ${label}`}
-                contentStyle={{ borderRadius: 8, borderColor: "#dbe5ea", boxShadow: "0 18px 40px rgba(21, 33, 47, 0.08)" }}
-              />
-              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#087f8c" strokeWidth={3} dot={{ r: 4, fill: "#087f8c", strokeWidth: 2, stroke: "#ffffff" }} activeDot={{ r: 6 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      ) : (
-        <div className="grid min-h-[220px] place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
-          No completed job revenue to chart yet.
-        </div>
-      )}
-      <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-3">
-        <span>{chartData.length} completed jobs</span>
-        <span>{currency.format(chartData.reduce((sum, item) => sum + item.revenue, 0))} completed revenue</span>
-        <span>Sorted by job date ascending</span>
-      </div>
-    </Section>
-  );
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -398,7 +346,7 @@ function Dashboard({ customers, jobs, leads, invoices, reviews, currentDate, onJ
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const upcoming = jobs.filter((job) => isUpcomingJob(job, currentDate)).slice(0, 6);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
-  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Payments collected today" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(0)} detail="No crew payroll set up yet" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Past due jobs" value={`${metrics.pastDueJobs}`} detail={`${currency.format(metrics.unpaidInvoiceTotal)} owed`} icon={FileText} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="June collected revenue and tips" icon={BarChart3} /><Stat label="Unpaid invoices" value={`${metrics.unpaidInvoiceCount}`} detail="Unpaid, partial, and past due" icon={ReceiptText} /><Stat label="Total tips" value={currency.format(metrics.totalTips)} detail="Tracked across all completed jobs" icon={Sparkles} /><Stat label="Reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} /></div></Section><JobRevenueChart customers={customers} jobs={jobs} /><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address}</p></button>)}</div></Section><Section title="Customer insights" kicker="Retention signals"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><div><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{customer.insights.join(" / ")}</p></div><p className="font-semibold text-lagoon dark:text-cyan-300">{currency.format(customer.spent)}</p></div>)}</div></Section></div></div>;
+  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Payments collected today" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(0)} detail="No crew payroll set up yet" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Past due jobs" value={`${metrics.pastDueJobs}`} detail={`${currency.format(metrics.unpaidInvoiceTotal)} owed`} icon={FileText} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="June collected revenue and tips" icon={BarChart3} /><Stat label="Unpaid invoices" value={`${metrics.unpaidInvoiceCount}`} detail="Unpaid, partial, and past due" icon={ReceiptText} /><Stat label="Total tips" value={currency.format(metrics.totalTips)} detail="Tracked across all completed jobs" icon={Sparkles} /><Stat label="Reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} /></div></Section><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address}</p></button>)}</div></Section><Section title="Customer insights" kicker="Retention signals"><div className="space-y-3">{bestCustomers(customers, jobs).map((customer) => <div key={customer.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><div><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{customer.insights.join(" / ")}</p></div><p className="font-semibold text-lagoon dark:text-cyan-300">{currency.format(customer.spent)}</p></div>)}</div></Section></div></div>;
 }
 
 function Customers({ customers, jobs, invoices, currentDate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; currentDate: string }) {
@@ -411,7 +359,7 @@ function Leads({ leads, onLeadUpdate }: { leads: Lead[]; onLeadUpdate: (leadId: 
 }
 
 function Jobs({ customers, jobs, currentDate, onJobClick, onJobUpdate }: { customers: Customer[]; jobs: Job[]; currentDate: string; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => void }) {
-  return <div className="space-y-4"><Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={jobDisplayStatus(job, currentDate)} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><span className="photo-chip">Before</span><span className="photo-chip">After</span></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section><JobRevenueChart customers={customers} jobs={jobs} /></div>;
+  return <Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={jobDisplayStatus(job, currentDate)} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><span className="photo-chip">Before</span><span className="photo-chip">After</span></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section>;
 }
 
 function Calendar({ customers, jobs, currentDate, syncing, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; syncing: boolean; onJobClick: (job: Job) => void }) {
