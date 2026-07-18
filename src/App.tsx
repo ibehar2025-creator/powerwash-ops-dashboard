@@ -210,8 +210,15 @@ export default function App() {
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
 
   const syncSheets = useCallback(async ({ background = false }: SyncOptions = {}) => {
-    if (!background) setSyncing(true);
-    if (!background) setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
+    if (!background) {
+      setSyncing(true);
+      setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
+      if (calendarSkeletonTimer.current !== null) {
+        window.clearTimeout(calendarSkeletonTimer.current);
+        calendarSkeletonTimer.current = null;
+      }
+      setShowCalendarSkeleton(true);
+    }
     try {
       let payload = await syncSheetsToDatabase() as SyncPayload | null;
       if (!payload && syncEndpoint) {
@@ -230,7 +237,10 @@ export default function App() {
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
     } finally {
-      if (!background) setSyncing(false);
+      if (!background) {
+        setSyncing(false);
+        setShowCalendarSkeleton(false);
+      }
     }
   }, [syncEndpoint]);
 
