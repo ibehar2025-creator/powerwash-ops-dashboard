@@ -76,7 +76,6 @@ export const customers: Customer[] = sheetRows.map((row, index) => {
     email: "Import email pending",
     address: row.address,
     notes: `Imported from Upcoming Jobs. Original date text: ${row.originalDate}. ${row.notes ?? "No notes in spreadsheet."}`,
-    subscribedPlanId: row.name === "Mark" ? "sp-001" : undefined,
     insights: completed ? ["repeat customer"] : row.date < "2026-06-08" ? ["overdue payment"] : ["inactive customer"],
   };
 });
@@ -137,19 +136,7 @@ export const payments: Payment[] = invoices
     date: invoice.issuedDate,
   }));
 
-export const servicePlans: ServicePlan[] = [
-  {
-    id: "sp-001",
-    type: "3-month",
-    customerId: customers.find((customer) => customer.name === "Mark")?.id ?? customers[0].id,
-    discountPct: 10,
-    renewalDate: "2026-09-01",
-    servicesIncluded: ["Recurring driveway cleaning", "Sidewalk refresh", "Quarterly reminder"],
-    price: 175,
-    paymentStatus: "unpaid",
-    notes: "Imported from Recurring Jobs sheet: Mark, $175, every 3 months, next predicted date September, phone 832-405-4440.",
-  },
-];
+export const servicePlans: ServicePlan[] = [];
 
 export const reviews: Review[] = [
   {

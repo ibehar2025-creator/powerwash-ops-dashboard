@@ -134,8 +134,10 @@ function calendarDays(anchorDate: Date, mode: "day" | "week" | "month"): Calenda
   });
 }
 
-function normalizePlans(plans: ServicePlan[]) {
-  return plans.map((plan) => ({ ...plan, type: "3-month" as unknown as ServicePlan["type"] }));
+function normalizePlans(plans: ServicePlan[], customers: Customer[]) {
+  const customerIds = new Set(customers.map((customer) => customer.id));
+  const subscribedPlanIds = new Set(customers.flatMap((customer) => customer.subscribedPlanId ? [customer.subscribedPlanId] : []));
+  return plans.filter((plan) => customerIds.has(plan.customerId) && subscribedPlanIds.has(plan.id));
 }
 
 function Badge({ status }: { status: string }) {
@@ -196,7 +198,7 @@ export default function App() {
   const [jobs, setJobs] = useState<Job[]>(importedJobs.map((job) => ({ ...job, crewIds: [] })));
   const [leads, setLeads] = useState<Lead[]>(importedLeads);
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
-  const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans));
+  const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans, importedCustomers));
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [darkMode, setDarkMode] = useState(false);
@@ -235,7 +237,7 @@ export default function App() {
       if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
       if (payload.leads) setLeads(payload.leads);
       if (payload.invoices) setInvoices(payload.invoices);
-      if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
+      if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans, payload.customers ?? []));
       if (payload.reviews) setReviews(payload.reviews);
       setSyncStatus(`Synced from Google Sheets at ${new Date().toLocaleTimeString()}.`);
     } catch (error) {
@@ -263,7 +265,7 @@ export default function App() {
         if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
         if (payload.leads) setLeads(payload.leads);
         if (payload.invoices) setInvoices(payload.invoices);
-        if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
+        if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans, payload.customers ?? importedCustomers));
         if (payload.reviews) setReviews(payload.reviews);
         setSyncStatus("Loaded saved database records.");
       })
@@ -428,6 +430,9 @@ function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { custo
 function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void }) {
   const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
   const plan = plans.find((item) => item.id === selectedId) ?? plans[0];
+  if (!plans.length) {
+    return <Section title="Service plans" kicker="Monthly, 3-month, and yearly plans"><div className="py-10 text-center"><h3 className="text-lg font-semibold text-ink dark:text-white">No active service plans</h3><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Customers appear here only after they are explicitly subscribed.</p></div></Section>;
+  }
   return <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]"><Section title="Service plans" kicker="Monthly, 3-month, and yearly plans"><div className="space-y-2">{plans.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", plan?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}><div className="flex items-center justify-between gap-3"><strong className="capitalize text-ink dark:text-white">{item.type} plan</strong><Badge status={item.paymentStatus} /></div><p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - renews {item.renewalDate}</p></button>)}</div></Section>{plan && <Section title="Plan editor" kicker="Subscription status, renewal, services, pricing"><div className="settings-grid"><Field label="Customer"><select value={plan.customerId} onChange={(event) => onPlanUpdate(plan.id, { customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Plan type"><select value={String(plan.type)} onChange={(event) => onPlanUpdate(plan.id, { type: event.target.value as unknown as ServicePlan["type"] })}>{planTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field><Field label="Plan price">{moneyInput(plan.price, (value) => onPlanUpdate(plan.id, { price: value }))}</Field><Field label="Discount %">{moneyInput(plan.discountPct, (value) => onPlanUpdate(plan.id, { discountPct: value }))}</Field><Field label="Renewal date"><input value={plan.renewalDate} onChange={(event) => onPlanUpdate(plan.id, { renewalDate: event.target.value })} /></Field><Field label="Payment status"><select value={plan.paymentStatus} onChange={(event) => onPlanUpdate(plan.id, { paymentStatus: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={plan.notes} onChange={(event) => onPlanUpdate(plan.id, { notes: event.target.value })} /></label></div><div className="mt-4 flex flex-wrap gap-2">{plan.servicesIncluded.map((service) => <span key={service} className="tag">{service}</span>)}</div></Section>}</div>;
 }
 
