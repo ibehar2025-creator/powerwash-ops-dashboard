@@ -106,6 +106,41 @@ select {
   @apply mb-2 flex w-full flex-col gap-1 rounded-lg border border-slate-200 bg-white p-3 text-left text-sm text-slate-600 transition hover:border-lagoon hover:shadow-soft dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300;
 }
 
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.skeleton-shimmer::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 70%), transparent);
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.dark .skeleton-shimmer {
+  background: #334155;
+}
+
+.dark .skeleton-shimmer::after {
+  background: linear-gradient(90deg, transparent, rgb(148 163 184 / 24%), transparent);
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after {
+    animation: none;
+  }
+}
+
 .metric-mini {
   @apply rounded-lg bg-slate-50 p-3 dark:bg-slate-800;
 }

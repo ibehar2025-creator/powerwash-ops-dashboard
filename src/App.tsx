@@ -378,21 +378,21 @@ function Calendar({ customers, jobs, currentDate, syncing, onJobClick }: { custo
         kicker="Date-matched spreadsheet schedule"
         action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}
       >
-        <div className="animate-pulse space-y-4" role="status" aria-live="polite" aria-label="Syncing calendar">
+        <div className="space-y-4" role="status" aria-live="polite" aria-label="Syncing calendar">
           <div className="flex items-center justify-between gap-4">
-            <div className="h-6 w-48 rounded bg-slate-200 dark:bg-slate-700" />
-            <div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-700" />
+            <div className="skeleton-shimmer h-6 w-48 rounded" />
+            <div className="skeleton-shimmer h-4 w-24 rounded" />
           </div>
           <div className={cx("calendar-grid", mode === "month" && "month-mode")}>
             {days.map((day, index) => (
               <div key={day.date} className="calendar-day" aria-hidden="true">
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="h-5 w-20 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div className="h-3 w-10 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="skeleton-shimmer h-5 w-20 rounded" />
+                  <div className="skeleton-shimmer h-3 w-10 rounded" />
                 </div>
                 <div className="space-y-3">
-                  <div className="h-28 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  {mode !== "month" && index % 3 === 0 && <div className="h-20 rounded-lg bg-slate-100 dark:bg-slate-800" />}
+                  <div className="skeleton-shimmer h-28 rounded-lg" />
+                  {mode !== "month" && index % 3 === 0 && <div className="skeleton-shimmer h-20 rounded-lg" />}
                 </div>
               </div>
             ))}
