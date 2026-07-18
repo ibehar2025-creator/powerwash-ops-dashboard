@@ -197,23 +197,18 @@ function DataTable({ children }: { children: ReactNode }) {
 }
 
 function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job[] }) {
-  const completedJobs = jobs
+  const chartData = jobs
     .filter((job) => job.status === "completed")
-    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-  const revenueByDate = completedJobs.reduce((totals, job) => {
-    totals.set(job.date, (totals.get(job.date) ?? 0) + job.price);
-    return totals;
-  }, new Map<string, number>());
-  let cumulativeRevenue = 0;
-  const chartData = Array.from(revenueByDate.entries()).map(([date, revenue]) => {
-    cumulativeRevenue += revenue;
-    return { date, revenue: cumulativeRevenue };
-  });
-  const totalRevenue = chartData.at(-1)?.revenue ?? 0;
-  const completedCustomerCount = new Set(completedJobs.map((job) => findCustomer(customers, job.customerId).name)).size;
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+    .map((job) => ({
+      date: job.date,
+      customer: findCustomer(customers, job.customerId).name,
+      revenue: job.price,
+      service: job.serviceType,
+    }));
 
   return (
-    <Section title="Job Revenue Over Time" kicker="Cumulative completed revenue">
+    <Section title="Job Revenue Over Time" kicker="Completed job revenue">
       {chartData.length ? (
         <div className="h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -222,11 +217,11 @@ function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job
               <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={22} />
               <YAxis tickFormatter={(value) => currency.format(Number(value))} tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} axisLine={false} width={64} />
               <Tooltip
-                formatter={(value) => [currency.format(Number(value)), "Total Revenue"]}
-                labelFormatter={(label) => `Through: ${label}`}
+                formatter={(value) => [currency.format(Number(value)), "Revenue"]}
+                labelFormatter={(label) => `Job date: ${label}`}
                 contentStyle={{ borderRadius: 8, borderColor: "#dbe5ea", boxShadow: "0 18px 40px rgba(21, 33, 47, 0.08)" }}
               />
-              <Line type="monotone" dataKey="revenue" name="Total Revenue" stroke="#087f8c" strokeWidth={3} dot={{ r: 4, fill: "#087f8c", strokeWidth: 2, stroke: "#ffffff" }} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#087f8c" strokeWidth={3} dot={{ r: 4, fill: "#087f8c", strokeWidth: 2, stroke: "#ffffff" }} activeDot={{ r: 6 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -236,9 +231,9 @@ function JobRevenueChart({ customers, jobs }: { customers: Customer[]; jobs: Job
         </div>
       )}
       <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-3">
-        <span>{completedJobs.length} completed jobs</span>
-        <span>{currency.format(totalRevenue)} total completed revenue</span>
-        <span>Running total by date across {completedCustomerCount} customers</span>
+        <span>{chartData.length} completed jobs</span>
+        <span>{currency.format(chartData.reduce((sum, item) => sum + item.revenue, 0))} completed revenue</span>
+        <span>Sorted by job date ascending</span>
       </div>
     </Section>
   );
@@ -263,6 +258,7 @@ export default function App() {
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
 
   const syncSheets = useCallback(async (showNoEndpointMessage = true) => {
+    const syncStartedAt = Date.now();
     if (!syncEndpoint && showNoEndpointMessage) {
       setSyncStatus("Syncing through the database...");
     } else if (!syncEndpoint) {
@@ -288,6 +284,8 @@ export default function App() {
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
     } finally {
+      const remainingSkeletonTime = 500 - (Date.now() - syncStartedAt);
+      if (remainingSkeletonTime > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingSkeletonTime));
       setSyncing(false);
     }
   }, [syncEndpoint]);
@@ -380,7 +378,15 @@ export default function App() {
               </aside>
             </div>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">{activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} leads={leads} invoices={invoices} reviews={reviews} currentDate={currentDate} onJobClick={setSelectedJob} />}{activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}{activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}{activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} currentDate={currentDate} onJobClick={setSelectedJob} onJobUpdate={updateJob} />}{activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} onJobClick={setSelectedJob} />}{activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}{activeTab === "reviews" && <Reviews reviews={reviews} />}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
+            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} leads={leads} invoices={invoices} reviews={reviews} currentDate={currentDate} onJobClick={setSelectedJob} />}
+            {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
+            {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
+            {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} currentDate={currentDate} onJobClick={setSelectedJob} onJobUpdate={updateJob} />}
+            {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} syncing={syncing} onJobClick={setSelectedJob} />}
+            {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
+            {activeTab === "reviews" && <Reviews reviews={reviews} />}
+          </div>
         </main>
       </div>
       {selectedJob && <JobModal customers={customers} job={selectedJob} onClose={() => setSelectedJob(null)} />}
@@ -408,7 +414,7 @@ function Jobs({ customers, jobs, currentDate, onJobClick, onJobUpdate }: { custo
   return <div className="space-y-4"><Section title="Jobs management" kicker="Schedule, completion, photos, and payments"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price / Paid / Tip</th><th>Payment</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={jobDisplayStatus(job, currentDate)} /></td><td>Unassigned</td><td>{currency.format(job.price)} / {currency.format(job.amountPaid)} / {currency.format(job.tipAmount)}</td><td><Badge status={job.paymentStatus} /></td><td><span className="photo-chip">Before</span><span className="photo-chip">After</span></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed", paymentStatus: "paid", amountPaid: job.price })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due", paymentStatus: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section><JobRevenueChart customers={customers} jobs={jobs} /></div>;
 }
 
-function Calendar({ customers, jobs, currentDate, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; onJobClick: (job: Job) => void }) {
+function Calendar({ customers, jobs, currentDate, syncing, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; syncing: boolean; onJobClick: (job: Job) => void }) {
   const [mode, setMode] = useState<"day" | "week" | "month">("week");
   const [anchorIso, setAnchorIso] = useState(currentDate);
   const anchorDate = dateFromIso(anchorIso);
@@ -417,6 +423,37 @@ function Calendar({ customers, jobs, currentDate, onJobClick }: { customers: Cus
     const next = mode === "month" ? addMonths(anchorDate, direction) : addDays(anchorDate, direction * (mode === "week" ? 7 : 1));
     setAnchorIso(isoFromDate(next));
   };
+  if (syncing) {
+    return (
+      <Section
+        title="Scheduling calendar"
+        kicker="Date-matched spreadsheet schedule"
+        action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}
+      >
+        <div className="animate-pulse space-y-4" role="status" aria-live="polite" aria-label="Syncing calendar">
+          <div className="flex items-center justify-between gap-4">
+            <div className="h-6 w-48 rounded bg-slate-200 dark:bg-slate-700" />
+            <div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-700" />
+          </div>
+          <div className={cx("calendar-grid", mode === "month" && "month-mode")}>
+            {days.map((day, index) => (
+              <div key={day.date} className="calendar-day" aria-hidden="true">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="h-5 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="h-3 w-10 rounded bg-slate-200 dark:bg-slate-700" />
+                </div>
+                <div className="space-y-3">
+                  <div className="h-28 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  {mode !== "month" && index % 3 === 0 && <div className="h-20 rounded-lg bg-slate-100 dark:bg-slate-800" />}
+                </div>
+              </div>
+            ))}
+          </div>
+          <span className="sr-only">Syncing jobs from Google Sheets.</span>
+        </div>
+      </Section>
+    );
+  }
   return <Section title="Scheduling calendar" kicker="Date-matched spreadsheet schedule" action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{days.reduce((total, day) => total + jobs.filter((job) => job.date === day.date).length, 0)} jobs in view</p></div><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}</div>; })}</div></Section>;
 }
 
