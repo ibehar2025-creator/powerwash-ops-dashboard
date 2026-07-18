@@ -267,7 +267,10 @@ export default function App() {
 
   useEffect(() => {
     if (!syncEndpoint) return;
-    void syncSheets({ showSkeleton: true });
+    const skeletonStorageKey = "powerwashing-calendar-initial-skeleton-shown";
+    const showInitialSkeleton = window.sessionStorage.getItem(skeletonStorageKey) !== "true";
+    if (showInitialSkeleton) window.sessionStorage.setItem(skeletonStorageKey, "true");
+    void syncSheets({ showSkeleton: showInitialSkeleton });
     const interval = window.setInterval(() => void syncSheets({ background: true }), 60_000);
     return () => window.clearInterval(interval);
   }, [syncEndpoint, syncSheets]);
