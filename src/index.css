@@ -135,12 +135,6 @@ select {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .skeleton-shimmer::after {
-    animation: none;
-  }
-}
-
 .metric-mini {
   @apply rounded-lg bg-slate-50 p-3 dark:bg-slate-800;
 }
