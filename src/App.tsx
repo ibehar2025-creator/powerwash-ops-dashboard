@@ -66,6 +66,7 @@ const leadStatuses: LeadStatus[] = ["new", "contacted", "quoted", "scheduled", "
 const dayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
 const fullDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+const calendarSkeletonDurationMs = 1_500;
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -212,7 +213,7 @@ export default function App() {
   const syncSheets = useCallback(async ({ background = false }: SyncOptions = {}) => {
     const minimumManualSkeleton = background
       ? null
-      : new Promise<void>((resolve) => window.setTimeout(resolve, 900));
+      : new Promise<void>((resolve) => window.setTimeout(resolve, calendarSkeletonDurationMs));
     if (!background) {
       setSyncing(true);
       setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
@@ -310,7 +311,7 @@ export default function App() {
     if (tabId === "calendar" && !calendarSkeletonShown.current) {
       calendarSkeletonShown.current = true;
       setShowCalendarSkeleton(true);
-      calendarSkeletonTimer.current = window.setTimeout(() => setShowCalendarSkeleton(false), 500);
+      calendarSkeletonTimer.current = window.setTimeout(() => setShowCalendarSkeleton(false), calendarSkeletonDurationMs);
     }
     setActiveTab(tabId);
     setMobileMenuOpen(false);
