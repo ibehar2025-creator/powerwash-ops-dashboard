@@ -57,10 +57,11 @@ export function crewPay(member: CrewMember, jobs: Job[], targetDate = today) {
 }
 
 export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[], expenses: Expense[], crew: CrewMember[], targetDate = isoToday()) {
-  const todayJobs = jobs.filter((job) => job.date === targetDate);
-  const monthJobs = jobs.filter((job) => job.date.startsWith(targetDate.slice(0, 7)));
-  const dailyRevenue = todayJobs.reduce((sum, job) => sum + job.amountPaid, 0);
-  const monthlyRevenue = monthJobs.reduce((sum, job) => sum + job.amountPaid + job.tipAmount, 0);
+  const revenueJobs = jobs.filter((job) => job.status !== "canceled");
+  const todayJobs = revenueJobs.filter((job) => job.date === targetDate);
+  const monthJobs = revenueJobs.filter((job) => job.date.startsWith(targetDate.slice(0, 7)));
+  const dailyRevenue = todayJobs.reduce((sum, job) => sum + job.price, 0);
+  const monthlyRevenue = monthJobs.reduce((sum, job) => sum + job.price, 0);
   const totalTips = jobs.reduce((sum, job) => sum + job.tipAmount, 0);
   const unpaidInvoices = invoices.filter((invoice) => invoice.status !== "paid");
   const crewPayouts = crew.reduce((sum, member) => sum + crewPay(member, jobs, targetDate).weeklyPay, 0);
