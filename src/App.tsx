@@ -210,6 +210,9 @@ export default function App() {
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
 
   const syncSheets = useCallback(async ({ background = false }: SyncOptions = {}) => {
+    const minimumManualSkeleton = background
+      ? null
+      : new Promise<void>((resolve) => window.setTimeout(resolve, 900));
     if (!background) {
       setSyncing(true);
       setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
@@ -238,6 +241,7 @@ export default function App() {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
     } finally {
       if (!background) {
+        await minimumManualSkeleton;
         setSyncing(false);
         setShowCalendarSkeleton(false);
       }
