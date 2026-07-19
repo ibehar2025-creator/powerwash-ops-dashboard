@@ -134,10 +134,35 @@ function calendarDays(anchorDate: Date, mode: "day" | "week" | "month"): Calenda
   });
 }
 
-function normalizePlans(plans: ServicePlan[], customers: Customer[]) {
+function recurringCustomerName(plan: ServicePlan) {
+  return plan.notes.match(/Recurring Jobs sheet:\s*([^,]+)/i)?.[1]?.trim() || "Recurring customer";
+}
+
+function mergeRecurringCustomers(customers: Customer[], plans: ServicePlan[]) {
   const customerIds = new Set(customers.map((customer) => customer.id));
-  const subscribedPlanIds = new Set(customers.flatMap((customer) => customer.subscribedPlanId ? [customer.subscribedPlanId] : []));
-  return plans.filter((plan) => customerIds.has(plan.customerId) && subscribedPlanIds.has(plan.id));
+  const recurringCustomers = plans
+    .filter((plan) => !customerIds.has(plan.customerId))
+    .map<Customer>((plan) => ({
+      id: plan.customerId,
+      name: recurringCustomerName(plan),
+      phone: "",
+      email: "",
+      address: "",
+      notes: "Imported from the Recurring Jobs sheet.",
+      subscribedPlanId: plan.id,
+      insights: ["repeat customer"],
+    }));
+
+  return customers
+    .map((customer) => {
+      const linkedPlan = plans.find((plan) => plan.customerId === customer.id);
+      return linkedPlan ? { ...customer, subscribedPlanId: linkedPlan.id } : customer;
+    })
+    .concat(recurringCustomers);
+}
+
+function normalizePlans(plans: ServicePlan[]) {
+  return plans;
 }
 
 function Badge({ status }: { status: string }) {
@@ -198,7 +223,7 @@ export default function App() {
   const [jobs, setJobs] = useState<Job[]>(importedJobs.map((job) => ({ ...job, crewIds: [] })));
   const [leads, setLeads] = useState<Lead[]>(importedLeads);
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
-  const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans, importedCustomers));
+  const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans));
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [darkMode, setDarkMode] = useState(false);
@@ -233,11 +258,11 @@ export default function App() {
         payload = (await response.json()) as SyncPayload;
       }
       if (!payload) throw new Error("Live sync is not configured on this deployment.");
-      if (payload.customers) setCustomers(payload.customers);
+      if (payload.customers) setCustomers(mergeRecurringCustomers(payload.customers, payload.servicePlans ?? []));
       if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
       if (payload.leads) setLeads(payload.leads);
       if (payload.invoices) setInvoices(payload.invoices);
-      if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans, payload.customers ?? []));
+      if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
       if (payload.reviews) setReviews(payload.reviews);
       setSyncStatus(`Synced from Google Sheets at ${new Date().toLocaleTimeString()}.`);
     } catch (error) {
@@ -261,11 +286,11 @@ export default function App() {
     void loadDatabaseSnapshot()
       .then((payload) => {
         if (ignore || !payload) return;
-        if (payload.customers) setCustomers(payload.customers);
+        if (payload.customers) setCustomers(mergeRecurringCustomers(payload.customers, payload.servicePlans ?? []));
         if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
         if (payload.leads) setLeads(payload.leads);
         if (payload.invoices) setInvoices(payload.invoices);
-        if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans, payload.customers ?? importedCustomers));
+        if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
         if (payload.reviews) setReviews(payload.reviews);
         setSyncStatus("Loaded saved database records.");
       })
