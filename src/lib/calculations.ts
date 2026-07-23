@@ -1,4 +1,4 @@
-import type { CrewMember, Customer, Expense, Invoice, Job, Lead, PaymentMethod } from "../types/business";
+import type { CrewMember, Customer, Expense, Invoice, Job, Lead, PaymentMethod, ServicePlan } from "../types/business";
 
 export function isoToday(date = new Date()) {
   const year = date.getFullYear();
@@ -38,6 +38,22 @@ export function jobDisplayStatus(job: Job, targetDate = isoToday()): Job["status
 
 export function isUpcomingJob(job: Job, targetDate = isoToday()) {
   return (job.status === "scheduled" || job.status === "in progress") && job.date >= targetDate;
+}
+
+function recurringCyclesPerYear(plan: ServicePlan) {
+  const frequency = plan.notes.toLowerCase();
+
+  if (/quarterly|3 months?/.test(frequency)) return 4;
+  if (/4 months?/.test(frequency)) return 3;
+  if (/bi[- ]?annually|semi[- ]?annually|6 months?/.test(frequency)) return 2;
+  if (/monthly|1 month/.test(frequency)) return 12;
+  if (/yearly|annual|12 months?/.test(frequency)) return 1;
+
+  return { monthly: 12, "3-month": 4, "6-month": 2, yearly: 1 }[plan.type] ?? 1;
+}
+
+export function annualRecurringRevenue(plans: ServicePlan[]) {
+  return plans.reduce((sum, plan) => sum + Math.max(plan.price, 0) * recurringCyclesPerYear(plan), 0);
 }
 
 export function crewPay(member: CrewMember, jobs: Job[], targetDate = today) {
