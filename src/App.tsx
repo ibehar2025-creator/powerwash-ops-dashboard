@@ -42,11 +42,11 @@ import {
   jobsForCustomer,
   paymentHistory,
 } from "./lib/calculations";
-import { loadDatabaseSnapshot, saveJobPatch, saveLeadPatch, saveServicePlanPatch, syncSheetsToDatabase } from "./lib/api";
+import { loadDatabaseSnapshot, saveLeadPatch, saveServicePlanPatch, syncSheetsToDatabase } from "./lib/api";
 import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "plans" | "reviews";
+type TabId = "dashboard" | "customers" | "leads" | "calendar" | "plans" | "reviews";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[] }>;
 type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
@@ -55,7 +55,6 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "customers", label: "Customers", icon: Users },
   { id: "leads", label: "Leads", icon: Sparkles },
-  { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "reviews", label: "Reviews", icon: Star },
@@ -313,13 +312,6 @@ export default function App() {
     if (calendarSkeletonTimer.current !== null) window.clearTimeout(calendarSkeletonTimer.current);
   }, []);
 
-  function updateJob(jobId: string, patch: Partial<Job>) {
-    setJobs((current) => current.map((job) => job.id === jobId ? { ...job, ...patch } : job));
-    void saveJobPatch(jobId, patch).catch((error) => {
-      setSyncStatus(error instanceof Error ? error.message : "Job save failed.");
-    });
-  }
-
   function updateLead(leadId: string, patch: Partial<Lead>) {
     setLeads((current) => current.map((lead) => lead.id === leadId ? { ...lead, ...patch } : lead));
     void saveLeadPatch(leadId, patch).catch((error) => {
@@ -377,7 +369,6 @@ export default function App() {
             {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} leads={leads} invoices={invoices} reviews={reviews} currentDate={currentDate} onJobClick={setSelectedJob} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
-            {activeTab === "jobs" && <Jobs customers={customers} jobs={jobs} currentDate={currentDate} onJobClick={setSelectedJob} onJobUpdate={updateJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
@@ -403,10 +394,6 @@ function Customers({ customers, jobs, invoices, currentDate }: { customers: Cust
 function Leads({ leads, onLeadUpdate }: { leads: Lead[]; onLeadUpdate: (leadId: string, patch: Partial<Lead>) => void }) {
   const wins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
   return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><div className="space-y-2"><Badge status={lead.status} /><select value={lead.status} onChange={(event) => onLeadUpdate(lead.id, { status: event.target.value as LeadStatus })}>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
-}
-
-function Jobs({ customers, jobs, currentDate, onJobClick, onJobUpdate }: { customers: Customer[]; jobs: Job[]; currentDate: string; onJobClick: (job: Job) => void; onJobUpdate: (jobId: string, patch: Partial<Job>) => void }) {
-  return <Section title="Jobs management" kicker="Schedule, completion, and photos"><DataTable><table className="data-table"><thead><tr><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Assignment</th><th>Price</th><th>Photos</th><th>Actions</th></tr></thead><tbody>{jobs.map((job) => <tr key={job.id}><td>{job.date}<br />{job.time}</td><td><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{job.address}</p></td><td>{job.serviceType}<p className="text-xs text-slate-500 dark:text-slate-400">{job.notes}</p></td><td><Badge status={jobDisplayStatus(job, currentDate)} /></td><td>Unassigned</td><td>{currency.format(job.price)}</td><td><span className="photo-chip">Before</span><span className="photo-chip">After</span></td><td><div className="flex flex-wrap gap-2"><button className="icon-button" title="Mark complete" onClick={() => onJobUpdate(job.id, { status: "completed" })}><CheckCircle2 size={16} /></button><button className="icon-button" title="Mark past due" onClick={() => onJobUpdate(job.id, { status: "past due" })}><FileText size={16} /></button><button className="text-button" onClick={() => onJobClick(job)}>Details</button></div></td></tr>)}</tbody></table></DataTable></Section>;
 }
 
 function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void }) {
