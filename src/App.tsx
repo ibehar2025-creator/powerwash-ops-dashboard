@@ -74,6 +74,26 @@ function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function ThemeSwitch({ darkMode, onToggle }: { darkMode: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={cx("theme-switch", darkMode && "is-dark")}
+      onClick={onToggle}
+      aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+      aria-pressed={darkMode}
+      title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      <span className="theme-stars" aria-hidden="true"><i /><i /><i /></span>
+      <span className="theme-cloud" aria-hidden="true"><i /><i /></span>
+      <span className="theme-orb" aria-hidden="true">
+        <Sun className="theme-sun" size={18} strokeWidth={2.4} />
+        <Moon className="theme-moon" size={17} strokeWidth={2.4} />
+      </span>
+    </button>
+  );
+}
+
 function findCustomer(customers: Customer[], customerId: string) {
   return customers.find((customer) => customer.id === customerId) ?? customers[0];
 }
@@ -353,7 +373,7 @@ export default function App() {
                 <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="text-2xl font-bold text-ink dark:text-white">{activeLabel}</h1><p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p></div>
               </div>
-              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><button className="icon-button" onClick={() => setDarkMode(!darkMode)} title="Toggle theme">{darkMode ? <Sun size={18} /> : <Moon size={18} />}</button></div>
+              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /></div>
             </div>
           </header>
           {mobileMenuOpen && (
