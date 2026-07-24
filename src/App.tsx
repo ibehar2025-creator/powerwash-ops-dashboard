@@ -43,6 +43,7 @@ import {
   jobDisplayStatus,
   jobsForCustomer,
   paymentHistory,
+  recurringPlanType,
 } from "./lib/calculations";
 import { loadDatabaseSnapshot, saveLeadPatch, saveServicePlanPatch, syncSheetsToDatabase } from "./lib/api";
 import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan } from "./types/business";
@@ -62,7 +63,7 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "reviews", label: "Reviews", icon: Star },
 ];
 
-const planTypes = ["monthly", "3-month", "6-month", "yearly"];
+const planTypes = ["monthly", "3-month", "4-month", "6-month", "yearly"];
 const leadStatuses: LeadStatus[] = ["new", "contacted", "quoted", "scheduled", "won", "lost"];
 const dayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
@@ -163,11 +164,7 @@ function mergeRecurringCustomers(customers: Customer[], plans: ServicePlan[]) {
 }
 
 function normalizePlans(plans: ServicePlan[]): ServicePlan[] {
-  return plans.map((plan) => {
-    const frequency = plan.notes.toLowerCase();
-    const isSixMonth = /(?:6|six)[-\s]*months?|bi[-\s]?annually|semi[-\s]?annually/.test(frequency);
-    return isSixMonth ? { ...plan, type: "6-month" as const } : plan;
-  });
+  return plans.map((plan) => ({ ...plan, type: recurringPlanType(plan) }));
 }
 
 function Badge({ status }: { status: string }) {

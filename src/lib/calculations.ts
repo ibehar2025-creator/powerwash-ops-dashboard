@@ -40,16 +40,20 @@ export function isUpcomingJob(job: Job, targetDate = isoToday()) {
   return (job.status === "scheduled" || job.status === "in progress") && job.date >= targetDate;
 }
 
-function recurringCyclesPerYear(plan: ServicePlan) {
+export function recurringPlanType(plan: ServicePlan): ServicePlan["type"] {
   const frequency = plan.notes.toLowerCase();
 
-  if (/quarterly|3 months?/.test(frequency)) return 4;
-  if (/4 months?/.test(frequency)) return 3;
-  if (/bi[-\s]?annually|semi[-\s]?annually|(?:6|six)[-\s]*months?/.test(frequency)) return 2;
-  if (/monthly|1 month/.test(frequency)) return 12;
-  if (/yearly|annual|12 months?/.test(frequency)) return 1;
+  if (/quarterly|seasonal(?:ly)?|(?:3|three)[-\s]*months?/.test(frequency)) return "3-month";
+  if (/(?:4|four)[-\s]*months?/.test(frequency)) return "4-month";
+  if (/bi[-\s]?annual(?:ly)?|semi[-\s]?annual(?:ly)?|(?:6|six)[-\s]*months?/.test(frequency)) return "6-month";
+  if (/yearly|annual(?:ly)?|(?:1|one)[-\s]*(?:year|yr)s?|(?:12|twelve)[-\s]*months?/.test(frequency)) return "yearly";
+  if (/monthly|(?:1|one)[-\s]*months?/.test(frequency)) return "monthly";
 
-  return { monthly: 12, "3-month": 4, "6-month": 2, yearly: 1 }[plan.type] ?? 1;
+  return plan.type;
+}
+
+function recurringCyclesPerYear(plan: ServicePlan) {
+  return { monthly: 12, "3-month": 4, "4-month": 3, "6-month": 2, yearly: 1 }[recurringPlanType(plan)] ?? 1;
 }
 
 export function annualRecurringRevenue(plans: ServicePlan[]) {
