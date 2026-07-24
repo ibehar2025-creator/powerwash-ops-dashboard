@@ -45,7 +45,7 @@ function recurringCyclesPerYear(plan: ServicePlan) {
 
   if (/quarterly|3 months?/.test(frequency)) return 4;
   if (/4 months?/.test(frequency)) return 3;
-  if (/bi[- ]?annually|semi[- ]?annually|6 months?/.test(frequency)) return 2;
+  if (/bi[-\s]?annually|semi[-\s]?annually|(?:6|six)[-\s]*months?/.test(frequency)) return 2;
   if (/monthly|1 month/.test(frequency)) return 12;
   if (/yearly|annual|12 months?/.test(frequency)) return 1;
 

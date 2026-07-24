@@ -162,8 +162,12 @@ function mergeRecurringCustomers(customers: Customer[], plans: ServicePlan[]) {
     .concat(recurringCustomers);
 }
 
-function normalizePlans(plans: ServicePlan[]) {
-  return plans;
+function normalizePlans(plans: ServicePlan[]): ServicePlan[] {
+  return plans.map((plan) => {
+    const frequency = plan.notes.toLowerCase();
+    const isSixMonth = /(?:6|six)[-\s]*months?|bi[-\s]?annually|semi[-\s]?annually/.test(frequency);
+    return isSixMonth ? { ...plan, type: "6-month" as const } : plan;
+  });
 }
 
 function Badge({ status }: { status: string }) {
