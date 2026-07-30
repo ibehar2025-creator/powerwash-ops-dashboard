@@ -4,7 +4,6 @@ import {
   InfoWindow,
   Map,
   Marker,
-  useMap,
   useMapsLibrary,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
@@ -38,6 +37,7 @@ type Props = {
 
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 const defaultCenter = { lat: 29.7174, lng: -95.4307 };
+const jobCoordinateCacheKey = "powerwashing-pros-job-coordinate-cache-v1";
 const outcomes: SolicitationOutcome[] = ["visited", "no answer", "interested", "follow up", "not interested"];
 const outcomeColors: Record<SolicitationOutcome, string> = {
   visited: "#64748b",
@@ -62,26 +62,21 @@ function customerName(customers: Customer[], customerId: string) {
   return customers.find((customer) => customer.id === customerId)?.name ?? "Customer";
 }
 
-function FitMapToLocations({ positions }: { positions: google.maps.LatLngLiteral[] }) {
-  const map = useMap();
-  const fittedSignature = useRef("");
+function readJobCoordinateCache(): Record<string, Coordinates> {
+  try {
+    const saved = globalThis.localStorage?.getItem(jobCoordinateCacheKey);
+    return saved ? JSON.parse(saved) as Record<string, Coordinates> : {};
+  } catch {
+    return {};
+  }
+}
 
-  useEffect(() => {
-    if (!map || positions.length === 0) return;
-    const signature = positions.map((position) => `${position.lat.toFixed(5)},${position.lng.toFixed(5)}`).sort().join("|");
-    if (signature === fittedSignature.current) return;
-    fittedSignature.current = signature;
-    const bounds = new google.maps.LatLngBounds();
-    positions.forEach((position) => bounds.extend(position));
-    if (positions.length === 1) {
-      map.setCenter(positions[0]);
-      map.setZoom(17);
-      return;
-    }
-    map.fitBounds(bounds, 64);
-  }, [map, positions]);
-
-  return null;
+function writeJobCoordinateCache(cache: Record<string, Coordinates>) {
+  try {
+    globalThis.localStorage?.setItem(jobCoordinateCacheKey, JSON.stringify(cache));
+  } catch {
+    // The map still works when storage is disabled; only cross-session caching is lost.
+  }
 }
 
 function markerIcon(color: string, scale = 7): google.maps.Symbol {
@@ -120,17 +115,24 @@ function GoogleBusinessMap({
   const [formStatus, setFormStatus] = useState("Click a property on the map or search an address.");
   const [saving, setSaving] = useState(false);
   const [geocodingProgress, setGeocodingProgress] = useState("");
+  const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
   const failedJobAddresses = useRef(new Set<string>());
+  const geocodingJobAddresses = useRef(new Set<string>());
 
   const completedJobs = useMemo(() => jobs.filter((job) => job.status === "completed" && job.address.trim()), [jobs]);
+  const locatedCompletedJobs = useMemo(() => completedJobs.map((job) => {
+    if (job.latitude != null && job.longitude != null) return job;
+    const cached = jobCoordinateCache[normalizedAddress(job.address)];
+    return cached ? { ...job, ...cached } : job;
+  }), [completedJobs, jobCoordinateCache]);
   const missingGroups = useMemo(() => {
     const groups = new globalThis.Map<string, Job[]>();
-    completedJobs.filter((job) => job.latitude == null || job.longitude == null).forEach((job) => {
+    locatedCompletedJobs.filter((job) => job.latitude == null || job.longitude == null).forEach((job) => {
       const key = normalizedAddress(job.address);
       groups.set(key, [...(groups.get(key) ?? []), job]);
     });
     return [...groups.entries()].map(([key, groupedJobs]) => ({ key, jobs: groupedJobs, address: groupedJobs[0].address }));
-  }, [completedJobs]);
+  }, [locatedCompletedJobs]);
 
   useEffect(() => {
     if (!geocoder || missingGroups.length === 0) {
@@ -141,21 +143,33 @@ function GoogleBusinessMap({
     const activeGeocoder = geocoder;
 
     async function geocodeCompletedJobs() {
-      const pending = missingGroups.filter((group) => !failedJobAddresses.current.has(group.key));
+      const pending = missingGroups.filter((group) =>
+        !failedJobAddresses.current.has(group.key) && !geocodingJobAddresses.current.has(group.key));
       for (let index = 0; index < pending.length; index += 1) {
         if (canceled) return;
         const group = pending[index];
+        geocodingJobAddresses.current.add(group.key);
         setGeocodingProgress(`Locating completed jobs ${index + 1} of ${pending.length}`);
         try {
           const response = await activeGeocoder.geocode({ address: geocodingQuery(group.address), region: "US" });
           const location = response.results[0]?.geometry.location;
           if (!location) throw new Error("No matching property found");
-          await onSaveJobCoordinates(group.jobs.map((job) => job.id), {
+          const coordinates = {
             latitude: location.lat(),
             longitude: location.lng(),
+          };
+          setJobCoordinateCache((current) => {
+            const next = { ...current, [group.key]: coordinates };
+            writeJobCoordinateCache(next);
+            return next;
+          });
+          void onSaveJobCoordinates(group.jobs.map((job) => job.id), coordinates).catch(() => {
+            // Browser caching prevents repeat lookups if the database is temporarily unavailable.
           });
         } catch {
           failedJobAddresses.current.add(group.key);
+        } finally {
+          geocodingJobAddresses.current.delete(group.key);
         }
       }
       if (!canceled) setGeocodingProgress("");
@@ -167,7 +181,7 @@ function GoogleBusinessMap({
 
   const jobLocations = useMemo(() => {
     const groups = new globalThis.Map<string, JobLocation>();
-    completedJobs.forEach((job) => {
+    locatedCompletedJobs.forEach((job) => {
       if (job.latitude == null || job.longitude == null) return;
       const key = normalizedAddress(job.address);
       const existing = groups.get(key);
@@ -178,17 +192,12 @@ function GoogleBusinessMap({
       }
     });
     return [...groups.values()];
-  }, [completedJobs]);
+  }, [locatedCompletedJobs]);
 
   const visibleSolicitations = useMemo(
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
     [outcomeFilter, solicitations],
   );
-
-  const positions = useMemo(() => [
-    ...(showJobs ? jobLocations.map((item) => ({ lat: item.latitude, lng: item.longitude })) : []),
-    ...(showSolicitations ? visibleSolicitations.map((item) => ({ lat: item.latitude, lng: item.longitude })) : []),
-  ], [jobLocations, showJobs, showSolicitations, visibleSolicitations]);
 
   const reverseGeocode = useCallback(async (position: google.maps.LatLngLiteral) => {
     setDraftCoordinates({ latitude: position.lat, longitude: position.lng });
@@ -294,7 +303,7 @@ function GoogleBusinessMap({
         <div className="relative h-[58vh] min-h-[480px] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900 xl:h-[calc(100vh-245px)] xl:max-h-[760px]">
           <Map
             defaultCenter={defaultCenter}
-            defaultZoom={13}
+            defaultZoom={10}
             gestureHandling="greedy"
             mapTypeControl={false}
             streetViewControl={false}
@@ -303,7 +312,6 @@ function GoogleBusinessMap({
             reuseMaps
             onClick={handleMapClick}
           >
-            <FitMapToLocations positions={positions} />
             {showJobs && jobLocations.map((location) => (
               <Marker
                 key={location.key}
