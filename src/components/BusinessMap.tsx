@@ -271,7 +271,7 @@ function GoogleBusinessMap({
   function handleJobMarkerClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
     event.stop();
     if (location.locationCount > 1) {
-      map?.panTo({ lat: location.latitude, lng: location.longitude });
+      map?.setCenter({ lat: location.latitude, lng: location.longitude });
       map?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
       setSelected(null);
       return;
