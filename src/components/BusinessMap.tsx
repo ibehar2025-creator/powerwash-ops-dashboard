@@ -58,7 +58,7 @@ function blueBonnetStreetNumber(address: string) {
 
 const bellaireStreetNames = new Set([
   "beech", "braeburn", "huisache", "oleander", "orleander", "palmetto", "pamela", "pamellia",
-  "park", "pine", "spruce", "valerie", "vernon", "vernone", "verone", "willow",
+  "park", "pine", "spruce", "valerie", "vernon", "vernons", "vernone", "verone", "willow",
 ]);
 
 function parsedStreetAddress(address: string) {
@@ -78,7 +78,7 @@ function bellaireAddress(address: string) {
   if (!parsed || !bellaireStreetNames.has(parsed.street)) return null;
   const correctedStreet = parsed.street === "orleander"
     ? "Oleander St"
-    : parsed.street === "vernone" || parsed.street === "vernon"
+    : parsed.street === "vernone" || parsed.street === "vernon" || parsed.street === "vernons"
       ? "Vernon St"
       : parsed.street === "pamela" || parsed.street === "pamellia"
         ? "Pamellia Dr"
