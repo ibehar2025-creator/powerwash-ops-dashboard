@@ -79,7 +79,7 @@ function bellaireAddress(address: string) {
   const correctedStreet = parsed.street === "orleander"
     ? "Oleander St"
     : parsed.street === "vernone" || parsed.street === "vernon" || parsed.street === "vernons"
-      ? "Vernon St"
+      ? "Verone St"
       : parsed.street === "pamela" || parsed.street === "pamellia"
         ? "Pamellia Dr"
         : parsed.street === "braeburn"
