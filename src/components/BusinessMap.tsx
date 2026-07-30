@@ -5,6 +5,7 @@ import {
   Map,
   Marker,
   useMapsLibrary,
+  type MapCameraChangedEvent,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
 import { Check, LocateFixed, MapPin, Search, Trash2 } from "lucide-react";
@@ -19,6 +20,10 @@ type JobLocation = {
   latitude: number;
   longitude: number;
   jobs: Job[];
+};
+
+type JobMapMarker = JobLocation & {
+  locationCount: number;
 };
 
 type SelectedLocation =
@@ -114,10 +119,12 @@ function GoogleBusinessMap({
   const [locatedAddress, setLocatedAddress] = useState("");
   const [formStatus, setFormStatus] = useState("Click a property on the map or search an address.");
   const [saving, setSaving] = useState(false);
+  const [mapZoom, setMapZoom] = useState(10);
   const [geocodingProgress, setGeocodingProgress] = useState("");
   const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
+  const mapInstance = useRef<google.maps.Map | null>(null);
 
   const jobsWithAddresses = useMemo(() => jobs.filter((job) => job.address.trim()), [jobs]);
   const jobsMissingAddresses = jobs.length - jobsWithAddresses.length;
@@ -200,6 +207,32 @@ function GoogleBusinessMap({
     [jobLocations],
   );
   const locatingJobCount = jobsWithAddresses.length - mappedJobCount;
+  const jobMarkers = useMemo<JobMapMarker[]>(() => {
+    if (mapZoom >= 16) {
+      return jobLocations.map((location) => ({ ...location, locationCount: 1 }));
+    }
+
+    // Group nearby properties into numbered markers at wider zoom levels.
+    const cellSize = (360 / (2 ** mapZoom)) * 0.14;
+    const groups = new globalThis.Map<string, JobLocation[]>();
+    jobLocations.forEach((location) => {
+      const key = `${Math.floor(location.latitude / cellSize)}:${Math.floor(location.longitude / cellSize)}`;
+      groups.set(key, [...(groups.get(key) ?? []), location]);
+    });
+
+    return [...groups.entries()].map(([key, locations]) => {
+      if (locations.length === 1) return { ...locations[0], locationCount: 1 };
+      const jobsInArea = locations.flatMap((location) => location.jobs);
+      return {
+        key: `cluster-${mapZoom}-${key}`,
+        address: `${locations.length} properties in this area`,
+        latitude: locations.reduce((sum, location) => sum + location.latitude, 0) / locations.length,
+        longitude: locations.reduce((sum, location) => sum + location.longitude, 0) / locations.length,
+        jobs: jobsInArea,
+        locationCount: locations.length,
+      };
+    });
+  }, [jobLocations, mapZoom]);
 
   const visibleSolicitations = useMemo(
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
@@ -227,6 +260,22 @@ function GoogleBusinessMap({
 
   function handleMapClick(event: MapMouseEvent) {
     if (event.detail.latLng) void reverseGeocode(event.detail.latLng);
+  }
+
+  function handleZoomChanged(event: MapCameraChangedEvent) {
+    mapInstance.current = event.map;
+    setMapZoom(event.detail.zoom);
+  }
+
+  function handleJobMarkerClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
+    event.stop();
+    if (location.locationCount > 1) {
+      mapInstance.current?.panTo({ lat: location.latitude, lng: location.longitude });
+      mapInstance.current?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
+      setSelected(null);
+      return;
+    }
+    setSelected({ kind: "job", location });
   }
 
   async function locateTypedAddress() {
@@ -293,6 +342,7 @@ function GoogleBusinessMap({
           <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Field coverage</p>
           <h2 className="text-xl font-bold text-ink dark:text-white">Jobs and canvassing map</h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Click a property to record a door you solicited.</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Numbered job markers group nearby properties. Click one to zoom in.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
@@ -318,14 +368,24 @@ function GoogleBusinessMap({
             fullscreenControl
             reuseMaps
             onClick={handleMapClick}
+            onZoomChanged={handleZoomChanged}
           >
-            {showJobs && jobLocations.map((location) => (
+            {showJobs && jobMarkers.map((location) => (
               <Marker
                 key={location.key}
                 position={{ lat: location.latitude, lng: location.longitude }}
-                icon={markerIcon(location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb", location.jobs.length > 1 ? 9 : 7)}
+                icon={markerIcon(
+                  location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
+                  location.jobs.length > 1 ? Math.min(15, 8 + Math.log2(location.jobs.length) * 1.5) : 7,
+                )}
+                label={location.jobs.length > 1 ? {
+                  text: String(location.jobs.length),
+                  color: "#ffffff",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                } : undefined}
                 title={`${location.jobs.length} job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
-                onClick={(event) => { event.stop(); setSelected({ kind: "job", location }); }}
+                onClick={(event) => handleJobMarkerClick(event, location)}
               />
             ))}
             {showSolicitations && visibleSolicitations.map((location) => (
