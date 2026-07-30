@@ -19,6 +19,7 @@ type JobLocation = {
   latitude: number;
   longitude: number;
   jobs: Job[];
+  approximate?: boolean;
 };
 
 type SelectedLocation =
@@ -55,19 +56,74 @@ function blueBonnetStreetNumber(address: string) {
   return address.trim().match(/^(\d{3,5})\s+blue\s*bonnet(?:\s+(?:blvd|boulevard))?$/i)?.[1] ?? null;
 }
 
+const bellaireStreetNames = new Set([
+  "beech", "braeburn", "huisache", "oleander", "orleander", "palmetto", "pamela", "pamellia",
+  "park", "pine", "spruce", "valerie", "vernon", "vernone", "verone", "willow",
+]);
+
+function parsedStreetAddress(address: string) {
+  const match = address.trim().match(/^(\d{2,6})\s+(.+?)\s*$/);
+  if (!match) return null;
+  const number = match[1];
+  const street = match[2]
+    .replace(/[)'’]/g, "")
+    .replace(/\b(?:street|st|drive|dr|court|ct|boulevard|blvd)\.?$/i, "")
+    .trim()
+    .toLowerCase();
+  return { number, street };
+}
+
+function bellaireAddress(address: string) {
+  const parsed = parsedStreetAddress(address);
+  if (!parsed || !bellaireStreetNames.has(parsed.street)) return null;
+  const correctedStreet = parsed.street === "orleander"
+    ? "Oleander St"
+    : parsed.street === "vernone" || parsed.street === "vernon"
+      ? "Vernon St"
+      : parsed.street === "pamela" || parsed.street === "pamellia"
+        ? "Pamellia Dr"
+        : parsed.street === "braeburn"
+          ? "Braeburn Dr"
+          : parsed.street === "park"
+            ? (/\b(?:court|ct)\b/i.test(address) ? "Park Ct" : "Park St")
+            : `${parsed.street.replace(/^./, (letter) => letter.toUpperCase())} St`;
+  return `${parsed.number} ${correctedStreet}, Bellaire, TX 77401`;
+}
+
+function isUsableJobAddress(address: string) {
+  const value = address.trim().toLowerCase();
+  return Boolean(value) && value !== "unknown" && value !== "n/a" && value !== "not listed";
+}
+
 function geocodingQuery(address: string) {
   const blueBonnetNumber = blueBonnetStreetNumber(address);
   if (blueBonnetNumber) return `${blueBonnetNumber} Blue Bonnet Blvd, Houston, TX 77025`;
+  const localBellaireAddress = bellaireAddress(address);
+  if (localBellaireAddress) return localBellaireAddress;
+  if (/^3818\s+rice\b/i.test(address)) return "3818 Rice Blvd, Houston, TX 77005";
+  if (/^4103\s+university\b/i.test(address)) return "4103 University Blvd, Houston, TX 77005";
   if (/\b(?:tx|texas|houston)\b/i.test(address)) return address;
   const reversedStreetNumber = address.trim().match(/^([^\d]+?)\s+(\d{2,6})$/);
   const normalized = reversedStreetNumber ? `${reversedStreetNumber[2]} ${reversedStreetNumber[1].trim()}` : address;
   return `${normalized}, Houston, TX`;
 }
 
+function coordinatesMatchAddress(address: string, latitude: number, longitude: number) {
+  if (bellaireAddress(address)) {
+    return latitude >= 29.68 && latitude <= 29.73 && longitude >= -95.47 && longitude <= -95.43;
+  }
+  if (/^(?:3818\s+rice|4103\s+university)\b/i.test(address)) {
+    return latitude >= 29.70 && latitude <= 29.73 && longitude >= -95.46 && longitude <= -95.425;
+  }
+  if (blueBonnetStreetNumber(address)) {
+    return latitude >= 29.68 && latitude <= 29.73 && longitude >= -95.47 && longitude <= -95.41;
+  }
+  return true;
+}
+
 function needsGeocoding(job: Job) {
   if (job.latitude == null || job.longitude == null) return true;
-  if (!blueBonnetStreetNumber(job.address)) return false;
-  return job.latitude < 29.68 || job.latitude > 29.73 || job.longitude < -95.47 || job.longitude > -95.41;
+  return !coordinatesMatchAddress(job.address, job.latitude, job.longitude);
 }
 
 function customerName(customers: Customer[], customerId: string) {
@@ -121,10 +177,12 @@ function JobMarkers({
       key={location.key}
       position={{ lat: location.latitude, lng: location.longitude }}
       icon={markerIcon(
-        location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
+        location.approximate
+          ? "#64748b"
+          : location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
         6,
       )}
-      title={`${location.jobs[0].date} job at ${location.address}`}
+      title={location.approximate ? `${location.jobs[0].date} job; address unavailable` : `${location.jobs[0].date} job at ${location.address}`}
       onClick={(event) => handleClick(event, location)}
     />
   ));
@@ -158,7 +216,8 @@ function GoogleBusinessMap({
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
 
-  const jobsWithAddresses = useMemo(() => jobs.filter((job) => job.address.trim()), [jobs]);
+  const jobsWithAddresses = useMemo(() => jobs.filter((job) => isUsableJobAddress(job.address)), [jobs]);
+  const jobsWithoutAddresses = useMemo(() => jobs.filter((job) => !isUsableJobAddress(job.address)), [jobs]);
   const jobsMissingAddresses = jobs.length - jobsWithAddresses.length;
   const locatedJobs = useMemo(() => jobsWithAddresses.map((job) => {
     if (job.latitude != null && job.longitude != null) return job;
@@ -198,6 +257,9 @@ function GoogleBusinessMap({
             latitude: location.lat(),
             longitude: location.lng(),
           };
+          if (!coordinatesMatchAddress(group.address, coordinates.latitude, coordinates.longitude)) {
+            throw new Error("Address result was outside the expected service area");
+          }
           setJobCoordinateCache((current) => {
             const next = { ...current, [group.key]: coordinates };
             writeJobCoordinateCache(next);
@@ -227,7 +289,7 @@ function GoogleBusinessMap({
       groups.set(key, [...(groups.get(key) ?? []), job]);
     });
 
-    return [...groups.values()].flatMap((jobsAtAddress) => jobsAtAddress.map((job, index) => {
+    const exactLocations = [...groups.values()].flatMap((jobsAtAddress) => jobsAtAddress.map((job, index) => {
       const angle = (2 * Math.PI * index) / jobsAtAddress.length;
       const offset = jobsAtAddress.length > 1 ? 0.00009 : 0;
       return {
@@ -238,14 +300,29 @@ function GoogleBusinessMap({
         jobs: [job],
       };
     }));
-  }, [locatedJobs]);
+
+    const unavailableLocations = jobsWithoutAddresses.map((job, index) => {
+      const ring = 1 + Math.floor(index / 8);
+      const angle = (2 * Math.PI * (index % 8)) / 8;
+      return {
+        key: job.id,
+        address: "Location unavailable",
+        latitude: defaultCenter.lat + Math.sin(angle) * ring * 0.0012,
+        longitude: defaultCenter.lng + Math.cos(angle) * ring * 0.0012,
+        jobs: [job],
+        approximate: true,
+      };
+    });
+
+    return [...exactLocations, ...unavailableLocations];
+  }, [jobsWithoutAddresses, locatedJobs]);
 
   const mappedJobCount = jobLocations.length;
   const uniqueLocationCount = useMemo(
     () => new Set(jobLocations.map((location) => normalizedAddress(location.address))).size,
     [jobLocations],
   );
-  const locatingJobCount = jobsWithAddresses.length - mappedJobCount;
+  const locatingJobCount = jobsWithAddresses.length - (mappedJobCount - jobsMissingAddresses);
 
   const visibleSolicitations = useMemo(
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
@@ -389,6 +466,7 @@ function GoogleBusinessMap({
                   <p className="font-semibold text-slate-950">{selected.location.address}</p>
                   {selected.kind === "job" ? (
                     <div className="mt-2 space-y-1">
+                      {selected.location.approximate && <p className="text-xs font-semibold text-amber-700">This spreadsheet row has no usable address. This marker is only a placeholder.</p>}
                       <p>{selected.location.jobs.length} job{selected.location.jobs.length === 1 ? "" : "s"} at this property</p>
                       {selected.location.jobs.map((job) => (
                         <p key={job.id} className="text-xs text-slate-600">{job.date}: {customerName(customers, job.customerId)} · {currency.format(job.price)}</p>
