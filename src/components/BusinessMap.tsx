@@ -4,9 +4,7 @@ import {
   InfoWindow,
   Map,
   Marker,
-  useMap,
   useMapsLibrary,
-  type MapCameraChangedEvent,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
 import { Check, LocateFixed, MapPin, Search, Trash2 } from "lucide-react";
@@ -21,10 +19,6 @@ type JobLocation = {
   latitude: number;
   longitude: number;
   jobs: Job[];
-};
-
-type JobMapMarker = JobLocation & {
-  locationCount: number;
 };
 
 type SelectedLocation =
@@ -100,24 +94,13 @@ function markerIcon(color: string, scale = 7): google.maps.Symbol {
 
 function JobMarkers({
   locations,
-  mapZoom,
   onSelect,
 }: {
-  locations: JobMapMarker[];
-  mapZoom: number;
+  locations: JobLocation[];
   onSelect: (location: JobLocation) => void;
 }) {
-  const map = useMap();
-
-  function handleClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
+  function handleClick(event: google.maps.MapMouseEvent, location: JobLocation) {
     event.stop();
-    if (location.locationCount > 1) {
-      map?.moveCamera({
-        center: { lat: location.latitude, lng: location.longitude },
-        zoom: Math.min(Math.max(mapZoom + 3, 14), 17),
-      });
-      return;
-    }
     onSelect(location);
   }
 
@@ -127,15 +110,9 @@ function JobMarkers({
       position={{ lat: location.latitude, lng: location.longitude }}
       icon={markerIcon(
         location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
-        location.jobs.length > 1 ? Math.min(15, 8 + Math.log2(location.jobs.length) * 1.5) : 7,
+        6,
       )}
-      label={location.jobs.length > 1 ? {
-        text: String(location.jobs.length),
-        color: "#ffffff",
-        fontSize: "11px",
-        fontWeight: "700",
-      } : undefined}
-      title={`${location.jobs.length} job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
+      title={`${location.jobs[0].date} job at ${location.address}`}
       onClick={(event) => handleClick(event, location)}
     />
   ));
@@ -164,7 +141,6 @@ function GoogleBusinessMap({
   const [locatedAddress, setLocatedAddress] = useState("");
   const [formStatus, setFormStatus] = useState("Click a property on the map or search an address.");
   const [saving, setSaving] = useState(false);
-  const [mapZoom, setMapZoom] = useState(10);
   const [geocodingProgress, setGeocodingProgress] = useState("");
   const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
   const failedJobAddresses = useRef(new Set<string>());
@@ -232,51 +208,32 @@ function GoogleBusinessMap({
   }, [geocoder, missingGroups, onSaveJobCoordinates]);
 
   const jobLocations = useMemo(() => {
-    const groups = new globalThis.Map<string, JobLocation>();
+    const groups = new globalThis.Map<string, Job[]>();
     locatedJobs.forEach((job) => {
       if (job.latitude == null || job.longitude == null) return;
       const key = normalizedAddress(job.address);
-      const existing = groups.get(key);
-      if (existing) {
-        existing.jobs.push(job);
-      } else {
-        groups.set(key, { key, address: job.address, latitude: job.latitude, longitude: job.longitude, jobs: [job] });
-      }
+      groups.set(key, [...(groups.get(key) ?? []), job]);
     });
-    return [...groups.values()];
+
+    return [...groups.values()].flatMap((jobsAtAddress) => jobsAtAddress.map((job, index) => {
+      const angle = (2 * Math.PI * index) / jobsAtAddress.length;
+      const offset = jobsAtAddress.length > 1 ? 0.00009 : 0;
+      return {
+        key: job.id,
+        address: job.address,
+        latitude: job.latitude! + Math.sin(angle) * offset,
+        longitude: job.longitude! + Math.cos(angle) * offset,
+        jobs: [job],
+      };
+    }));
   }, [locatedJobs]);
 
-  const mappedJobCount = useMemo(
-    () => jobLocations.reduce((total, location) => total + location.jobs.length, 0),
+  const mappedJobCount = jobLocations.length;
+  const uniqueLocationCount = useMemo(
+    () => new Set(jobLocations.map((location) => normalizedAddress(location.address))).size,
     [jobLocations],
   );
   const locatingJobCount = jobsWithAddresses.length - mappedJobCount;
-  const jobMarkers = useMemo<JobMapMarker[]>(() => {
-    if (mapZoom >= 16) {
-      return jobLocations.map((location) => ({ ...location, locationCount: 1 }));
-    }
-
-    // Group nearby properties into numbered markers at wider zoom levels.
-    const cellSize = (360 / (2 ** mapZoom)) * 0.14;
-    const groups = new globalThis.Map<string, JobLocation[]>();
-    jobLocations.forEach((location) => {
-      const key = `${Math.floor(location.latitude / cellSize)}:${Math.floor(location.longitude / cellSize)}`;
-      groups.set(key, [...(groups.get(key) ?? []), location]);
-    });
-
-    return [...groups.entries()].map(([key, locations]) => {
-      if (locations.length === 1) return { ...locations[0], locationCount: 1 };
-      const jobsInArea = locations.flatMap((location) => location.jobs);
-      return {
-        key: `cluster-${mapZoom}-${key}`,
-        address: `${locations.length} properties in this area`,
-        latitude: locations.reduce((sum, location) => sum + location.latitude, 0) / locations.length,
-        longitude: locations.reduce((sum, location) => sum + location.longitude, 0) / locations.length,
-        jobs: jobsInArea,
-        locationCount: locations.length,
-      };
-    });
-  }, [jobLocations, mapZoom]);
 
   const visibleSolicitations = useMemo(
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
@@ -304,10 +261,6 @@ function GoogleBusinessMap({
 
   function handleMapClick(event: MapMouseEvent) {
     if (event.detail.latLng) void reverseGeocode(event.detail.latLng);
-  }
-
-  function handleZoomChanged(event: MapCameraChangedEvent) {
-    setMapZoom(event.detail.zoom);
   }
 
   async function locateTypedAddress() {
@@ -374,7 +327,7 @@ function GoogleBusinessMap({
           <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Field coverage</p>
           <h2 className="text-xl font-bold text-ink dark:text-white">Jobs and canvassing map</h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Click a property to record a door you solicited.</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Numbered job markers group nearby properties. Click one to zoom in.</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Every job has its own marker. Zoom in to separate nearby properties.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
@@ -400,9 +353,8 @@ function GoogleBusinessMap({
             fullscreenControl
             reuseMaps
             onClick={handleMapClick}
-            onZoomChanged={handleZoomChanged}
           >
-            {showJobs && <JobMarkers locations={jobMarkers} mapZoom={mapZoom} onSelect={(location) => setSelected({ kind: "job", location })} />}
+            {showJobs && <JobMarkers locations={jobLocations} onSelect={(location) => setSelected({ kind: "job", location })} />}
             {showSolicitations && visibleSolicitations.map((location) => (
               <Marker
                 key={location.id}
@@ -492,7 +444,7 @@ function GoogleBusinessMap({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="metric-mini"><span>Jobs mapped</span><strong>{mappedJobCount} / {jobs.length}</strong><small className="block text-xs text-slate-500 dark:text-slate-400">{jobLocations.length} unique locations{jobsMissingAddresses > 0 ? `; ${jobsMissingAddresses} missing addresses` : ""}{locatingJobCount > 0 ? `; ${locatingJobCount} locating` : ""}</small></div>
+        <div className="metric-mini"><span>Jobs mapped</span><strong>{mappedJobCount} / {jobs.length}</strong><small className="block text-xs text-slate-500 dark:text-slate-400">{uniqueLocationCount} unique locations{jobsMissingAddresses > 0 ? `; ${jobsMissingAddresses} missing addresses` : ""}{locatingJobCount > 0 ? `; ${locatingJobCount} locating` : ""}</small></div>
         <div className="metric-mini"><span>Doors solicited</span><strong>{solicitations.length}</strong></div>
         <div className="metric-mini"><span>Interested / follow up</span><strong>{solicitations.filter((item) => item.outcome === "interested" || item.outcome === "follow up").length}</strong></div>
       </div>
