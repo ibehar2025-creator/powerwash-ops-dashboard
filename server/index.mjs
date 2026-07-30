@@ -27,6 +27,11 @@ async function ensureMapSchema() {
   await pool.query(`
     alter table jobs add column if not exists latitude double precision;
     alter table jobs add column if not exists longitude double precision;
+    alter table jobs add column if not exists geocoded_address text;
+
+    update jobs
+    set latitude = null, longitude = null
+    where geocoded_address is null and (latitude is not null or longitude is not null);
 
     create table if not exists solicitations (
       id uuid primary key default gen_random_uuid(),
@@ -289,7 +294,10 @@ async function upsertJobs(client, jobs = []) {
          notes = excluded.notes,
          before_photo = excluded.before_photo,
          after_photo = excluded.after_photo,
-         source = excluded.source`,
+         source = excluded.source,
+         latitude = case when jobs.address is distinct from excluded.address then null else jobs.latitude end,
+         longitude = case when jobs.address is distinct from excluded.address then null else jobs.longitude end,
+         geocoded_address = case when jobs.address is distinct from excluded.address then null else jobs.geocoded_address end`,
       [JSON.stringify(rows)],
     );
 }
@@ -459,7 +467,11 @@ app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
            payment_method = coalesce($7, payment_method),
            notes = coalesce($8, notes),
            latitude = coalesce($9, latitude),
-           longitude = coalesce($10, longitude)
+           longitude = coalesce($10, longitude),
+           geocoded_address = case
+             when $9::double precision is not null and $10::double precision is not null then address
+             else geocoded_address
+           end
        where id = $1
        returning *`,
       [req.params.id, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude],

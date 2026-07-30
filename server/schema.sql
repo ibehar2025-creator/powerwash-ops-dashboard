@@ -47,6 +47,7 @@ create table if not exists jobs (
   source text not null default 'spreadsheet-import',
   latitude double precision,
   longitude double precision,
+  geocoded_address text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
