@@ -86,7 +86,8 @@ function writeJobCoordinateCache(cache: Record<string, Coordinates>) {
 
 function markerIcon(color: string, scale = 7): google.maps.Symbol {
   return {
-    path: google.maps.SymbolPath.CIRCLE,
+    // SymbolPath.CIRCLE is 0; using the value avoids a race before the Maps global loads.
+    path: 0 as google.maps.SymbolPath,
     fillColor: color,
     fillOpacity: 1,
     strokeColor: "#ffffff",
