@@ -13,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const distPath = path.join(projectRoot, "dist");
 const syncUrl = process.env.SHEETS_SYNC_URL || process.env.VITE_SHEETS_SYNC_URL;
+let activeSheetSync = null;
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
@@ -173,10 +174,24 @@ async function loadSnapshot() {
 }
 
 async function upsertCustomers(client, customers = []) {
-  for (const customer of customers) {
-    await client.query(
+  if (customers.length === 0) return;
+  const rows = customers.map((customer) => ({
+    id: customer.id,
+    name: customer.name,
+    phone: customer.phone ?? "",
+    email: customer.email ?? "",
+    address: customer.address ?? "",
+    notes: customer.notes ?? "",
+    subscribed_plan_id: customer.subscribedPlanId ?? null,
+    insights: customer.insights ?? [],
+  }));
+  await client.query(
       `insert into customers (id, name, phone, email, address, notes, subscribed_plan_id, insights)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       select id, name, phone, email, address, notes, subscribed_plan_id, insights
+       from jsonb_to_recordset($1::jsonb) as row(
+         id text, name text, phone text, email text, address text, notes text,
+         subscribed_plan_id text, insights text[]
+       )
        on conflict (id) do update set
          name = excluded.name,
          phone = excluded.phone,
@@ -185,16 +200,30 @@ async function upsertCustomers(client, customers = []) {
          notes = excluded.notes,
          subscribed_plan_id = excluded.subscribed_plan_id,
          insights = excluded.insights`,
-      [customer.id, customer.name, customer.phone ?? "", customer.email ?? "", customer.address ?? "", customer.notes ?? "", customer.subscribedPlanId ?? null, customer.insights ?? []],
+      [JSON.stringify(rows)],
     );
-  }
 }
 
 async function upsertLeads(client, leads = []) {
-  for (const lead of leads) {
-    await client.query(
+  if (leads.length === 0) return;
+  const rows = leads.map((lead) => ({
+    id: lead.id,
+    name: lead.name,
+    contact: lead.contact ?? "",
+    address: lead.address ?? "",
+    source: lead.source ?? "",
+    status: lead.status ?? "new",
+    estimated_value: lead.estimatedValue ?? 0,
+    follow_up_date: lead.followUpDate || null,
+    notes: lead.notes ?? "",
+  }));
+  await client.query(
       `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       select id, name, contact, address, source, status, estimated_value, follow_up_date, notes
+       from jsonb_to_recordset($1::jsonb) as row(
+         id text, name text, contact text, address text, source text, status text,
+         estimated_value numeric, follow_up_date date, notes text
+       )
        on conflict (id) do update set
          name = excluded.name,
          contact = excluded.contact,
@@ -204,20 +233,46 @@ async function upsertLeads(client, leads = []) {
          estimated_value = excluded.estimated_value,
          follow_up_date = excluded.follow_up_date,
          notes = excluded.notes`,
-      [lead.id, lead.name, lead.contact ?? "", lead.address ?? "", lead.source ?? "", lead.status ?? "new", lead.estimatedValue ?? 0, lead.followUpDate || null, lead.notes ?? ""],
+      [JSON.stringify(rows)],
     );
-  }
 }
 
 async function upsertJobs(client, jobs = []) {
-  for (const job of jobs) {
-    await client.query(
+  if (jobs.length === 0) return;
+  const rows = jobs.map((job) => ({
+    id: job.id,
+    date: job.date,
+    time: job.time,
+    customer_id: job.customerId,
+    address: job.address ?? "",
+    service_type: job.serviceType ?? "",
+    status: job.status ?? "scheduled",
+    crew_ids: job.crewIds ?? [],
+    price: job.price ?? 0,
+    amount_paid: job.amountPaid ?? 0,
+    tip_amount: job.tipAmount ?? 0,
+    payment_status: job.paymentStatus ?? "unpaid",
+    payment_method: job.paymentMethod ?? null,
+    notes: job.notes ?? "",
+    before_photo: job.beforePhoto ?? null,
+    after_photo: job.afterPhoto ?? null,
+    source: job.source ?? "spreadsheet-import",
+  }));
+  await client.query(
       `insert into jobs (
          id, date, time, customer_id, address, service_type, status, crew_ids,
          price, amount_paid, tip_amount, payment_status, payment_method, notes,
          before_photo, after_photo, source
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       select id, date, time, customer_id, address, service_type, status, crew_ids,
+         price, amount_paid, tip_amount, payment_status, payment_method, notes,
+         before_photo, after_photo, source
+       from jsonb_to_recordset($1::jsonb) as row(
+         id text, date date, time text, customer_id text, address text, service_type text,
+         status text, crew_ids text[], price numeric, amount_paid numeric, tip_amount numeric,
+         payment_status text, payment_method text, notes text, before_photo text,
+         after_photo text, source text
+       )
        on conflict (id) do update set
          date = excluded.date,
          time = excluded.time,
@@ -235,37 +290,38 @@ async function upsertJobs(client, jobs = []) {
          before_photo = excluded.before_photo,
          after_photo = excluded.after_photo,
          source = excluded.source`,
-      [
-        job.id,
-        job.date,
-        job.time,
-        job.customerId,
-        job.address ?? "",
-        job.serviceType ?? "",
-        job.status ?? "scheduled",
-        job.crewIds ?? [],
-        job.price ?? 0,
-        job.amountPaid ?? 0,
-        job.tipAmount ?? 0,
-        job.paymentStatus ?? "unpaid",
-        job.paymentMethod ?? null,
-        job.notes ?? "",
-        job.beforePhoto ?? null,
-        job.afterPhoto ?? null,
-        job.source ?? "spreadsheet-import",
-      ],
+      [JSON.stringify(rows)],
     );
-  }
 }
 
 async function upsertInvoices(client, invoices = []) {
-  for (const invoice of invoices) {
-    await client.query(
+  if (invoices.length === 0) return;
+  const rows = invoices.map((invoice) => ({
+    id: invoice.id,
+    customer_id: invoice.customerId,
+    job_id: invoice.jobId,
+    service_description: invoice.serviceDescription ?? "",
+    price: invoice.price ?? 0,
+    discount: invoice.discount ?? 0,
+    tip: invoice.tip ?? 0,
+    payment_method: invoice.paymentMethod ?? null,
+    status: invoice.status ?? "unpaid",
+    amount_paid: invoice.amountPaid ?? 0,
+    due_date: invoice.dueDate || null,
+    issued_date: invoice.issuedDate || null,
+  }));
+  await client.query(
       `insert into invoices (
          id, customer_id, job_id, service_description, price, discount, tip,
          payment_method, status, amount_paid, due_date, issued_date
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       select id, customer_id, job_id, service_description, price, discount, tip,
+         payment_method, status, amount_paid, due_date, issued_date
+       from jsonb_to_recordset($1::jsonb) as row(
+         id text, customer_id text, job_id text, service_description text,
+         price numeric, discount numeric, tip numeric, payment_method text,
+         status text, amount_paid numeric, due_date date, issued_date date
+       )
        on conflict (id) do update set
          customer_id = excluded.customer_id,
          job_id = excluded.job_id,
@@ -278,25 +334,34 @@ async function upsertInvoices(client, invoices = []) {
          amount_paid = excluded.amount_paid,
          due_date = excluded.due_date,
          issued_date = excluded.issued_date`,
-      [invoice.id, invoice.customerId, invoice.jobId, invoice.serviceDescription ?? "", invoice.price ?? 0, invoice.discount ?? 0, invoice.tip ?? 0, invoice.paymentMethod ?? null, invoice.status ?? "unpaid", invoice.amountPaid ?? 0, invoice.dueDate || null, invoice.issuedDate || null],
+      [JSON.stringify(rows)],
     );
-  }
 }
 
 async function upsertReviews(client, reviews = []) {
-  for (const review of reviews) {
-    await client.query(
+  if (reviews.length === 0) return;
+  const rows = reviews.map((review) => ({
+    id: review.id,
+    submitted_at: review.submittedAt,
+    name: review.name ?? "",
+    rating: review.rating ?? 5,
+    review: review.review ?? "",
+    source: review.source ?? "spreadsheet-import",
+  }));
+  await client.query(
       `insert into reviews (id, submitted_at, name, rating, review, source)
-       values ($1, $2, $3, $4, $5, $6)
+       select id, submitted_at, name, rating, review, source
+       from jsonb_to_recordset($1::jsonb) as row(
+         id text, submitted_at timestamptz, name text, rating integer, review text, source text
+       )
        on conflict (id) do update set
          submitted_at = excluded.submitted_at,
          name = excluded.name,
          rating = excluded.rating,
          review = excluded.review,
          source = excluded.source`,
-      [review.id, review.submittedAt, review.name ?? "", review.rating ?? 5, review.review ?? "", review.source ?? "spreadsheet-import"],
+      [JSON.stringify(rows)],
     );
-  }
 }
 
 async function syncSheetsIntoDatabase(payload) {
@@ -338,19 +403,26 @@ app.get("/api/bootstrap", requireDatabase, async (_req, res, next) => {
   }
 });
 
+async function runSheetSync() {
+  const response = await fetch(syncUrl, { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error(`Sheet sync endpoint failed with ${response.status}`);
+  const payload = await response.json();
+  await syncSheetsIntoDatabase(payload);
+  return loadSnapshot();
+}
+
 app.post("/api/sync-sheets", requireDatabase, async (_req, res, next) => {
   try {
     if (!syncUrl) {
       res.status(503).json({ error: "SHEETS_SYNC_URL is not configured." });
       return;
     }
-
-    const response = await fetch(syncUrl);
-    if (!response.ok) throw new Error(`Sheet sync endpoint failed with ${response.status}`);
-
-    const payload = await response.json();
-    await syncSheetsIntoDatabase(payload);
-    res.json(await loadSnapshot());
+    if (!activeSheetSync) {
+      activeSheetSync = runSheetSync().finally(() => {
+        activeSheetSync = null;
+      });
+    }
+    res.json(await activeSheetSync);
   } catch (error) {
     next(error);
   }
