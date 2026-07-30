@@ -121,7 +121,9 @@ function coordinatesMatchAddress(address: string, latitude: number, longitude: n
   if (blueBonnetStreetNumber(address)) {
     return latitude >= 29.68 && latitude <= 29.73 && longitude >= -95.47 && longitude <= -95.41;
   }
-  return true;
+  // Beall Street is the one approved service-area exception.
+  if (/^2508\s+beall\b/i.test(address)) return true;
+  return latitude >= 29.67 && latitude <= 29.74 && longitude >= -95.50 && longitude <= -95.40;
 }
 
 function needsGeocoding(job: Job) {
