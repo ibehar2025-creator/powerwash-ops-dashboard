@@ -109,6 +109,10 @@ function geocodingQuery(address: string) {
 }
 
 function coordinatesMatchAddress(address: string, latitude: number, longitude: number) {
+  const parsed = parsedStreetAddress(address);
+  if (parsed && ["vernon", "vernons", "vernone"].includes(parsed.street)) {
+    return latitude >= 29.68 && latitude <= 29.73 && longitude >= -95.465 && longitude <= -95.43;
+  }
   if (bellaireAddress(address)) {
     return latitude >= 29.68 && latitude <= 29.73 && longitude >= -95.47 && longitude <= -95.43;
   }
