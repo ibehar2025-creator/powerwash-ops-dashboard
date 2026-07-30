@@ -4,6 +4,7 @@ import {
   InfoWindow,
   Map,
   Marker,
+  useMap,
   useMapsLibrary,
   type MapCameraChangedEvent,
   type MapMouseEvent,
@@ -108,6 +109,7 @@ function GoogleBusinessMap({
 }: Props) {
   const geocoding = useMapsLibrary("geocoding");
   const geocoder = useMemo(() => geocoding ? new geocoding.Geocoder() : null, [geocoding]);
+  const map = useMap();
   const [showJobs, setShowJobs] = useState(true);
   const [showSolicitations, setShowSolicitations] = useState(true);
   const [outcomeFilter, setOutcomeFilter] = useState<"all" | SolicitationOutcome>("all");
@@ -125,7 +127,6 @@ function GoogleBusinessMap({
   const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
-  const mapInstance = useRef<google.maps.Map | null>(null);
 
   const jobsWithAddresses = useMemo(() => jobs.filter((job) => job.address.trim()), [jobs]);
   const jobsMissingAddresses = jobs.length - jobsWithAddresses.length;
@@ -264,15 +265,14 @@ function GoogleBusinessMap({
   }
 
   function handleZoomChanged(event: MapCameraChangedEvent) {
-    mapInstance.current = event.map;
     setMapZoom(event.detail.zoom);
   }
 
   function handleJobMarkerClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
     event.stop();
     if (location.locationCount > 1) {
-      mapInstance.current?.panTo({ lat: location.latitude, lng: location.longitude });
-      mapInstance.current?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
+      map?.panTo({ lat: location.latitude, lng: location.longitude });
+      map?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
       setSelected(null);
       return;
     }
