@@ -112,8 +112,10 @@ function JobMarkers({
   function handleClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
     event.stop();
     if (location.locationCount > 1) {
-      map?.setCenter({ lat: location.latitude, lng: location.longitude });
-      map?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
+      map?.moveCamera({
+        center: { lat: location.latitude, lng: location.longitude },
+        zoom: Math.min(Math.max(mapZoom + 3, 14), 17),
+      });
       return;
     }
     onSelect(location);
