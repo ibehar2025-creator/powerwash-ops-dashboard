@@ -98,6 +98,47 @@ function markerIcon(color: string, scale = 7): google.maps.Symbol {
   };
 }
 
+function JobMarkers({
+  locations,
+  mapZoom,
+  onSelect,
+}: {
+  locations: JobMapMarker[];
+  mapZoom: number;
+  onSelect: (location: JobLocation) => void;
+}) {
+  const map = useMap();
+
+  function handleClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
+    event.stop();
+    if (location.locationCount > 1) {
+      map?.setCenter({ lat: location.latitude, lng: location.longitude });
+      map?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
+      return;
+    }
+    onSelect(location);
+  }
+
+  return locations.map((location) => (
+    <Marker
+      key={location.key}
+      position={{ lat: location.latitude, lng: location.longitude }}
+      icon={markerIcon(
+        location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
+        location.jobs.length > 1 ? Math.min(15, 8 + Math.log2(location.jobs.length) * 1.5) : 7,
+      )}
+      label={location.jobs.length > 1 ? {
+        text: String(location.jobs.length),
+        color: "#ffffff",
+        fontSize: "11px",
+        fontWeight: "700",
+      } : undefined}
+      title={`${location.jobs.length} job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
+      onClick={(event) => handleClick(event, location)}
+    />
+  ));
+}
+
 function GoogleBusinessMap({
   customers,
   jobs,
@@ -109,7 +150,6 @@ function GoogleBusinessMap({
 }: Props) {
   const geocoding = useMapsLibrary("geocoding");
   const geocoder = useMemo(() => geocoding ? new geocoding.Geocoder() : null, [geocoding]);
-  const map = useMap();
   const [showJobs, setShowJobs] = useState(true);
   const [showSolicitations, setShowSolicitations] = useState(true);
   const [outcomeFilter, setOutcomeFilter] = useState<"all" | SolicitationOutcome>("all");
@@ -268,17 +308,6 @@ function GoogleBusinessMap({
     setMapZoom(event.detail.zoom);
   }
 
-  function handleJobMarkerClick(event: google.maps.MapMouseEvent, location: JobMapMarker) {
-    event.stop();
-    if (location.locationCount > 1) {
-      map?.setCenter({ lat: location.latitude, lng: location.longitude });
-      map?.setZoom(Math.min(Math.max(mapZoom + 3, 14), 17));
-      setSelected(null);
-      return;
-    }
-    setSelected({ kind: "job", location });
-  }
-
   async function locateTypedAddress() {
     if (!geocoder || !address.trim()) return null;
     setFormStatus("Finding that address...");
@@ -371,24 +400,7 @@ function GoogleBusinessMap({
             onClick={handleMapClick}
             onZoomChanged={handleZoomChanged}
           >
-            {showJobs && jobMarkers.map((location) => (
-              <Marker
-                key={location.key}
-                position={{ lat: location.latitude, lng: location.longitude }}
-                icon={markerIcon(
-                  location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
-                  location.jobs.length > 1 ? Math.min(15, 8 + Math.log2(location.jobs.length) * 1.5) : 7,
-                )}
-                label={location.jobs.length > 1 ? {
-                  text: String(location.jobs.length),
-                  color: "#ffffff",
-                  fontSize: "11px",
-                  fontWeight: "700",
-                } : undefined}
-                title={`${location.jobs.length} job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
-                onClick={(event) => handleJobMarkerClick(event, location)}
-              />
-            ))}
+            {showJobs && <JobMarkers locations={jobMarkers} mapZoom={mapZoom} onSelect={(location) => setSelected({ kind: "job", location })} />}
             {showSolicitations && visibleSolicitations.map((location) => (
               <Marker
                 key={location.id}
