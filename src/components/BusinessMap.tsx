@@ -119,20 +119,21 @@ function GoogleBusinessMap({
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
 
-  const completedJobs = useMemo(() => jobs.filter((job) => job.status === "completed" && job.address.trim()), [jobs]);
-  const locatedCompletedJobs = useMemo(() => completedJobs.map((job) => {
+  const jobsWithAddresses = useMemo(() => jobs.filter((job) => job.address.trim()), [jobs]);
+  const jobsMissingAddresses = jobs.length - jobsWithAddresses.length;
+  const locatedJobs = useMemo(() => jobsWithAddresses.map((job) => {
     if (job.latitude != null && job.longitude != null) return job;
     const cached = jobCoordinateCache[normalizedAddress(job.address)];
     return cached ? { ...job, ...cached } : job;
-  }), [completedJobs, jobCoordinateCache]);
+  }), [jobsWithAddresses, jobCoordinateCache]);
   const missingGroups = useMemo(() => {
     const groups = new globalThis.Map<string, Job[]>();
-    locatedCompletedJobs.filter((job) => job.latitude == null || job.longitude == null).forEach((job) => {
+    locatedJobs.filter((job) => job.latitude == null || job.longitude == null).forEach((job) => {
       const key = normalizedAddress(job.address);
       groups.set(key, [...(groups.get(key) ?? []), job]);
     });
     return [...groups.entries()].map(([key, groupedJobs]) => ({ key, jobs: groupedJobs, address: groupedJobs[0].address }));
-  }, [locatedCompletedJobs]);
+  }, [locatedJobs]);
 
   useEffect(() => {
     if (!geocoder || missingGroups.length === 0) {
@@ -142,14 +143,14 @@ function GoogleBusinessMap({
     let canceled = false;
     const activeGeocoder = geocoder;
 
-    async function geocodeCompletedJobs() {
+    async function geocodeJobs() {
       const pending = missingGroups.filter((group) =>
         !failedJobAddresses.current.has(group.key) && !geocodingJobAddresses.current.has(group.key));
       for (let index = 0; index < pending.length; index += 1) {
         if (canceled) return;
         const group = pending[index];
         geocodingJobAddresses.current.add(group.key);
-        setGeocodingProgress(`Locating completed jobs ${index + 1} of ${pending.length}`);
+        setGeocodingProgress(`Locating jobs ${index + 1} of ${pending.length}`);
         try {
           const response = await activeGeocoder.geocode({ address: geocodingQuery(group.address), region: "US" });
           const location = response.results[0]?.geometry.location;
@@ -175,13 +176,13 @@ function GoogleBusinessMap({
       if (!canceled) setGeocodingProgress("");
     }
 
-    void geocodeCompletedJobs();
+    void geocodeJobs();
     return () => { canceled = true; };
   }, [geocoder, missingGroups, onSaveJobCoordinates]);
 
   const jobLocations = useMemo(() => {
     const groups = new globalThis.Map<string, JobLocation>();
-    locatedCompletedJobs.forEach((job) => {
+    locatedJobs.forEach((job) => {
       if (job.latitude == null || job.longitude == null) return;
       const key = normalizedAddress(job.address);
       const existing = groups.get(key);
@@ -192,7 +193,13 @@ function GoogleBusinessMap({
       }
     });
     return [...groups.values()];
-  }, [locatedCompletedJobs]);
+  }, [locatedJobs]);
+
+  const mappedJobCount = useMemo(
+    () => jobLocations.reduce((total, location) => total + location.jobs.length, 0),
+    [jobLocations],
+  );
+  const locatingJobCount = jobsWithAddresses.length - mappedJobCount;
 
   const visibleSolicitations = useMemo(
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
@@ -290,7 +297,7 @@ function GoogleBusinessMap({
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
             <input type="checkbox" checked={showJobs} onChange={(event) => setShowJobs(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" /> Completed jobs
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" /> All jobs
           </label>
           <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
             <input type="checkbox" checked={showSolicitations} onChange={(event) => setShowSolicitations(event.target.checked)} className="h-4 w-4 accent-amber-500" />
@@ -316,8 +323,8 @@ function GoogleBusinessMap({
               <Marker
                 key={location.key}
                 position={{ lat: location.latitude, lng: location.longitude }}
-                icon={markerIcon("#059669", location.jobs.length > 1 ? 9 : 7)}
-                title={`${location.jobs.length} completed job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
+                icon={markerIcon(location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb", location.jobs.length > 1 ? 9 : 7)}
+                title={`${location.jobs.length} job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
                 onClick={(event) => { event.stop(); setSelected({ kind: "job", location }); }}
               />
             ))}
@@ -343,8 +350,8 @@ function GoogleBusinessMap({
                   <p className="font-semibold text-slate-950">{selected.location.address}</p>
                   {selected.kind === "job" ? (
                     <div className="mt-2 space-y-1">
-                      <p>{selected.location.jobs.length} completed job{selected.location.jobs.length === 1 ? "" : "s"}</p>
-                      {selected.location.jobs.slice(0, 4).map((job) => (
+                      <p>{selected.location.jobs.length} job{selected.location.jobs.length === 1 ? "" : "s"} at this property</p>
+                      {selected.location.jobs.map((job) => (
                         <p key={job.id} className="text-xs text-slate-600">{job.date}: {customerName(customers, job.customerId)} · {currency.format(job.price)}</p>
                       ))}
                     </div>
@@ -410,7 +417,7 @@ function GoogleBusinessMap({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="metric-mini"><span>Completed properties</span><strong>{jobLocations.length}</strong></div>
+        <div className="metric-mini"><span>Jobs mapped</span><strong>{mappedJobCount} / {jobs.length}</strong><small className="block text-xs text-slate-500 dark:text-slate-400">{jobLocations.length} unique locations{jobsMissingAddresses > 0 ? `; ${jobsMissingAddresses} missing addresses` : ""}{locatingJobCount > 0 ? `; ${locatingJobCount} locating` : ""}</small></div>
         <div className="metric-mini"><span>Doors solicited</span><strong>{solicitations.length}</strong></div>
         <div className="metric-mini"><span>Interested / follow up</span><strong>{solicitations.filter((item) => item.outcome === "interested" || item.outcome === "follow up").length}</strong></div>
       </div>
@@ -425,7 +432,7 @@ export function BusinessMap(props: Props) {
         <div className="max-w-lg text-center">
           <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"><MapPin size={24} /></div>
           <h2 className="mt-4 text-xl font-bold text-ink dark:text-white">Google Maps is ready to connect</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">Add the browser-restricted Google Maps key in Render as <code className="rounded bg-slate-100 px-1.5 py-1 text-xs dark:bg-slate-800">VITE_GOOGLE_MAPS_API_KEY</code>, then redeploy. Completed jobs and solicitation tracking will appear here.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">Add the browser-restricted Google Maps key in Render as <code className="rounded bg-slate-100 px-1.5 py-1 text-xs dark:bg-slate-800">VITE_GOOGLE_MAPS_API_KEY</code>, then redeploy. Jobs and solicitation tracking will appear here.</p>
           <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><Check size={17} /> Database and canvassing tools configured</div>
         </div>
       </div>
