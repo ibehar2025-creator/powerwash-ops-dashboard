@@ -11,6 +11,7 @@ import {
   ClipboardList,
   FileText,
   LayoutDashboard,
+  MapPinned,
   Menu,
   Moon,
   ReceiptText,
@@ -22,6 +23,7 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import { BusinessMap } from "./components/BusinessMap";
 import {
   customers as importedCustomers,
   expenses,
@@ -45,12 +47,12 @@ import {
   paymentHistory,
   recurringPlanType,
 } from "./lib/calculations";
-import { loadDatabaseSnapshot, saveLeadPatch, saveServicePlanPatch, syncSheetsToDatabase } from "./lib/api";
-import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan } from "./types/business";
+import { createSolicitation, deleteSolicitation, loadDatabaseSnapshot, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
+import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "calendar" | "plans" | "reviews";
-type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[] }>;
+type TabId = "dashboard" | "customers" | "leads" | "calendar" | "map" | "plans" | "reviews";
+type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[] }>;
 type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
 
@@ -59,6 +61,7 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
   { id: "customers", label: "Customers", icon: Users },
   { id: "leads", label: "Leads", icon: Sparkles },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
+  { id: "map", label: "Map", icon: MapPinned },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "reviews", label: "Reviews", icon: Star },
 ];
@@ -247,6 +250,7 @@ export default function App() {
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
   const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans));
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
+  const [solicitations, setSolicitations] = useState<Solicitation[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
@@ -286,6 +290,7 @@ export default function App() {
       if (payload.invoices) setInvoices(payload.invoices);
       if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
       if (payload.reviews) setReviews(payload.reviews);
+      if (payload.solicitations) setSolicitations(payload.solicitations);
       setSyncStatus(`Synced from Google Sheets at ${new Date().toLocaleTimeString()}.`);
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
@@ -314,6 +319,7 @@ export default function App() {
         if (payload.invoices) setInvoices(payload.invoices);
         if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
         if (payload.reviews) setReviews(payload.reviews);
+        if (payload.solicitations) setSolicitations(payload.solicitations);
         setSyncStatus("Loaded saved database records.");
       })
       .catch((error) => {
@@ -348,6 +354,27 @@ export default function App() {
       setSyncStatus(error instanceof Error ? error.message : "Service plan save failed.");
     });
   }
+
+  const saveMapJobCoordinates = useCallback(async (jobIds: string[], coordinates: { latitude: number; longitude: number }) => {
+    const idSet = new Set(jobIds);
+    setJobs((current) => current.map((job) => idSet.has(job.id) ? { ...job, ...coordinates } : job));
+    await Promise.all(jobIds.map((jobId) => saveJobPatch(jobId, coordinates)));
+  }, []);
+
+  const addSolicitation = useCallback(async (draft: Omit<Solicitation, "id">) => {
+    const saved = await createSolicitation(draft);
+    setSolicitations((current) => [saved ?? { ...draft, id: crypto.randomUUID() }, ...current]);
+  }, []);
+
+  const updateSolicitation = useCallback(async (id: string, patch: Partial<Solicitation>) => {
+    await saveSolicitationPatch(id, patch);
+    setSolicitations((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }, []);
+
+  const removeSolicitation = useCallback(async (id: string) => {
+    await deleteSolicitation(id);
+    setSolicitations((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   function chooseTab(tabId: TabId) {
     if (tabId === "calendar" && !calendarSkeletonShown.current) {
@@ -393,6 +420,7 @@ export default function App() {
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
+            {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
           </div>

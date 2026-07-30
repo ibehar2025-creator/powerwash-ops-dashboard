@@ -65,6 +65,31 @@ VITE_SHEETS_SYNC_URL=https://your-sync-endpoint.example.com/sheets
 
 Until that endpoint exists, the dashboard uses the latest bundled snapshot imported from Google Drive.
 
+## Google Maps And Canvassing
+
+The Map tab combines completed-job coverage with SalesRabbit-style door-knocking records. Completed job addresses are geocoded once and their coordinates are saved in PostgreSQL. Solicitation pins are stored separately, so Google Sheets synchronization cannot remove them.
+
+Enable these Google Maps Platform APIs in a Google Cloud project:
+
+- Maps JavaScript API
+- Geocoding API
+
+Create a browser API key restricted to these website referrers:
+
+```text
+https://powerwash-ops-dashboard.onrender.com/*
+http://localhost:4173/*
+http://127.0.0.1:4173/*
+```
+
+Restrict the key to the Maps JavaScript API and Geocoding API, then add it to Render:
+
+```bash
+VITE_GOOGLE_MAPS_API_KEY=your_browser_restricted_key
+```
+
+Redeploy after adding the environment variable because Vite embeds browser environment variables during the production build.
+
 ## Development
 
 ```bash

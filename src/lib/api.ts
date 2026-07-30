@@ -1,4 +1,4 @@
-import type { Customer, Expense, Invoice, Job, Lead, Review, ServicePlan } from "../types/business";
+import type { Customer, Expense, Invoice, Job, Lead, Review, ServicePlan, Solicitation } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -8,6 +8,7 @@ export type DatabaseSnapshot = Partial<{
   servicePlans: ServicePlan[];
   reviews: Review[];
   expenses: Expense[];
+  solicitations: Solicitation[];
 }>;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
@@ -56,4 +57,22 @@ export function saveServicePlanPatch(planId: string, patch: Partial<ServicePlan>
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+}
+
+export function createSolicitation(solicitation: Omit<Solicitation, "id">) {
+  return request<Solicitation>("/api/solicitations", {
+    method: "POST",
+    body: JSON.stringify(solicitation),
+  });
+}
+
+export function saveSolicitationPatch(solicitationId: string, patch: Partial<Solicitation>) {
+  return request<Solicitation>(`/api/solicitations/${solicitationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteSolicitation(solicitationId: string) {
+  return request<{ deleted: boolean }>(`/api/solicitations/${solicitationId}`, { method: "DELETE" });
 }

@@ -4,6 +4,7 @@ export type LeadStatus = "new" | "contacted" | "quoted" | "scheduled" | "won" | 
 export type PaymentMethod = "Zelle" | "cash" | "card" | "check" | "other";
 export type CustomerInsight = "repeat customer" | "high-value customer" | "overdue payment" | "inactive customer";
 export type PlanType = "monthly" | "3-month" | "4-month" | "6-month" | "yearly";
+export type SolicitationOutcome = "visited" | "no answer" | "interested" | "follow up" | "not interested";
 
 export interface Customer {
   id: string;
@@ -34,6 +35,18 @@ export interface Job {
   beforePhoto?: string;
   afterPhoto?: string;
   source: "mock" | "spreadsheet-import";
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface Solicitation {
+  id: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  solicitedDate: string;
+  outcome: SolicitationOutcome;
+  notes: string;
 }
 
 export interface Lead {

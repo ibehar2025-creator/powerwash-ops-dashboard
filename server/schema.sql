@@ -45,6 +45,8 @@ create table if not exists jobs (
   before_photo text,
   after_photo text,
   source text not null default 'spreadsheet-import',
+  latitude double precision,
+  longitude double precision,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -112,6 +114,18 @@ create table if not exists reviews (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists solicitations (
+  id uuid primary key default gen_random_uuid(),
+  address text not null,
+  latitude double precision not null,
+  longitude double precision not null,
+  solicited_date date not null default current_date,
+  outcome text not null default 'visited' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists business_settings (
   id text primary key default 'default',
   business_name text not null default 'The Powerwashing Pros',
@@ -149,6 +163,7 @@ begin
     'service_plans',
     'expenses',
     'reviews',
+    'solicitations',
     'business_settings'
   ]
   loop

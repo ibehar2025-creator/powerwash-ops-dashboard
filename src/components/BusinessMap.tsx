@@ -1,0 +1,428 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  APIProvider,
+  InfoWindow,
+  Map,
+  Marker,
+  useMap,
+  useMapsLibrary,
+  type MapMouseEvent,
+} from "@vis.gl/react-google-maps";
+import { Check, LocateFixed, MapPin, Search, Trash2 } from "lucide-react";
+import { currency, isoToday } from "../lib/calculations";
+import type { Customer, Job, Solicitation, SolicitationOutcome } from "../types/business";
+
+type Coordinates = { latitude: number; longitude: number };
+
+type JobLocation = {
+  key: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  jobs: Job[];
+};
+
+type SelectedLocation =
+  | { kind: "job"; location: JobLocation }
+  | { kind: "solicitation"; location: Solicitation };
+
+type Props = {
+  customers: Customer[];
+  jobs: Job[];
+  solicitations: Solicitation[];
+  onSaveJobCoordinates: (jobIds: string[], coordinates: Coordinates) => Promise<void>;
+  onCreateSolicitation: (solicitation: Omit<Solicitation, "id">) => Promise<void>;
+  onUpdateSolicitation: (id: string, patch: Partial<Solicitation>) => Promise<void>;
+  onDeleteSolicitation: (id: string) => Promise<void>;
+};
+
+const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
+const defaultCenter = { lat: 29.7174, lng: -95.4307 };
+const outcomes: SolicitationOutcome[] = ["visited", "no answer", "interested", "follow up", "not interested"];
+const outcomeColors: Record<SolicitationOutcome, string> = {
+  visited: "#64748b",
+  "no answer": "#f59e0b",
+  interested: "#2563eb",
+  "follow up": "#8b5cf6",
+  "not interested": "#ef4444",
+};
+
+function normalizedAddress(address: string) {
+  return address.toLowerCase().replace(/\bstreet\b/g, "st").replace(/\bavenue\b/g, "ave").replace(/[^a-z0-9]/g, "");
+}
+
+function geocodingQuery(address: string) {
+  if (/\b(?:tx|texas|houston)\b/i.test(address)) return address;
+  const reversedStreetNumber = address.trim().match(/^([^\d]+?)\s+(\d{2,6})$/);
+  const normalized = reversedStreetNumber ? `${reversedStreetNumber[2]} ${reversedStreetNumber[1].trim()}` : address;
+  return `${normalized}, Houston, TX`;
+}
+
+function customerName(customers: Customer[], customerId: string) {
+  return customers.find((customer) => customer.id === customerId)?.name ?? "Customer";
+}
+
+function FitMapToLocations({ positions }: { positions: google.maps.LatLngLiteral[] }) {
+  const map = useMap();
+  const fittedSignature = useRef("");
+
+  useEffect(() => {
+    if (!map || positions.length === 0) return;
+    const signature = positions.map((position) => `${position.lat.toFixed(5)},${position.lng.toFixed(5)}`).sort().join("|");
+    if (signature === fittedSignature.current) return;
+    fittedSignature.current = signature;
+    const bounds = new google.maps.LatLngBounds();
+    positions.forEach((position) => bounds.extend(position));
+    if (positions.length === 1) {
+      map.setCenter(positions[0]);
+      map.setZoom(17);
+      return;
+    }
+    map.fitBounds(bounds, 64);
+  }, [map, positions]);
+
+  return null;
+}
+
+function markerIcon(color: string, scale = 7): google.maps.Symbol {
+  return {
+    path: google.maps.SymbolPath.CIRCLE,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: "#ffffff",
+    strokeOpacity: 1,
+    strokeWeight: 2,
+    scale,
+  };
+}
+
+function GoogleBusinessMap({
+  customers,
+  jobs,
+  solicitations,
+  onSaveJobCoordinates,
+  onCreateSolicitation,
+  onUpdateSolicitation,
+  onDeleteSolicitation,
+}: Props) {
+  const geocoding = useMapsLibrary("geocoding");
+  const geocoder = useMemo(() => geocoding ? new geocoding.Geocoder() : null, [geocoding]);
+  const [showJobs, setShowJobs] = useState(true);
+  const [showSolicitations, setShowSolicitations] = useState(true);
+  const [outcomeFilter, setOutcomeFilter] = useState<"all" | SolicitationOutcome>("all");
+  const [selected, setSelected] = useState<SelectedLocation | null>(null);
+  const [address, setAddress] = useState("");
+  const [solicitedDate, setSolicitedDate] = useState(isoToday());
+  const [outcome, setOutcome] = useState<SolicitationOutcome>("visited");
+  const [notes, setNotes] = useState("");
+  const [draftCoordinates, setDraftCoordinates] = useState<Coordinates | null>(null);
+  const [locatedAddress, setLocatedAddress] = useState("");
+  const [formStatus, setFormStatus] = useState("Click a property on the map or search an address.");
+  const [saving, setSaving] = useState(false);
+  const [geocodingProgress, setGeocodingProgress] = useState("");
+  const failedJobAddresses = useRef(new Set<string>());
+
+  const completedJobs = useMemo(() => jobs.filter((job) => job.status === "completed" && job.address.trim()), [jobs]);
+  const missingGroups = useMemo(() => {
+    const groups = new globalThis.Map<string, Job[]>();
+    completedJobs.filter((job) => job.latitude == null || job.longitude == null).forEach((job) => {
+      const key = normalizedAddress(job.address);
+      groups.set(key, [...(groups.get(key) ?? []), job]);
+    });
+    return [...groups.entries()].map(([key, groupedJobs]) => ({ key, jobs: groupedJobs, address: groupedJobs[0].address }));
+  }, [completedJobs]);
+
+  useEffect(() => {
+    if (!geocoder || missingGroups.length === 0) {
+      if (missingGroups.length === 0) setGeocodingProgress("");
+      return;
+    }
+    let canceled = false;
+    const activeGeocoder = geocoder;
+
+    async function geocodeCompletedJobs() {
+      const pending = missingGroups.filter((group) => !failedJobAddresses.current.has(group.key));
+      for (let index = 0; index < pending.length; index += 1) {
+        if (canceled) return;
+        const group = pending[index];
+        setGeocodingProgress(`Locating completed jobs ${index + 1} of ${pending.length}`);
+        try {
+          const response = await activeGeocoder.geocode({ address: geocodingQuery(group.address), region: "US" });
+          const location = response.results[0]?.geometry.location;
+          if (!location) throw new Error("No matching property found");
+          await onSaveJobCoordinates(group.jobs.map((job) => job.id), {
+            latitude: location.lat(),
+            longitude: location.lng(),
+          });
+        } catch {
+          failedJobAddresses.current.add(group.key);
+        }
+      }
+      if (!canceled) setGeocodingProgress("");
+    }
+
+    void geocodeCompletedJobs();
+    return () => { canceled = true; };
+  }, [geocoder, missingGroups, onSaveJobCoordinates]);
+
+  const jobLocations = useMemo(() => {
+    const groups = new globalThis.Map<string, JobLocation>();
+    completedJobs.forEach((job) => {
+      if (job.latitude == null || job.longitude == null) return;
+      const key = normalizedAddress(job.address);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.jobs.push(job);
+      } else {
+        groups.set(key, { key, address: job.address, latitude: job.latitude, longitude: job.longitude, jobs: [job] });
+      }
+    });
+    return [...groups.values()];
+  }, [completedJobs]);
+
+  const visibleSolicitations = useMemo(
+    () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
+    [outcomeFilter, solicitations],
+  );
+
+  const positions = useMemo(() => [
+    ...(showJobs ? jobLocations.map((item) => ({ lat: item.latitude, lng: item.longitude })) : []),
+    ...(showSolicitations ? visibleSolicitations.map((item) => ({ lat: item.latitude, lng: item.longitude })) : []),
+  ], [jobLocations, showJobs, showSolicitations, visibleSolicitations]);
+
+  const reverseGeocode = useCallback(async (position: google.maps.LatLngLiteral) => {
+    setDraftCoordinates({ latitude: position.lat, longitude: position.lng });
+    setSelected(null);
+    setFormStatus("Looking up this property...");
+    if (!geocoder) return;
+    try {
+      const response = await geocoder.geocode({ location: position });
+      const formattedAddress = response.results[0]?.formatted_address ?? `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
+      setAddress(formattedAddress);
+      setLocatedAddress(formattedAddress);
+      setFormStatus("Property selected. Choose the result and save it.");
+    } catch {
+      const coordinates = `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
+      setAddress(coordinates);
+      setLocatedAddress(coordinates);
+      setFormStatus("Pin selected. Add any identifying address details before saving.");
+    }
+  }, [geocoder]);
+
+  function handleMapClick(event: MapMouseEvent) {
+    if (event.detail.latLng) void reverseGeocode(event.detail.latLng);
+  }
+
+  async function locateTypedAddress() {
+    if (!geocoder || !address.trim()) return null;
+    setFormStatus("Finding that address...");
+    const response = await geocoder.geocode({ address: geocodingQuery(address.trim()), region: "US" });
+    const result = response.results[0];
+    if (!result) throw new Error("Address not found");
+    const coordinates = { latitude: result.geometry.location.lat(), longitude: result.geometry.location.lng() };
+    setAddress(result.formatted_address);
+    setLocatedAddress(result.formatted_address);
+    setDraftCoordinates(coordinates);
+    setFormStatus("Address located. Choose the result and save it.");
+    return { coordinates, formattedAddress: result.formatted_address };
+  }
+
+  async function submitSolicitation(event: React.FormEvent) {
+    event.preventDefault();
+    if (!address.trim()) {
+      setFormStatus("Enter an address or click a property on the map.");
+      return;
+    }
+    setSaving(true);
+    try {
+      let coordinates = draftCoordinates;
+      let savedAddress = address.trim();
+      if (!coordinates || locatedAddress !== address) {
+        const located = await locateTypedAddress();
+        if (!located) return;
+        coordinates = located.coordinates;
+        savedAddress = located.formattedAddress;
+      }
+      await onCreateSolicitation({
+        address: savedAddress,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        solicitedDate,
+        outcome,
+        notes: notes.trim(),
+      });
+      setAddress("");
+      setNotes("");
+      setDraftCoordinates(null);
+      setLocatedAddress("");
+      setOutcome("visited");
+      setFormStatus("Solicitation saved to the map.");
+    } catch (error) {
+      setFormStatus(error instanceof Error ? error.message : "Unable to save this location.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const selectedPosition = selected?.kind === "job"
+    ? { lat: selected.location.latitude, lng: selected.location.longitude }
+    : selected?.kind === "solicitation"
+      ? { lat: selected.location.latitude, lng: selected.location.longitude }
+      : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Field coverage</p>
+          <h2 className="text-xl font-bold text-ink dark:text-white">Jobs and canvassing map</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Click a property to record a door you solicited.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+            <input type="checkbox" checked={showJobs} onChange={(event) => setShowJobs(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" /> Completed jobs
+          </label>
+          <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
+            <input type="checkbox" checked={showSolicitations} onChange={(event) => setShowSolicitations(event.target.checked)} className="h-4 w-4 accent-amber-500" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Solicited
+          </label>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="relative h-[58vh] min-h-[480px] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900 xl:h-[calc(100vh-245px)] xl:max-h-[760px]">
+          <Map
+            defaultCenter={defaultCenter}
+            defaultZoom={13}
+            gestureHandling="greedy"
+            mapTypeControl={false}
+            streetViewControl={false}
+            clickableIcons={false}
+            fullscreenControl
+            reuseMaps
+            onClick={handleMapClick}
+          >
+            <FitMapToLocations positions={positions} />
+            {showJobs && jobLocations.map((location) => (
+              <Marker
+                key={location.key}
+                position={{ lat: location.latitude, lng: location.longitude }}
+                icon={markerIcon("#059669", location.jobs.length > 1 ? 9 : 7)}
+                title={`${location.jobs.length} completed job${location.jobs.length === 1 ? "" : "s"} at ${location.address}`}
+                onClick={(event) => { event.stop(); setSelected({ kind: "job", location }); }}
+              />
+            ))}
+            {showSolicitations && visibleSolicitations.map((location) => (
+              <Marker
+                key={location.id}
+                position={{ lat: location.latitude, lng: location.longitude }}
+                icon={markerIcon(outcomeColors[location.outcome])}
+                title={`${location.outcome} at ${location.address}`}
+                onClick={(event) => { event.stop(); setSelected({ kind: "solicitation", location }); }}
+              />
+            ))}
+            {draftCoordinates && (
+              <Marker
+                position={{ lat: draftCoordinates.latitude, lng: draftCoordinates.longitude }}
+                icon={markerIcon("#0f172a", 8)}
+                title="New solicitation"
+              />
+            )}
+            {selected && selectedPosition && (
+              <InfoWindow position={selectedPosition} onCloseClick={() => setSelected(null)}>
+                <div className="max-w-[260px] text-sm text-slate-700">
+                  <p className="font-semibold text-slate-950">{selected.location.address}</p>
+                  {selected.kind === "job" ? (
+                    <div className="mt-2 space-y-1">
+                      <p>{selected.location.jobs.length} completed job{selected.location.jobs.length === 1 ? "" : "s"}</p>
+                      {selected.location.jobs.slice(0, 4).map((job) => (
+                        <p key={job.id} className="text-xs text-slate-600">{job.date}: {customerName(customers, job.customerId)} · {currency.format(job.price)}</p>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-1">
+                      <p className="capitalize">{selected.location.outcome} · {selected.location.solicitedDate}</p>
+                      {selected.location.notes && <p className="text-xs text-slate-600">{selected.location.notes}</p>}
+                    </div>
+                  )}
+                </div>
+              </InfoWindow>
+            )}
+          </Map>
+          {geocodingProgress && <div className="absolute bottom-3 left-3 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow dark:bg-slate-900/95 dark:text-slate-200">{geocodingProgress}</div>}
+        </div>
+
+        <aside className="min-h-0 space-y-4 xl:max-h-[calc(100vh-245px)] xl:overflow-y-auto xl:pr-1">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center gap-2">
+              <LocateFixed size={18} className="text-lagoon dark:text-cyan-300" />
+              <h3 className="font-semibold text-ink dark:text-white">Record a solicitation</h3>
+            </div>
+            <form className="mt-4 space-y-3" onSubmit={submitSolicitation}>
+              <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">
+                Address
+                <div className="mt-2 flex gap-2">
+                  <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Click map or enter address" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" />
+                  <button type="button" className="icon-button shrink-0" title="Find address" aria-label="Find address" onClick={() => void locateTypedAddress().catch(() => setFormStatus("Address not found. Add the city or ZIP code and try again."))}><Search size={17} /></button>
+                </div>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={solicitedDate} onChange={(event) => setSolicitedDate(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
+                <label className="text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={outcome} onChange={(event) => setOutcome(event.target.value as SolicitationOutcome)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              </div>
+              <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Name, interest, follow-up details..." className="mt-2 min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
+              <p className="min-h-8 text-xs leading-4 text-slate-500 dark:text-slate-400">{formStatus}</p>
+              <button className="primary-button w-full gap-2" disabled={saving}><MapPin size={17} />{saving ? "Saving..." : "Save solicitation"}</button>
+            </form>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-3">
+              <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Canvassing log</p><h3 className="font-semibold text-ink dark:text-white">{solicitations.length} doors tracked</h3></div>
+              <select value={outcomeFilter} onChange={(event) => setOutcomeFilter(event.target.value as "all" | SolicitationOutcome)} className="max-w-32 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"><option value="all">All results</option>{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+            </div>
+            <div className="mt-3 space-y-2">
+              {visibleSolicitations.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No solicitation pins match this filter.</p>}
+              {visibleSolicitations.slice(0, 40).map((item) => (
+                <article key={item.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                  <button type="button" className="w-full text-left" onClick={() => setSelected({ kind: "solicitation", location: item })}>
+                    <div className="flex items-start gap-2"><span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: outcomeColors[item.outcome] }} /><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink dark:text-white">{item.address}</p><p className="text-xs text-slate-500">{item.solicitedDate}</p></div></div>
+                  </button>
+                  <div className="mt-2 flex items-center gap-2">
+                    <select value={item.outcome} onChange={(event) => void onUpdateSolicitation(item.id, { outcome: event.target.value as SolicitationOutcome })} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{outcomes.map((result) => <option key={result} value={result}>{result}</option>)}</select>
+                    <button type="button" className="icon-button h-8 w-8 shrink-0" title="Delete solicitation" aria-label={`Delete solicitation at ${item.address}`} onClick={() => void onDeleteSolicitation(item.id)}><Trash2 size={15} /></button>
+                  </div>
+                  {item.notes && <p className="mt-2 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{item.notes}</p>}
+                </article>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="metric-mini"><span>Completed properties</span><strong>{jobLocations.length}</strong></div>
+        <div className="metric-mini"><span>Doors solicited</span><strong>{solicitations.length}</strong></div>
+        <div className="metric-mini"><span>Interested / follow up</span><strong>{solicitations.filter((item) => item.outcome === "interested" || item.outcome === "follow up").length}</strong></div>
+      </div>
+    </div>
+  );
+}
+
+export function BusinessMap(props: Props) {
+  if (!apiKey) {
+    return (
+      <div className="grid min-h-[520px] place-items-center rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+        <div className="max-w-lg text-center">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"><MapPin size={24} /></div>
+          <h2 className="mt-4 text-xl font-bold text-ink dark:text-white">Google Maps is ready to connect</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">Add the browser-restricted Google Maps key in Render as <code className="rounded bg-slate-100 px-1.5 py-1 text-xs dark:bg-slate-800">VITE_GOOGLE_MAPS_API_KEY</code>, then redeploy. Completed jobs and solicitation tracking will appear here.</p>
+          <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><Check size={17} /> Database and canvassing tools configured</div>
+        </div>
+      </div>
+    );
+  }
+
+  return <APIProvider apiKey={apiKey} region="US" libraries={["geocoding"]}><GoogleBusinessMap {...props} /></APIProvider>;
+}

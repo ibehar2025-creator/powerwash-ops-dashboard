@@ -21,6 +21,26 @@ const pool = process.env.DATABASE_URL
     })
   : null;
 
+async function ensureMapSchema() {
+  if (!pool) return;
+  await pool.query(`
+    alter table jobs add column if not exists latitude double precision;
+    alter table jobs add column if not exists longitude double precision;
+
+    create table if not exists solicitations (
+      id uuid primary key default gen_random_uuid(),
+      address text not null,
+      latitude double precision not null,
+      longitude double precision not null,
+      solicited_date date not null default current_date,
+      outcome text not null default 'visited' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
+      notes text not null default '',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+  `);
+}
+
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
@@ -73,6 +93,8 @@ const toJob = (row) => ({
   beforePhoto: row.before_photo ?? undefined,
   afterPhoto: row.after_photo ?? undefined,
   source: row.source,
+  latitude: row.latitude == null ? undefined : Number(row.latitude),
+  longitude: row.longitude == null ? undefined : Number(row.longitude),
 });
 
 const toInvoice = (row) => ({
@@ -111,13 +133,23 @@ const toReview = (row) => ({
   source: row.source,
 });
 
+const toSolicitation = (row) => ({
+  id: row.id,
+  address: row.address,
+  latitude: Number(row.latitude),
+  longitude: Number(row.longitude),
+  solicitedDate: row.solicited_date?.toISOString?.().slice(0, 10) ?? row.solicited_date,
+  outcome: row.outcome,
+  notes: row.notes,
+});
+
 async function tableRows(table, orderBy = "created_at asc") {
   const result = await pool.query(`select * from ${table} order by ${orderBy}`);
   return result.rows;
 }
 
 async function loadSnapshot() {
-  const [customers, leads, jobs, invoices, servicePlans, reviews, expenses] = await Promise.all([
+  const [customers, leads, jobs, invoices, servicePlans, reviews, expenses, solicitations] = await Promise.all([
     tableRows("customers", "name asc"),
     tableRows("leads", "follow_up_date asc nulls last, created_at asc"),
     tableRows("jobs", "date asc, time asc"),
@@ -125,6 +157,7 @@ async function loadSnapshot() {
     tableRows("service_plans", "renewal_date asc nulls last"),
     tableRows("reviews", "submitted_at desc"),
     tableRows("expenses", "date desc"),
+    tableRows("solicitations", "solicited_date desc, created_at desc"),
   ]);
 
   return {
@@ -135,6 +168,7 @@ async function loadSnapshot() {
     servicePlans: servicePlans.map(toServicePlan),
     reviews: reviews.map(toReview),
     expenses,
+    solicitations: solicitations.map(toSolicitation),
   };
 }
 
@@ -342,7 +376,7 @@ app.patch("/api/leads/:id", requireDatabase, async (req, res, next) => {
 
 app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
   try {
-    const { status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes } = req.body;
+    const { status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
     const result = await pool.query(
       `update jobs
        set status = coalesce($2, status),
@@ -351,12 +385,67 @@ app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
            tip_amount = coalesce($5, tip_amount),
            price = coalesce($6, price),
            payment_method = coalesce($7, payment_method),
-           notes = coalesce($8, notes)
+           notes = coalesce($8, notes),
+           latitude = coalesce($9, latitude),
+           longitude = coalesce($10, longitude)
        where id = $1
        returning *`,
-      [req.params.id, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes],
+      [req.params.id, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude],
     );
     res.json(toJob(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/solicitations", requireDatabase, async (req, res, next) => {
+  try {
+    const { address, latitude, longitude, solicitedDate, outcome, notes } = req.body;
+    if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      res.status(400).json({ error: "Address and valid coordinates are required." });
+      return;
+    }
+    const result = await pool.query(
+      `insert into solicitations (address, latitude, longitude, solicited_date, outcome, notes)
+       values ($1, $2, $3, $4, $5, $6)
+       returning *`,
+      [address, latitude, longitude, solicitedDate || new Date().toISOString().slice(0, 10), outcome || "visited", notes || ""],
+    );
+    res.status(201).json(toSolicitation(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
+  try {
+    const { address, latitude, longitude, solicitedDate, outcome, notes } = req.body;
+    const result = await pool.query(
+      `update solicitations
+       set address = coalesce($2, address),
+           latitude = coalesce($3, latitude),
+           longitude = coalesce($4, longitude),
+           solicited_date = coalesce($5, solicited_date),
+           outcome = coalesce($6, outcome),
+           notes = coalesce($7, notes)
+       where id = $1
+       returning *`,
+      [req.params.id, address, latitude, longitude, solicitedDate, outcome, notes],
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ error: "Solicitation not found." });
+      return;
+    }
+    res.json(toSolicitation(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
+  try {
+    const result = await pool.query("delete from solicitations where id = $1 returning id", [req.params.id]);
+    res.json({ deleted: Boolean(result.rows[0]) });
   } catch (error) {
     next(error);
   }
@@ -417,6 +506,14 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: "Server error", detail: error.message });
 });
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`The Powerwashing Pros dashboard listening on ${port}`);
+async function startServer() {
+  await ensureMapSchema();
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`The Powerwashing Pros dashboard listening on ${port}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Unable to initialize the dashboard database", error);
+  process.exit(1);
 });

@@ -13,6 +13,7 @@
     "db:seed:sheets": "node server/seed-from-sheets.mjs"
   },
   "dependencies": {
+    "@vis.gl/react-google-maps": "^1.9.0",
     "@vitejs/plugin-react": "^5.0.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
