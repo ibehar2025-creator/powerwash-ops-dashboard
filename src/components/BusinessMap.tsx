@@ -51,11 +51,23 @@ function normalizedAddress(address: string) {
   return address.toLowerCase().replace(/\bstreet\b/g, "st").replace(/\bavenue\b/g, "ave").replace(/[^a-z0-9]/g, "");
 }
 
+function blueBonnetStreetNumber(address: string) {
+  return address.trim().match(/^(\d{3,5})\s+blue\s*bonnet(?:\s+(?:blvd|boulevard))?$/i)?.[1] ?? null;
+}
+
 function geocodingQuery(address: string) {
+  const blueBonnetNumber = blueBonnetStreetNumber(address);
+  if (blueBonnetNumber) return `${blueBonnetNumber} Blue Bonnet Blvd, Houston, TX 77025`;
   if (/\b(?:tx|texas|houston)\b/i.test(address)) return address;
   const reversedStreetNumber = address.trim().match(/^([^\d]+?)\s+(\d{2,6})$/);
   const normalized = reversedStreetNumber ? `${reversedStreetNumber[2]} ${reversedStreetNumber[1].trim()}` : address;
   return `${normalized}, Houston, TX`;
+}
+
+function needsGeocoding(job: Job) {
+  if (job.latitude == null || job.longitude == null) return true;
+  if (!blueBonnetStreetNumber(job.address)) return false;
+  return job.latitude < 29.68 || job.latitude > 29.73 || job.longitude < -95.47 || job.longitude > -95.41;
 }
 
 function customerName(customers: Customer[], customerId: string) {
@@ -155,7 +167,7 @@ function GoogleBusinessMap({
   }), [jobsWithAddresses, jobCoordinateCache]);
   const missingGroups = useMemo(() => {
     const groups = new globalThis.Map<string, Job[]>();
-    locatedJobs.filter((job) => job.latitude == null || job.longitude == null).forEach((job) => {
+    locatedJobs.filter(needsGeocoding).forEach((job) => {
       const key = normalizedAddress(job.address);
       groups.set(key, [...(groups.get(key) ?? []), job]);
     });
