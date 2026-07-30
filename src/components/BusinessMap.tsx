@@ -19,7 +19,6 @@ type JobLocation = {
   latitude: number;
   longitude: number;
   jobs: Job[];
-  approximate?: boolean;
 };
 
 type SelectedLocation =
@@ -181,12 +180,10 @@ function JobMarkers({
       key={location.key}
       position={{ lat: location.latitude, lng: location.longitude }}
       icon={markerIcon(
-        location.approximate
-          ? "#64748b"
-          : location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
+        location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
         6,
       )}
-      title={location.approximate ? `${location.jobs[0].date} job; address unavailable` : `${location.jobs[0].date} job at ${location.address}`}
+      title={`${location.jobs[0].date} job at ${location.address}`}
       onClick={(event) => handleClick(event, location)}
     />
   ));
@@ -221,7 +218,6 @@ function GoogleBusinessMap({
   const geocodingJobAddresses = useRef(new Set<string>());
 
   const jobsWithAddresses = useMemo(() => jobs.filter((job) => isUsableJobAddress(job.address)), [jobs]);
-  const jobsWithoutAddresses = useMemo(() => jobs.filter((job) => !isUsableJobAddress(job.address)), [jobs]);
   const jobsMissingAddresses = jobs.length - jobsWithAddresses.length;
   const locatedJobs = useMemo(() => jobsWithAddresses.map((job) => {
     if (job.latitude != null && job.longitude != null) return job;
@@ -293,7 +289,7 @@ function GoogleBusinessMap({
       groups.set(key, [...(groups.get(key) ?? []), job]);
     });
 
-    const exactLocations = [...groups.values()].flatMap((jobsAtAddress) => jobsAtAddress.map((job, index) => {
+    return [...groups.values()].flatMap((jobsAtAddress) => jobsAtAddress.map((job, index) => {
       const angle = (2 * Math.PI * index) / jobsAtAddress.length;
       const offset = jobsAtAddress.length > 1 ? 0.00009 : 0;
       return {
@@ -304,29 +300,14 @@ function GoogleBusinessMap({
         jobs: [job],
       };
     }));
-
-    const unavailableLocations = jobsWithoutAddresses.map((job, index) => {
-      const ring = 1 + Math.floor(index / 8);
-      const angle = (2 * Math.PI * (index % 8)) / 8;
-      return {
-        key: job.id,
-        address: "Location unavailable",
-        latitude: defaultCenter.lat + Math.sin(angle) * ring * 0.0012,
-        longitude: defaultCenter.lng + Math.cos(angle) * ring * 0.0012,
-        jobs: [job],
-        approximate: true,
-      };
-    });
-
-    return [...exactLocations, ...unavailableLocations];
-  }, [jobsWithoutAddresses, locatedJobs]);
+  }, [locatedJobs]);
 
   const mappedJobCount = jobLocations.length;
   const uniqueLocationCount = useMemo(
     () => new Set(jobLocations.map((location) => normalizedAddress(location.address))).size,
     [jobLocations],
   );
-  const locatingJobCount = jobsWithAddresses.length - (mappedJobCount - jobsMissingAddresses);
+  const locatingJobCount = jobsWithAddresses.length - mappedJobCount;
 
   const visibleSolicitations = useMemo(
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
@@ -470,7 +451,6 @@ function GoogleBusinessMap({
                   <p className="font-semibold text-slate-950">{selected.location.address}</p>
                   {selected.kind === "job" ? (
                     <div className="mt-2 space-y-1">
-                      {selected.location.approximate && <p className="text-xs font-semibold text-amber-700">This spreadsheet row has no usable address. This marker is only a placeholder.</p>}
                       <p>{selected.location.jobs.length} job{selected.location.jobs.length === 1 ? "" : "s"} at this property</p>
                       {selected.location.jobs.map((job) => (
                         <p key={job.id} className="text-xs text-slate-600">{job.date}: {customerName(customers, job.customerId)} · {currency.format(job.price)}</p>
