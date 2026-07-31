@@ -56,7 +56,7 @@ function blueBonnetStreetNumber(address: string) {
 }
 
 const bellaireStreetNames = new Set([
-  "beech", "braeburn", "huisache", "oleander", "orleander", "palmetto", "pamela", "pamellia",
+  "beech", "braeburn", "holt", "huisache", "oleander", "orleander", "palmetto", "pamela", "pamellia",
   "park", "pine", "spruce", "valerie", "vernon", "vernons", "vernone", "verone", "willow",
 ]);
 
