@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, ReactNode } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   BadgeDollarSign,
   BarChart3,
@@ -10,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
-  FileText,
   LayoutDashboard,
   MapPinned,
   Menu,
@@ -21,7 +19,6 @@ import {
   Star,
   Sun,
   Users,
-  WalletCards,
   X,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
@@ -38,7 +35,6 @@ import { reviews as importedReviews } from "./data/reviews";
 import {
   annualRecurringRevenue,
   businessMetrics,
-  cumulativeRevenueOverTime,
   currency,
   customerSpend,
   isoToday,
@@ -234,6 +230,25 @@ function Stat({ label, value, detail, icon: Icon }: { label: string; value: stri
   );
 }
 
+function DashboardMetric({ label, value, detail, icon: Icon, featured, className }: { label: string; value: string; detail: string; icon: ElementType; featured?: boolean; className?: string }) {
+  return (
+    <Card className={cx("relative min-h-[164px] overflow-hidden", featured && "border-lagoon/40 bg-mist/60 dark:border-cyan-400/30 dark:bg-cyan-500/10", className)}>
+      <div className="flex h-full flex-col justify-between gap-6">
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
+          <div className={cx("grid h-10 w-10 shrink-0 place-items-center rounded-lg", featured ? "bg-lagoon text-white dark:bg-cyan-300 dark:text-slate-950" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200")}>
+            <Icon size={20} />
+          </div>
+        </div>
+        <div>
+          <p className={cx("font-bold text-ink dark:text-white", featured ? "text-4xl" : "text-3xl")}>{value}</p>
+          <p className="mt-2 text-sm leading-5 text-slate-500 dark:text-slate-400">{detail}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="text-sm font-semibold text-slate-600 dark:text-slate-300">{label}{children}</label>;
 }
@@ -417,7 +432,7 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} onJobClick={setSelectedJob} />}
+            {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
@@ -432,13 +447,38 @@ export default function App() {
   );
 }
 
-function Dashboard({ customers, jobs, leads, invoices, plans, reviews, currentDate, onJobClick }: { customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string; onJobClick: (job: Job) => void }) {
+function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { jobs: Job[]; leads: Lead[]; invoices: Invoice[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string }) {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const recurringRevenue = annualRecurringRevenue(plans);
-  const revenueGrowth = cumulativeRevenueOverTime(jobs);
-  const upcoming = jobs.filter((job) => isUpcomingJob(job, currentDate)).slice(0, 6);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
-  return <div className="space-y-4"><Section title="Today at a glance" kicker="Business dashboard" action={<span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-100">{spreadsheetImportNotice}</span>}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Daily job revenue" value={currency.format(metrics.dailyRevenue)} detail="Total price of today's jobs" icon={BadgeDollarSign} /><Stat label="Daily pay" value={currency.format(0)} detail="No crew payroll set up yet" icon={WalletCards} /><Stat label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} /><Stat label="Past due jobs" value={`${metrics.pastDueJobs}`} detail={`${currency.format(metrics.unpaidInvoiceTotal)} owed`} icon={FileText} /><Stat label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Current month scheduled and completed job value" icon={BarChart3} /><Stat label="Total revenue" value={currency.format(metrics.totalRevenue)} detail="All completed and future one-time jobs" icon={BadgeDollarSign} /><Stat label="Annual recurring revenue" value={currency.format(recurringRevenue)} detail={`${plans.filter((plan) => plan.price > 0).length} priced recurring plans annualized`} icon={RefreshCw} /><Stat label="Reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} /></div></Section><div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"><Section title="Upcoming jobs" kicker="Imported schedule"><div className="grid gap-3 md:grid-cols-2">{upcoming.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="rounded-lg border border-slate-200 p-3 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-800 dark:hover:bg-slate-800"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="text-sm text-slate-500 dark:text-slate-400">{job.date} at {job.time}</p></div><Badge status={job.status} /></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{job.serviceType}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.address}</p></button>)}</div></Section><Section title="Total revenue growth" kicker="Cumulative booked revenue"><div className="mb-3 flex items-baseline justify-between gap-3"><p className="text-2xl font-bold text-ink dark:text-white">{currency.format(revenueGrowth.at(-1)?.total ?? 0)}</p><p className="text-xs text-slate-500 dark:text-slate-400">Canceled jobs excluded</p></div><div className="h-64 min-h-64 w-full" aria-label="Total revenue growth over time"><ResponsiveContainer width="100%" height="100%"><AreaChart data={revenueGrowth} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}><defs><linearGradient id="revenueGrowthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#087f8c" stopOpacity={0.28} /><stop offset="100%" stopColor="#087f8c" stopOpacity={0.03} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#cbd5e1" opacity={0.5} /><XAxis dataKey="label" minTickGap={28} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={46} tickFormatter={(value) => `$${Math.round(Number(value) / 1000)}k`} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [currency.format(Number(value)), "Total revenue"]} labelFormatter={(_, payload) => payload[0]?.payload?.date ?? ""} contentStyle={{ borderRadius: 6, borderColor: "#cbd5e1", fontSize: 12 }} /><Area type="monotone" dataKey="total" stroke="#087f8c" strokeWidth={3} fill="url(#revenueGrowthFill)" dot={{ r: 2, fill: "#087f8c", strokeWidth: 0 }} activeDot={{ r: 5 }} /></AreaChart></ResponsiveContainer></div></Section></div></div>;
+  const pricedPlans = plans.filter((plan) => plan.price > 0).length;
+
+  return (
+    <div className="mx-auto w-full max-w-[1500px] space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Business overview</p>
+          <h2 className="mt-1 text-2xl font-bold text-ink dark:text-white">Performance snapshot</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The numbers that matter most, in one place.</p>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <CheckCircle2 size={16} />
+          Live spreadsheet data
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
+        <DashboardMetric className="xl:col-span-6" label="Total revenue" value={currency.format(metrics.totalRevenue)} detail="All completed and future one-time jobs" icon={BadgeDollarSign} featured />
+        <DashboardMetric className="xl:col-span-3" label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Scheduled and completed this month" icon={BarChart3} />
+        <DashboardMetric className="xl:col-span-3" label="Annual recurring revenue" value={currency.format(recurringRevenue)} detail={`${pricedPlans} priced plans annualized`} icon={RefreshCw} />
+        <DashboardMetric className="xl:col-span-4" label="Today's job value" value={currency.format(metrics.dailyRevenue)} detail="Total price of today's jobs" icon={BadgeDollarSign} />
+        <DashboardMetric className="xl:col-span-4" label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} />
+        <DashboardMetric className="xl:col-span-4" label="Customer reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} />
+      </div>
+
+      <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{spreadsheetImportNotice}</p>
+    </div>
+  );
 }
 
 function Customers({ customers, jobs, invoices, currentDate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; currentDate: string }) {
