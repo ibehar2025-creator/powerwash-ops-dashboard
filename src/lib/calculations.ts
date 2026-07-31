@@ -121,6 +121,24 @@ export function revenueByDay(jobs: Job[]) {
   ).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export function cumulativeRevenueOverTime(jobs: Job[]) {
+  const revenueByDate = jobs
+    .filter((job) => job.status !== "canceled")
+    .reduce<Record<string, number>>((totals, job) => {
+      totals[job.date] = (totals[job.date] ?? 0) + job.price;
+      return totals;
+    }, {});
+
+  let total = 0;
+  return Object.entries(revenueByDate)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, revenue]) => ({
+      date,
+      label: date.slice(5),
+      total: total += revenue,
+    }));
+}
+
 export function serviceBreakdown(jobs: Job[]) {
   return Object.values(
     jobs.reduce<Record<string, { name: string; count: number; revenue: number }>>((acc, job) => {

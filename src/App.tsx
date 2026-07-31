@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, ReactNode } from "react";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   BadgeDollarSign,
   BarChart3,
@@ -35,6 +36,7 @@ import { reviews as importedReviews } from "./data/reviews";
 import {
   annualRecurringRevenue,
   businessMetrics,
+  cumulativeRevenueOverTime,
   currency,
   customerSpend,
   isoToday,
@@ -230,28 +232,19 @@ function Stat({ label, value, detail, icon: Icon }: { label: string; value: stri
   );
 }
 
-const dashboardMetricTones = {
-  blue: "border-blue-200 bg-blue-50/80 text-blue-700 dark:border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-200",
-  green: "border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200",
-  magenta: "border-fuchsia-200 bg-fuchsia-50/70 text-fuchsia-700 dark:border-fuchsia-500/25 dark:bg-fuchsia-500/10 dark:text-fuchsia-200",
-  teal: "border-cyan-200 bg-cyan-50/80 text-cyan-700 dark:border-cyan-500/25 dark:bg-cyan-500/10 dark:text-cyan-200",
-  amber: "border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200",
-  violet: "border-violet-200 bg-violet-50/70 text-violet-700 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-200",
-};
-
-function DashboardMetric({ label, value, detail, icon: Icon, tone, className }: { label: string; value: string; detail: string; icon: ElementType; tone: keyof typeof dashboardMetricTones; className?: string }) {
+function DashboardMetric({ label, value, detail, icon: Icon, featured, className }: { label: string; value: string; detail: string; icon: ElementType; featured?: boolean; className?: string }) {
   return (
-    <Card className={cx("relative min-h-[164px] overflow-hidden", dashboardMetricTones[tone], className)}>
-      <div className="flex h-full flex-col justify-between gap-5">
+    <Card className={cx("relative min-h-[164px] overflow-hidden", featured && "border-lagoon/40 bg-mist/60 dark:border-cyan-400/30 dark:bg-cyan-500/10", className)}>
+      <div className="flex h-full flex-col justify-between gap-6">
         <div className="flex items-start justify-between gap-4">
-          <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/75 shadow-sm dark:bg-white/10">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
+          <div className={cx("grid h-10 w-10 shrink-0 place-items-center rounded-lg", featured ? "bg-lagoon text-white dark:bg-cyan-300 dark:text-slate-950" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200")}>
             <Icon size={20} />
           </div>
         </div>
         <div>
-          <p className="text-3xl font-bold text-ink dark:text-white">{value}</p>
-          <p className="mt-2 text-sm leading-5 text-slate-600 dark:text-slate-300">{detail}</p>
+          <p className={cx("font-bold text-ink dark:text-white", featured ? "text-4xl" : "text-3xl")}>{value}</p>
+          <p className="mt-2 text-sm leading-5 text-slate-500 dark:text-slate-400">{detail}</p>
         </div>
       </div>
     </Card>
@@ -441,7 +434,7 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-            {activeTab === "dashboard" && <Dashboard customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} onJobClick={setSelectedJob} />}
+            {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
@@ -456,23 +449,28 @@ export default function App() {
   );
 }
 
-function Dashboard({ customers, jobs, leads, invoices, plans, reviews, currentDate, onJobClick }: { customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string; onJobClick: (job: Job) => void }) {
+function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { jobs: Job[]; leads: Lead[]; invoices: Invoice[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string }) {
+  const [revenueRange, setRevenueRange] = useState<"90d" | "12m" | "all">("all");
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const recurringRevenue = annualRecurringRevenue(plans);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
   const pricedPlans = plans.filter((plan) => plan.price > 0).length;
-  const todayJobs = jobs
-    .filter((job) => job.date === currentDate && job.status !== "canceled")
-    .sort((left, right) => left.time.localeCompare(right.time));
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const revenueGrowth = useMemo(() => cumulativeRevenueOverTime(jobs), [jobs]);
+  const visibleRevenue = useMemo(() => {
+    if (revenueRange === "all") return revenueGrowth;
+    const cutoff = dateFromIso(currentDate);
+    cutoff.setDate(cutoff.getDate() - (revenueRange === "90d" ? 90 : 365));
+    const cutoffIso = isoFromDate(cutoff);
+    return revenueGrowth.filter((point) => point.date >= cutoffIso);
+  }, [currentDate, revenueGrowth, revenueRange]);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-4 py-1">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-ink dark:text-white">{greeting}</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Here is what is happening at The Powerwashing Pros today.</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Business overview</p>
+          <h2 className="mt-1 text-2xl font-bold text-ink dark:text-white">Performance snapshot</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The numbers that matter most, in one place.</p>
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
           <CheckCircle2 size={16} />
@@ -480,35 +478,19 @@ function Dashboard({ customers, jobs, leads, invoices, plans, reviews, currentDa
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <DashboardMetric label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} tone="blue" />
-        <DashboardMetric label="Today's job value" value={currency.format(metrics.dailyRevenue)} detail="Total price of today's jobs" icon={BadgeDollarSign} tone="green" />
-        <DashboardMetric label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Scheduled and completed this month" icon={BarChart3} tone="magenta" />
-        <DashboardMetric label="Total revenue" value={currency.format(metrics.totalRevenue)} detail="Completed and future one-time jobs" icon={BadgeDollarSign} tone="teal" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
+        <DashboardMetric className="xl:col-span-6" label="Total revenue" value={currency.format(metrics.totalRevenue)} detail="All completed and future one-time jobs" icon={BadgeDollarSign} featured />
+        <DashboardMetric className="xl:col-span-3" label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Scheduled and completed this month" icon={BarChart3} />
+        <DashboardMetric className="xl:col-span-3" label="Annual recurring revenue" value={currency.format(recurringRevenue)} detail={`${pricedPlans} priced plans annualized`} icon={RefreshCw} />
+        <DashboardMetric className="xl:col-span-4" label="Today's job value" value={currency.format(metrics.dailyRevenue)} detail="Total price of today's jobs" icon={BadgeDollarSign} />
+        <DashboardMetric className="xl:col-span-4" label="Jobs today" value={`${metrics.jobsToday}`} detail={`${metrics.upcomingJobs} upcoming or active`} icon={BriefcaseBusiness} />
+        <DashboardMetric className="xl:col-span-4" label="Customer reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.7fr)]">
-        <Card>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2"><CalendarDays size={19} className="text-lagoon dark:text-cyan-300" /><h3 className="font-semibold text-ink dark:text-white">Today's schedule</h3></div>
-            <span className="tag">{todayJobs.length} {todayJobs.length === 1 ? "job" : "jobs"}</span>
-          </div>
-          {todayJobs.length ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {todayJobs.map((job) => (
-                <button key={job.id} type="button" onClick={() => onJobClick(job)} className="flex min-h-[92px] items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-lagoon hover:bg-mist dark:border-slate-700 dark:bg-slate-800 dark:hover:border-cyan-400 dark:hover:bg-slate-800/70">
-                  <div className="min-w-0"><p className="text-xs font-semibold text-lagoon dark:text-cyan-300">{job.time}</p><p className="mt-1 truncate font-semibold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</p><p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{job.address || job.serviceType}</p></div>
-                  <ChevronRight size={18} className="shrink-0 text-slate-400" />
-                </button>
-              ))}
-            </div>
-          ) : <div className="grid min-h-[118px] place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">No jobs scheduled today</div>}
-        </Card>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-          <DashboardMetric label="Annual recurring revenue" value={currency.format(recurringRevenue)} detail={`${pricedPlans} priced plans annualized`} icon={RefreshCw} tone="amber" />
-          <DashboardMetric label="Customer reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} tone="violet" />
-        </div>
-      </div>
+      <Section title="Total revenue growth" kicker="Cumulative booked revenue" action={<div className="segmented" aria-label="Revenue chart range">{(["90d", "12m", "all"] as const).map((range) => <button key={range} type="button" onClick={() => setRevenueRange(range)} className={cx(revenueRange === range && "active")}>{range === "all" ? "All time" : range === "12m" ? "12 months" : "90 days"}</button>)}</div>}>
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3"><p className="text-2xl font-bold text-ink dark:text-white">{currency.format(visibleRevenue.at(-1)?.total ?? 0)}</p><p className="text-xs text-slate-500 dark:text-slate-400">Hover or tap a point for details · Canceled jobs excluded</p></div>
+        <div className="h-72 min-h-72 w-full" aria-label="Interactive total revenue growth chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={visibleRevenue} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}><defs><linearGradient id="revenueGrowthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#087f8c" stopOpacity={0.3} /><stop offset="100%" stopColor="#087f8c" stopOpacity={0.03} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#cbd5e1" opacity={0.5} /><XAxis dataKey="label" minTickGap={28} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={48} tickFormatter={(value) => `$${Math.round(Number(value) / 1000)}k`} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [currency.format(Number(value)), "Total revenue"]} labelFormatter={(_, payload) => payload[0]?.payload?.date ?? ""} contentStyle={{ borderRadius: 6, borderColor: "#cbd5e1", fontSize: 12 }} /><Area type="monotone" dataKey="total" stroke="#087f8c" strokeWidth={3} fill="url(#revenueGrowthFill)" dot={{ r: 3, fill: "#087f8c", stroke: "#ffffff", strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} /></AreaChart></ResponsiveContainer></div>
+      </Section>
 
       <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{spreadsheetImportNotice}</p>
     </div>
