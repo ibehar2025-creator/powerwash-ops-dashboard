@@ -405,14 +405,14 @@ export default function App() {
   }
 
   return (
-    <div className={cx("min-h-screen", darkMode && "dark")}>
-      <div className="flex min-h-screen bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-200">
+    <div className={cx("min-h-screen w-full max-w-full overflow-x-hidden", darkMode && "dark")}>
+      <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-200">
         <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:block">
           <div className="mb-6 rounded-lg bg-ink p-4 text-white"><p className="text-sm text-cyan-100">The</p><h1 className="text-xl font-bold">Powerwashing Pros</h1><p className="mt-2 text-xs text-slate-300">Daily control center for jobs, reviews, and growth.</p></div>
           <nav className="space-y-1">{tabs.map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`desktop-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}</nav>
         </aside>
-        <main className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <main className="flex min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
+          <header className="min-w-0 max-w-full border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
                 <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
@@ -433,7 +433,7 @@ export default function App() {
               </aside>
             </div>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
+          <div className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6">
             {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
