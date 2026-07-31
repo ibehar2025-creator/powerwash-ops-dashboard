@@ -327,10 +327,6 @@ select {
 }
 
 @media (max-width: 640px) {
-  .mobile-hidden-stat {
-    display: none;
-  }
-
   .data-table th,
   .data-table td {
     @apply px-3 py-2;
