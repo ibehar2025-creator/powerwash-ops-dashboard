@@ -29,6 +29,10 @@ async function ensureMapSchema() {
     alter table jobs add column if not exists longitude double precision;
     alter table jobs add column if not exists geocoded_address text;
 
+    alter table service_plans drop constraint if exists service_plans_type_check;
+    alter table service_plans add constraint service_plans_type_check
+      check (type in ('monthly', '3-month', '4-month', '6-month', 'yearly'));
+
     update jobs
     set latitude = null, longitude = null
     where geocoded_address is null and (latitude is not null or longitude is not null);
@@ -123,7 +127,7 @@ const toServicePlan = (row) => ({
   type: row.type,
   customerId: row.customer_id,
   discountPct: Number(row.discount_pct),
-  renewalDate: row.renewal_date?.toISOString?.().slice(0, 10) ?? row.renewal_date,
+  renewalDate: row.renewal_date?.toISOString?.().slice(0, 10) ?? row.renewal_date ?? "Not listed",
   servicesIncluded: row.services_included ?? [],
   price: Number(row.price),
   paymentStatus: row.payment_status,
@@ -372,12 +376,56 @@ async function upsertReviews(client, reviews = []) {
     );
 }
 
+function databaseDate(value) {
+  if (!value || value === "Not listed") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+async function upsertServicePlans(client, plans = []) {
+  if (plans.length === 0) return;
+  const rows = plans.map((plan) => ({
+    id: plan.id,
+    type: plan.type,
+    customer_id: plan.customerId,
+    discount_pct: plan.discountPct ?? 0,
+    renewal_date: databaseDate(plan.renewalDate),
+    services_included: plan.servicesIncluded ?? [],
+    price: plan.price ?? 0,
+    payment_status: plan.paymentStatus ?? "unpaid",
+    notes: plan.notes ?? "",
+  }));
+  await client.query(
+    `insert into service_plans (
+       id, type, customer_id, discount_pct, renewal_date, services_included,
+       price, payment_status, notes
+     )
+     select id, type, customer_id, discount_pct, renewal_date, services_included,
+       price, payment_status, notes
+     from jsonb_to_recordset($1::jsonb) as row(
+       id text, type text, customer_id text, discount_pct numeric, renewal_date date,
+       services_included text[], price numeric, payment_status text, notes text
+     )
+     on conflict (id) do update set
+       type = excluded.type,
+       customer_id = excluded.customer_id,
+       discount_pct = excluded.discount_pct,
+       renewal_date = excluded.renewal_date,
+       services_included = excluded.services_included,
+       price = excluded.price,
+       payment_status = excluded.payment_status,
+       notes = excluded.notes`,
+    [JSON.stringify(rows)],
+  );
+}
+
 async function syncSheetsIntoDatabase(payload) {
   const client = await pool.connect();
   const customerIds = (payload.customers ?? []).map((customer) => customer.id);
   const jobIds = (payload.jobs ?? []).map((job) => job.id);
   const invoiceIds = (payload.invoices ?? []).map((invoice) => invoice.id);
   const reviewIds = (payload.reviews ?? []).map((review) => review.id);
+  const servicePlanIds = (payload.servicePlans ?? []).map((plan) => plan.id);
 
   try {
     await client.query("begin");
@@ -386,6 +434,8 @@ async function syncSheetsIntoDatabase(payload) {
     await upsertJobs(client, payload.jobs);
     await upsertInvoices(client, payload.invoices);
     await upsertReviews(client, payload.reviews);
+    await upsertServicePlans(client, payload.servicePlans);
+    await client.query("delete from service_plans where id like 'sp-%' and not (id = any($1::text[]))", [servicePlanIds]);
     await client.query("delete from invoices where id like 'sheet-invoice-%' and not (id = any($1::text[]))", [invoiceIds]);
     await client.query("delete from jobs where source = 'spreadsheet-import' and not (id = any($1::text[]))", [jobIds]);
     await client.query("delete from reviews where source = 'spreadsheet-import' and not (id = any($1::text[]))", [reviewIds]);
@@ -415,6 +465,11 @@ async function runSheetSync() {
   const response = await fetch(syncUrl, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Sheet sync endpoint failed with ${response.status}`);
   const payload = await response.json();
+  const customersById = new Map((payload.customers ?? []).map((customer) => [customer.id, customer]));
+  for (const plan of payload.servicePlans ?? []) {
+    if (plan.customer?.id) customersById.set(plan.customer.id, plan.customer);
+  }
+  payload.customers = [...customersById.values()];
   await syncSheetsIntoDatabase(payload);
   return loadSnapshot();
 }

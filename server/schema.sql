@@ -81,7 +81,7 @@ create table if not exists payments (
 
 create table if not exists service_plans (
   id text primary key,
-  type text not null check (type in ('monthly', '3-month', '6-month', 'yearly')),
+  type text not null check (type in ('monthly', '3-month', '4-month', '6-month', 'yearly')),
   customer_id text not null references customers(id) on delete cascade,
   discount_pct numeric(6,2) not null default 0,
   renewal_date date,
