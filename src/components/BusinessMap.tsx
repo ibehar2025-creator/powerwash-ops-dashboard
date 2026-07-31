@@ -397,7 +397,7 @@ function GoogleBusinessMap({
       : null;
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4 overflow-x-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Field coverage</p>
@@ -417,8 +417,8 @@ function GoogleBusinessMap({
         </div>
       </div>
 
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="relative h-[58vh] min-h-[480px] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900 xl:h-[calc(100vh-245px)] xl:max-h-[760px]">
+      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="relative h-[58vh] min-h-[480px] min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900 xl:h-[calc(100vh-245px)] xl:max-h-[760px]">
           <Map
             defaultCenter={defaultCenter}
             defaultZoom={10}
@@ -471,23 +471,23 @@ function GoogleBusinessMap({
           {geocodingProgress && <div className="absolute bottom-3 left-3 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow dark:bg-slate-900/95 dark:text-slate-200">{geocodingProgress}</div>}
         </div>
 
-        <aside className="min-h-0 space-y-4 xl:max-h-[calc(100vh-245px)] xl:overflow-y-auto xl:pr-1">
-          <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <aside className="min-h-0 min-w-0 space-y-4 xl:max-h-[calc(100vh-245px)] xl:overflow-y-auto xl:pr-1">
+          <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center gap-2">
               <LocateFixed size={18} className="text-lagoon dark:text-cyan-300" />
               <h3 className="font-semibold text-ink dark:text-white">Record a solicitation</h3>
             </div>
-            <form className="mt-4 space-y-3" onSubmit={submitSolicitation}>
+            <form className="mt-4 min-w-0 space-y-3" onSubmit={submitSolicitation}>
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">
                 Address
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2 flex min-w-0 gap-2">
                   <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Click map or enter address" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" />
                   <button type="button" className="icon-button shrink-0" title="Find address" aria-label="Find address" onClick={() => void locateTypedAddress().catch(() => setFormStatus("Address not found. Add the city or ZIP code and try again."))}><Search size={17} /></button>
                 </div>
               </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={solicitedDate} onChange={(event) => setSolicitedDate(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
-                <label className="text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={outcome} onChange={(event) => setOutcome(event.target.value as SolicitationOutcome)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={solicitedDate} onChange={(event) => setSolicitedDate(event.target.value)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
+                <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={outcome} onChange={(event) => setOutcome(event.target.value as SolicitationOutcome)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
               </div>
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Name, interest, follow-up details..." className="mt-2 min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
               <p className="min-h-8 text-xs leading-4 text-slate-500 dark:text-slate-400">{formStatus}</p>
@@ -495,10 +495,10 @@ function GoogleBusinessMap({
             </form>
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex items-center justify-between gap-3">
-              <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Canvassing log</p><h3 className="font-semibold text-ink dark:text-white">{solicitations.length} doors tracked</h3></div>
-              <select value={outcomeFilter} onChange={(event) => setOutcomeFilter(event.target.value as "all" | SolicitationOutcome)} className="max-w-32 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"><option value="all">All results</option>{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+          <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Canvassing log</p><h3 className="font-semibold text-ink dark:text-white">{solicitations.length} doors tracked</h3></div>
+              <select value={outcomeFilter} onChange={(event) => setOutcomeFilter(event.target.value as "all" | SolicitationOutcome)} className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 sm:w-auto sm:max-w-32"><option value="all">All results</option>{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select>
             </div>
             <div className="mt-3 space-y-2">
               {visibleSolicitations.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No solicitation pins match this filter.</p>}
