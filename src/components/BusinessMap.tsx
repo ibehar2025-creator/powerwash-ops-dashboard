@@ -221,6 +221,8 @@ function GoogleBusinessMap({
   const [editNotes, setEditNotes] = useState("");
   const [editStatus, setEditStatus] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [geocodingProgress, setGeocodingProgress] = useState("");
   const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
   const failedJobAddresses = useRef(new Set<string>());
@@ -404,6 +406,7 @@ function GoogleBusinessMap({
     setEditOutcome(item.outcome);
     setEditNotes(item.notes);
     setEditStatus("");
+    setConfirmingDelete(false);
   }
 
   async function submitSolicitationEdit(event: React.FormEvent) {
@@ -438,6 +441,22 @@ function GoogleBusinessMap({
       setEditStatus(error instanceof Error ? error.message : "Unable to update this solicitation.");
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function removeEditingSolicitation() {
+    if (!editing) return;
+    setDeleting(true);
+    setEditStatus("Removing solicitation...");
+    try {
+      await onDeleteSolicitation(editing.id);
+      setSelected((current) => current?.kind === "solicitation" && current.location.id === editing.id ? null : current);
+      setEditing(null);
+      setConfirmingDelete(false);
+    } catch (error) {
+      setEditStatus(error instanceof Error ? error.message : "Unable to remove this solicitation.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -593,7 +612,15 @@ function GoogleBusinessMap({
               </div>
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={editNotes} onChange={(event) => setEditNotes(event.target.value)} className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
               {editStatus && <p className="text-sm text-slate-500 dark:text-slate-400">{editStatus}</p>}
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="text-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button gap-2" disabled={updating}><Check size={17} />{updating ? "Saving..." : "Save changes"}</button></div>
+              {confirmingDelete ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/25 dark:bg-rose-500/10">
+                  <p className="text-sm font-semibold text-rose-800 dark:text-rose-200">Remove this solicitation?</p>
+                  <p className="mt-1 text-xs leading-5 text-rose-700 dark:text-rose-300">This permanently removes the map dot and canvassing-log record.</p>
+                  <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="text-button" disabled={deleting} onClick={() => setConfirmingDelete(false)}>Keep solicitation</button><button type="button" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={deleting} onClick={() => void removeEditingSolicitation()}><Trash2 size={16} />{deleting ? "Removing..." : "Delete permanently"}</button></div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><button type="button" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10" onClick={() => setConfirmingDelete(true)}><Trash2 size={16} />Remove solicitation</button><div className="flex flex-col-reverse gap-2 sm:flex-row"><button type="button" className="text-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button gap-2" disabled={updating}><Check size={17} />{updating ? "Saving..." : "Save changes"}</button></div></div>
+              )}
             </div>
           </form>
         </div>
