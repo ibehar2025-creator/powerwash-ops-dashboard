@@ -7,7 +7,7 @@ import {
   useMapsLibrary,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
-import { Check, LocateFixed, MapPin, Search, Trash2 } from "lucide-react";
+import { Check, LocateFixed, MapPin, Pencil, Search, Trash2, X } from "lucide-react";
 import { currency, isoToday } from "../lib/calculations";
 import type { Customer, Job, Solicitation, SolicitationOutcome } from "../types/business";
 
@@ -38,7 +38,7 @@ type Props = {
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 const defaultCenter = { lat: 29.7174, lng: -95.4307 };
 const jobCoordinateCacheKey = "powerwashing-pros-job-coordinate-cache-v1";
-const outcomes: SolicitationOutcome[] = ["visited", "no answer", "interested", "follow up", "not interested"];
+const outcomes: SolicitationOutcome[] = ["no answer", "visited", "interested", "follow up", "not interested"];
 const outcomeColors: Record<SolicitationOutcome, string> = {
   visited: "#64748b",
   "no answer": "#f59e0b",
@@ -208,12 +208,19 @@ function GoogleBusinessMap({
   const [selected, setSelected] = useState<SelectedLocation | null>(null);
   const [address, setAddress] = useState("");
   const [solicitedDate, setSolicitedDate] = useState(isoToday());
-  const [outcome, setOutcome] = useState<SolicitationOutcome>("visited");
+  const [outcome, setOutcome] = useState<SolicitationOutcome>("no answer");
   const [notes, setNotes] = useState("");
   const [draftCoordinates, setDraftCoordinates] = useState<Coordinates | null>(null);
   const [locatedAddress, setLocatedAddress] = useState("");
   const [formStatus, setFormStatus] = useState("Click a property on the map or search an address.");
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<Solicitation | null>(null);
+  const [editAddress, setEditAddress] = useState("");
+  const [editDate, setEditDate] = useState(isoToday());
+  const [editOutcome, setEditOutcome] = useState<SolicitationOutcome>("no answer");
+  const [editNotes, setEditNotes] = useState("");
+  const [editStatus, setEditStatus] = useState("");
+  const [updating, setUpdating] = useState(false);
   const [geocodingProgress, setGeocodingProgress] = useState("");
   const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
   const failedJobAddresses = useRef(new Set<string>());
@@ -381,12 +388,56 @@ function GoogleBusinessMap({
       setNotes("");
       setDraftCoordinates(null);
       setLocatedAddress("");
-      setOutcome("visited");
+      setOutcome("no answer");
       setFormStatus("Solicitation saved to the map.");
     } catch (error) {
       setFormStatus(error instanceof Error ? error.message : "Unable to save this location.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function beginEditing(item: Solicitation) {
+    setEditing(item);
+    setEditAddress(item.address);
+    setEditDate(item.solicitedDate);
+    setEditOutcome(item.outcome);
+    setEditNotes(item.notes);
+    setEditStatus("");
+  }
+
+  async function submitSolicitationEdit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!editing || !editAddress.trim()) {
+      setEditStatus("Enter an address before saving.");
+      return;
+    }
+    setUpdating(true);
+    setEditStatus("Saving changes...");
+    try {
+      const patch: Partial<Solicitation> = {
+        address: editAddress.trim(),
+        solicitedDate: editDate,
+        outcome: editOutcome,
+        notes: editNotes.trim(),
+      };
+      if (editAddress.trim() !== editing.address && geocoder) {
+        const response = await geocoder.geocode({ address: geocodingQuery(editAddress.trim()), region: "US" });
+        const result = response.results[0];
+        if (!result) throw new Error("The updated address could not be located.");
+        patch.address = result.formatted_address;
+        patch.latitude = result.geometry.location.lat();
+        patch.longitude = result.geometry.location.lng();
+      }
+      await onUpdateSolicitation(editing.id, patch);
+      setSelected((current) => current?.kind === "solicitation" && current.location.id === editing.id
+        ? { kind: "solicitation", location: { ...current.location, ...patch } }
+        : current);
+      setEditing(null);
+    } catch (error) {
+      setEditStatus(error instanceof Error ? error.message : "Unable to update this solicitation.");
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -462,6 +513,7 @@ function GoogleBusinessMap({
                     <div className="mt-2 space-y-1">
                       <p className="capitalize">{selected.location.outcome} · {selected.location.solicitedDate}</p>
                       {selected.location.notes && <p className="text-xs text-slate-600">{selected.location.notes}</p>}
+                      <button type="button" className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700" onClick={() => beginEditing(selected.location)}><Pencil size={13} />Edit solicitation</button>
                     </div>
                   )}
                 </div>
@@ -509,6 +561,7 @@ function GoogleBusinessMap({
                   </button>
                   <div className="mt-2 flex items-center gap-2">
                     <select value={item.outcome} onChange={(event) => void onUpdateSolicitation(item.id, { outcome: event.target.value as SolicitationOutcome })} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{outcomes.map((result) => <option key={result} value={result}>{result}</option>)}</select>
+                    <button type="button" className="icon-button h-8 w-8 shrink-0" title="Edit solicitation" aria-label={`Edit solicitation at ${item.address}`} onClick={() => beginEditing(item)}><Pencil size={15} /></button>
                     <button type="button" className="icon-button h-8 w-8 shrink-0" title="Delete solicitation" aria-label={`Delete solicitation at ${item.address}`} onClick={() => void onDeleteSolicitation(item.id)}><Trash2 size={15} /></button>
                   </div>
                   {item.notes && <p className="mt-2 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{item.notes}</p>}
@@ -524,6 +577,27 @@ function GoogleBusinessMap({
         <div className="metric-mini"><span>Doors solicited</span><strong>{solicitations.length}</strong></div>
         <div className="metric-mini"><span>Interested / follow up</span><strong>{solicitations.filter((item) => item.outcome === "interested" || item.outcome === "follow up").length}</strong></div>
       </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/55 p-4">
+          <form className="my-auto w-full max-w-lg rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900" onSubmit={submitSolicitationEdit}>
+            <div className="flex items-start justify-between gap-4">
+              <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Canvassing record</p><h3 className="text-xl font-bold text-ink dark:text-white">Edit solicitation</h3></div>
+              <button type="button" className="icon-button shrink-0" title="Close edit form" aria-label="Close edit form" onClick={() => setEditing(null)}><X size={17} /></button>
+            </div>
+            <div className="mt-5 space-y-4">
+              <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Address<input value={editAddress} onChange={(event) => setEditAddress(event.target.value)} className="mt-2 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={editDate} onChange={(event) => setEditDate(event.target.value)} className="mt-2 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
+                <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={editOutcome} onChange={(event) => setEditOutcome(event.target.value as SolicitationOutcome)} className="mt-2 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              </div>
+              <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={editNotes} onChange={(event) => setEditNotes(event.target.value)} className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
+              {editStatus && <p className="text-sm text-slate-500 dark:text-slate-400">{editStatus}</p>}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="text-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button gap-2" disabled={updating}><Check size={17} />{updating ? "Saving..." : "Save changes"}</button></div>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

@@ -548,7 +548,7 @@ app.post("/api/solicitations", requireDatabase, async (req, res, next) => {
       `insert into solicitations (address, latitude, longitude, solicited_date, outcome, notes)
        values ($1, $2, $3, $4, $5, $6)
        returning *`,
-      [address, latitude, longitude, solicitedDate || new Date().toISOString().slice(0, 10), outcome || "visited", notes || ""],
+      [address, latitude, longitude, solicitedDate || new Date().toISOString().slice(0, 10), outcome || "no answer", notes || ""],
     );
     res.status(201).json(toSolicitation(result.rows[0]));
   } catch (error) {
