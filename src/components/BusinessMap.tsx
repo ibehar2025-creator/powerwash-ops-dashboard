@@ -55,6 +55,15 @@ function blueBonnetStreetNumber(address: string) {
   return address.trim().match(/^(\d{3,5})\s+blue\s*bonnet(?:\s+(?:blvd|boulevard))?$/i)?.[1] ?? null;
 }
 
+function communityDriveStreetNumber(address: string) {
+  return address.trim().match(/^(\d{3,5})\s+community(?:\s+(?:dr|drive))?$/i)?.[1] ?? null;
+}
+
+function mapDisplayAddress(address: string) {
+  const communityDriveNumber = communityDriveStreetNumber(address);
+  return communityDriveNumber ? `${communityDriveNumber} Community Dr` : address;
+}
+
 const bellaireStreetNames = new Set([
   "beech", "braeburn", "holt", "huisache", "oleander", "orleander", "palmetto", "pamela", "pamellia",
   "park", "pine", "spruce", "valerie", "vernon", "vernons", "vernone", "verone", "willow",
@@ -97,6 +106,8 @@ function isUsableJobAddress(address: string) {
 function geocodingQuery(address: string) {
   const blueBonnetNumber = blueBonnetStreetNumber(address);
   if (blueBonnetNumber) return `${blueBonnetNumber} Blue Bonnet Blvd, Houston, TX 77025`;
+  const communityDriveNumber = communityDriveStreetNumber(address);
+  if (communityDriveNumber) return `${communityDriveNumber} Community Dr, Houston, TX 77005`;
   const localBellaireAddress = bellaireAddress(address);
   if (localBellaireAddress) return localBellaireAddress;
   if (/^3818\s+rice\b/i.test(address)) return "3818 Rice Blvd, Houston, TX 77005";
@@ -120,6 +131,9 @@ function coordinatesMatchAddress(address: string, latitude: number, longitude: n
   }
   if (blueBonnetStreetNumber(address)) {
     return latitude >= 29.68 && latitude <= 29.73 && longitude >= -95.47 && longitude <= -95.41;
+  }
+  if (communityDriveStreetNumber(address)) {
+    return latitude >= 29.70 && latitude <= 29.73 && longitude >= -95.46 && longitude <= -95.42;
   }
   // Beall Street is the one approved service-area exception.
   if (/^2508\s+beall\b/i.test(address)) return true;
@@ -305,7 +319,7 @@ function GoogleBusinessMap({
       const offset = jobsAtAddress.length > 1 ? 0.00009 : 0;
       return {
         key: job.id,
-        address: job.address,
+        address: mapDisplayAddress(job.address),
         latitude: job.latitude! + Math.sin(angle) * offset,
         longitude: job.longitude! + Math.cos(angle) * offset,
         jobs: [job],
