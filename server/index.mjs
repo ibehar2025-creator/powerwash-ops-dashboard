@@ -486,7 +486,12 @@ async function syncSheetsIntoDatabase(payload) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, database: Boolean(pool), assistant: Boolean(geminiApiKey) });
+  res.json({
+    ok: true,
+    database: Boolean(pool),
+    assistant: Boolean(geminiApiKey),
+    assistantModel: geminiApiKey ? geminiModel : null,
+  });
 });
 
 app.post("/api/assistant", assistantRateLimit, async (req, res) => {
