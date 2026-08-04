@@ -104,7 +104,7 @@ The assistant has a built-in FAQ fallback. To enable free-tier photo analysis an
 
 ```bash
 GEMINI_API_KEY=your_server_side_key
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 Do not prefix the Gemini key with `VITE_`; that would expose it to browsers. The API endpoint validates image size and type and limits each visitor to 30 assistant requests per ten minutes.
