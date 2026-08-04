@@ -540,7 +540,10 @@ app.post("/api/assistant", assistantRateLimit, async (req, res) => {
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => null);
       const errorStatus = errorPayload?.error?.status || "unknown";
-      throw new Error(`Gemini request failed with ${response.status} (${errorStatus})`);
+      const errorMessage = String(errorPayload?.error?.message || "No error details returned")
+        .replace(/\s+/g, " ")
+        .slice(0, 500);
+      throw new Error(`Gemini request failed with ${response.status} (${errorStatus}): ${errorMessage}`);
     }
     const payload = await response.json();
     const reply = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
