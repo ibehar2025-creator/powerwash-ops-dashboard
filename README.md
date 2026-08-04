@@ -90,25 +90,6 @@ VITE_GOOGLE_MAPS_API_KEY=your_browser_restricted_key
 
 Redeploy after adding the environment variable because Vite embeds browser environment variables during the production build.
 
-## Public Quote Assistant
-
-The dashboard includes a bottom-right question and estimate assistant. Customers can use the dedicated public page without seeing dashboard records:
-
-```text
-https://powerwash-ops-dashboard.onrender.com/quote
-```
-
-The assistant answers common pressure-washing questions, accepts one compressed property photo, produces a preliminary estimate range, and saves completed quote requests to the Leads tab. Photos are sent for temporary analysis and are not stored in PostgreSQL or Supabase Storage.
-
-The assistant has a built-in FAQ fallback. To enable free-tier photo analysis and conversational responses, create a Gemini API key in Google AI Studio and add these server-side Render environment variables:
-
-```bash
-GEMINI_API_KEY=your_server_side_key
-GEMINI_MODEL=gemini-2.5-flash-lite
-```
-
-Do not prefix the Gemini key with `VITE_`; that would expose it to browsers. The API endpoint validates image size and type and limits each visitor to 30 assistant requests per ten minutes.
-
 ## Development
 
 ```bash
