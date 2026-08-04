@@ -374,9 +374,24 @@ export default function App() {
   }
 
   const saveMapJobCoordinates = useCallback(async (jobIds: string[], coordinates: { latitude: number; longitude: number }) => {
+    async function persistCoordinates(jobId: string) {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const saved = await saveJobPatch(jobId, coordinates);
+          if (saved) return;
+          lastError = new Error("Coordinate save service is unavailable.");
+        } catch (error) {
+          lastError = error;
+        }
+        if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+      }
+      throw lastError instanceof Error ? lastError : new Error("Unable to save job coordinates.");
+    }
+
+    await Promise.all(jobIds.map(persistCoordinates));
     const idSet = new Set(jobIds);
     setJobs((current) => current.map((job) => idSet.has(job.id) ? { ...job, ...coordinates } : job));
-    await Promise.all(jobIds.map((jobId) => saveJobPatch(jobId, coordinates)));
   }, []);
 
   const addSolicitation = useCallback(async (draft: Omit<Solicitation, "id">) => {

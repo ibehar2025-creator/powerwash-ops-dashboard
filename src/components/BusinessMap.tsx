@@ -242,6 +242,10 @@ function GoogleBusinessMap({
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
 
+  useEffect(() => {
+    failedJobAddresses.current.clear();
+  }, [jobs]);
+
   const jobsWithAddresses = useMemo(() => jobs.filter((job) => isUsableJobAddress(job.address)), [jobs]);
   const jobsMissingAddresses = jobs.length - jobsWithAddresses.length;
   const locatedJobs = useMemo(() => jobsWithAddresses.map((job) => {
@@ -285,13 +289,11 @@ function GoogleBusinessMap({
           if (!coordinatesMatchAddress(group.address, coordinates.latitude, coordinates.longitude)) {
             throw new Error("Address result was outside the expected service area");
           }
+          await onSaveJobCoordinates(group.jobs.map((job) => job.id), coordinates);
           setJobCoordinateCache((current) => {
             const next = { ...current, [group.key]: coordinates };
             writeJobCoordinateCache(next);
             return next;
-          });
-          void onSaveJobCoordinates(group.jobs.map((job) => job.id), coordinates).catch(() => {
-            // Browser caching prevents repeat lookups if the database is temporarily unavailable.
           });
         } catch {
           failedJobAddresses.current.add(group.key);
