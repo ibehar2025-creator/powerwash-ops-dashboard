@@ -15,7 +15,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const distPath = path.join(projectRoot, "dist");
 const syncUrl = process.env.SHEETS_SYNC_URL || process.env.VITE_SHEETS_SYNC_URL;
 const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
-const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash-lite";
 let activeSheetSync = null;
 const assistantRequestWindows = new Map();
 
@@ -532,11 +532,7 @@ app.post("/api/assistant", assistantRateLimit, async (req, res) => {
         generationConfig: { temperature: 0.25, maxOutputTokens: 300 },
       }),
     });
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => null);
-      const errorStatus = errorPayload?.error?.status || "unknown";
-      throw new Error(`Gemini request failed with ${response.status} (${errorStatus})`);
-    }
+    if (!response.ok) throw new Error(`Gemini request failed with ${response.status}`);
     const payload = await response.json();
     const reply = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
     if (!reply) throw new Error("Gemini returned an empty response");
