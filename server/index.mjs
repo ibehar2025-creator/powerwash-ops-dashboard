@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "node:path";
 import process from "node:process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
@@ -13,7 +14,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const distPath = path.join(projectRoot, "dist");
 const syncUrl = process.env.SHEETS_SYNC_URL || process.env.VITE_SHEETS_SYNC_URL;
+const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
+const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash-lite";
 let activeSheetSync = null;
+const assistantRequestWindows = new Map();
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
@@ -52,7 +56,39 @@ async function ensureMapSchema() {
 }
 
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "8mb" }));
+
+const assistantInstructions = `You are the website assistant for The Powerwashing Pros, a professional pressure-washing business serving Houston and nearby neighborhoods.
+Be friendly, concise, and practical. Answer ordinary questions about pressure washing, exterior cleaning, preparing for service, scheduling, and quote requests.
+Services can include driveways, sidewalks, walkways, patios, pool areas, exterior walls, roofs, and full-property cleaning. Never claim a service, guarantee, policy, availability, phone number, or discount that was not provided by the visitor or these instructions.
+For quote requests, ask for the property address, surfaces to clean, approximate size, condition, and contact information. A photo can help identify visible surfaces and staining, but cannot prove exact square footage, material condition, or final price.
+Use these broad historical starting ranges only when useful: driveway $100-$180; sidewalks or walkway $100-$175; patio $125-$225; driveway plus sidewalks $175-$300; driveway plus patio and sidewalks $250-$375; full property $250-$500. Clearly label every price as a preliminary range subject to confirmation.
+When an image is provided, describe only what is visibly relevant to cleaning, note uncertainty, and recommend an appropriate service. Do not identify people, infer sensitive traits, or make claims about structural safety.
+Encourage the visitor to submit the quote form when they want follow-up. Keep replies under 120 words.`;
+
+function assistantRateLimit(req, res, next) {
+  const now = Date.now();
+  const key = req.ip || req.socket.remoteAddress || "unknown";
+  const recent = (assistantRequestWindows.get(key) || []).filter((time) => now - time < 10 * 60_000);
+  if (recent.length >= 30) {
+    res.status(429).json({ error: "Please wait a few minutes before sending another message." });
+    return;
+  }
+  recent.push(now);
+  assistantRequestWindows.set(key, recent);
+  next();
+}
+
+function fallbackAssistantReply(message, hasImage) {
+  const text = message.toLowerCase();
+  if (hasImage) return "I received your photo. Photo analysis is being connected now. You can still submit your address and service details, and The Powerwashing Pros will review the request.";
+  if (/price|cost|estimate|quote/.test(text)) return "Most jobs depend on the surfaces, size, and staining. Driveways often start around $100-$180, while combined or full-property work is usually higher. Open Get estimate and send the address and a photo for a preliminary range.";
+  if (/how long|time|duration/.test(text)) return "Timing depends on the property and services requested. A driveway is generally faster than a full-property cleaning. Send the address and surfaces you want cleaned for a more useful estimate.";
+  if (/prepare|before|move/.test(text)) return "Before service, move vehicles, furniture, toys, and fragile items away from the cleaning area. Please also close windows and make sure an outdoor water source is accessible.";
+  if (/roof/.test(text)) return "Roof cleaning requires a method appropriate for the roofing material and condition. Send a clear photo and address so the team can review it before confirming a service or price.";
+  if (/service|clean|wash/.test(text)) return "The Powerwashing Pros handles common exterior-cleaning projects such as driveways, sidewalks, walkways, patios, pool areas, exterior walls, roofs, and full-property cleaning. What would you like cleaned?";
+  return "I can answer questions about pressure washing or help request an estimate. Tell me what you want cleaned, or choose Get estimate to send an address and photo.";
+}
 
 function requireDatabase(_req, res, next) {
   if (!pool) {
@@ -450,7 +486,87 @@ async function syncSheetsIntoDatabase(payload) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, database: Boolean(pool) });
+  res.json({ ok: true, database: Boolean(pool), assistant: Boolean(geminiApiKey) });
+});
+
+app.post("/api/assistant", assistantRateLimit, async (req, res) => {
+  const message = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, 2_000) : "";
+  const history = Array.isArray(req.body?.history)
+    ? req.body.history.slice(-10).flatMap((item) => {
+        const role = item?.role === "model" ? "model" : item?.role === "user" ? "user" : null;
+        const text = typeof item?.text === "string" ? item.text.trim().slice(0, 2_000) : "";
+        return role && text ? [{ role, parts: [{ text }] }] : [];
+      })
+    : [];
+  const image = req.body?.image;
+  const validImage = image
+    && ["image/jpeg", "image/png", "image/webp"].includes(image.mimeType)
+    && typeof image.data === "string"
+    && image.data.length <= 5_500_000
+    && /^[a-zA-Z0-9+/=]+$/.test(image.data);
+
+  if (!message && !validImage) {
+    res.status(400).json({ error: "Enter a question or attach a photo." });
+    return;
+  }
+
+  if (!geminiApiKey) {
+    res.json({ reply: fallbackAssistantReply(message, Boolean(validImage)), ai: false });
+    return;
+  }
+
+  const parts = [];
+  if (validImage) parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+  parts.push({ text: message || "Review this property photo for a preliminary pressure-washing estimate." });
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiApiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: assistantInstructions }] },
+        contents: [...history, { role: "user", parts }],
+        generationConfig: { temperature: 0.25, maxOutputTokens: 300 },
+      }),
+    });
+    if (!response.ok) throw new Error(`Gemini request failed with ${response.status}`);
+    const payload = await response.json();
+    const reply = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+    if (!reply) throw new Error("Gemini returned an empty response");
+    res.json({ reply, ai: true });
+  } catch (error) {
+    console.error("Assistant request failed:", error instanceof Error ? error.message : error);
+    res.json({ reply: fallbackAssistantReply(message, Boolean(validImage)), ai: false });
+  }
+});
+
+app.post("/api/public-leads", assistantRateLimit, requireDatabase, async (req, res, next) => {
+  try {
+    const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 120) : "";
+    const contact = typeof req.body?.contact === "string" ? req.body.contact.trim().slice(0, 180) : "";
+    const address = typeof req.body?.address === "string" ? req.body.address.trim().slice(0, 300) : "";
+    const service = typeof req.body?.service === "string" ? req.body.service.trim().slice(0, 120) : "General exterior cleaning";
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.trim().slice(0, 4_000) : "";
+    const estimatedValue = Number.isFinite(Number(req.body?.estimatedValue))
+      ? Math.max(0, Math.min(100_000, Number(req.body.estimatedValue)))
+      : 0;
+    if (!name || !contact || !address) {
+      res.status(400).json({ error: "Name, contact information, and address are required." });
+      return;
+    }
+    const result = await pool.query(
+      `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
+       values ($1, $2, $3, $4, 'website quote assistant', 'new', $5, current_date, $6)
+       returning *`,
+      [`web-${randomUUID()}`, name, contact, address, estimatedValue, `Requested service: ${service}\n${notes}`.trim()],
+    );
+    res.status(201).json(toLead(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/bootstrap", requireDatabase, async (_req, res, next) => {

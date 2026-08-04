@@ -11,6 +11,17 @@ export type DatabaseSnapshot = Partial<{
   solicitations: Solicitation[];
 }>;
 
+export type AssistantMessage = { role: "user" | "model"; text: string };
+export type AssistantImage = { data: string; mimeType: string };
+export type PublicLeadDraft = {
+  name: string;
+  contact: string;
+  address: string;
+  service: string;
+  estimatedValue: number;
+  notes: string;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -56,6 +67,20 @@ export function saveServicePlanPatch(planId: string, patch: Partial<ServicePlan>
   return request<ServicePlan>(`/api/service-plans/${planId}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
+  });
+}
+
+export function createPublicLead(lead: PublicLeadDraft) {
+  return request<Lead>("/api/public-leads", {
+    method: "POST",
+    body: JSON.stringify(lead),
+  });
+}
+
+export function askAssistant(message: string, history: AssistantMessage[], image?: AssistantImage) {
+  return request<{ reply: string; ai: boolean }>("/api/assistant", {
+    method: "POST",
+    body: JSON.stringify({ message, history, image }),
   });
 }
 
