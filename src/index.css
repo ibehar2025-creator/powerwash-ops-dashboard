@@ -244,6 +244,10 @@ select {
   @apply grid gap-3 lg:grid-cols-7;
 }
 
+.calendar-scroll {
+  @apply w-full overflow-x-auto pb-2;
+}
+
 .calendar-grid.month-mode {
   @apply lg:grid-cols-4;
 }
@@ -257,11 +261,22 @@ select {
 }
 
 .calendar-time-group {
-  @apply mb-2 grid gap-2;
+  @apply mb-2 grid gap-2 overflow-x-auto;
 }
 
 .calendar-time-group .calendar-job {
   @apply mb-0 min-w-0;
+}
+
+@media (min-width: 1024px) {
+  .calendar-grid.week-mode {
+    grid-template-columns: repeat(var(--calendar-slot-count, 7), minmax(180px, 1fr));
+    min-width: max(100%, var(--calendar-min-width, 1332px));
+  }
+
+  .calendar-grid.week-mode .calendar-day {
+    grid-column: span var(--calendar-day-span, 1);
+  }
 }
 
 .skeleton-shimmer {
