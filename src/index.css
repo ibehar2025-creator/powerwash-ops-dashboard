@@ -245,7 +245,7 @@ select {
 }
 
 .calendar-scroll {
-  @apply w-full overflow-x-auto pb-2;
+  @apply w-full min-w-0;
 }
 
 .calendar-grid.month-mode {
@@ -261,7 +261,7 @@ select {
 }
 
 .calendar-time-group {
-  @apply mb-2 grid gap-2 overflow-x-auto;
+  @apply mb-2 grid min-w-0 gap-2;
 }
 
 .calendar-time-group .calendar-job {
@@ -270,8 +270,9 @@ select {
 
 @media (min-width: 1024px) {
   .calendar-grid.week-mode {
-    grid-template-columns: repeat(var(--calendar-slot-count, 7), minmax(180px, 1fr));
-    min-width: max(100%, var(--calendar-min-width, 1332px));
+    grid-template-columns: repeat(var(--calendar-slot-count, 7), minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
   }
 
   .calendar-grid.week-mode .calendar-day {
