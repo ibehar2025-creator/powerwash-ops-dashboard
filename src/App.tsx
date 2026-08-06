@@ -366,6 +366,29 @@ export default function App() {
     });
   }
 
+  const updateMapLead = useCallback((solicitation: Solicitation, savedLead?: Lead | null) => {
+    const leadId = `solicitation-${solicitation.id}`;
+    if (solicitation.outcome !== "follow up") {
+      setLeads((current) => current.filter((lead) => lead.id !== leadId || lead.source !== "Map solicitation"));
+      return;
+    }
+
+    const lead = savedLead ?? {
+      id: leadId,
+      name: "Map follow-up",
+      contact: "Contact info pending",
+      address: solicitation.address,
+      source: "Map solicitation",
+      status: "new" as LeadStatus,
+      estimatedValue: 0,
+      followUpDate: "",
+      notes: solicitation.notes,
+    };
+    setLeads((current) => current.some((item) => item.id === lead.id)
+      ? current.map((item) => item.id === lead.id ? lead : item)
+      : [lead, ...current]);
+  }, []);
+
   function updatePlan(planId: string, patch: Partial<ServicePlan>) {
     setPlans((current) => current.map((plan) => plan.id === planId ? { ...plan, ...patch } : plan));
     void saveServicePlanPatch(planId, patch).catch((error) => {
@@ -396,17 +419,25 @@ export default function App() {
 
   const addSolicitation = useCallback(async (draft: Omit<Solicitation, "id">) => {
     const saved = await createSolicitation(draft);
-    setSolicitations((current) => [saved ?? { ...draft, id: crypto.randomUUID() }, ...current]);
-  }, []);
+    const solicitation = saved?.solicitation ?? { ...draft, id: crypto.randomUUID() };
+    setSolicitations((current) => [solicitation, ...current]);
+    updateMapLead(solicitation, saved?.lead);
+  }, [updateMapLead]);
 
   const updateSolicitation = useCallback(async (id: string, patch: Partial<Solicitation>) => {
-    await saveSolicitationPatch(id, patch);
-    setSolicitations((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
-  }, []);
+    const saved = await saveSolicitationPatch(id, patch);
+    const existing = solicitations.find((item) => item.id === id);
+    const updated = saved?.solicitation ?? (existing ? { ...existing, ...patch } : undefined);
+    if (!updated) return;
+    setSolicitations((current) => current.map((item) => item.id === id ? updated : item));
+    updateMapLead(updated, saved?.lead);
+  }, [solicitations, updateMapLead]);
 
   const removeSolicitation = useCallback(async (id: string) => {
-    await deleteSolicitation(id);
+    const removed = await deleteSolicitation(id);
     setSolicitations((current) => current.filter((item) => item.id !== id));
+    const removedLeadId = removed?.removedLeadId ?? `solicitation-${id}`;
+    setLeads((current) => current.filter((lead) => lead.id !== removedLeadId || lead.source !== "Map solicitation"));
   }, []);
 
   function chooseTab(tabId: TabId) {
@@ -518,7 +549,7 @@ function Customers({ customers, jobs, invoices, currentDate }: { customers: Cust
 
 function Leads({ leads, onLeadUpdate }: { leads: Lead[]; onLeadUpdate: (leadId: string, patch: Partial<Lead>) => void }) {
   const wins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
-  return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><div className="space-y-2"><Badge status={lead.status} /><select value={lead.status} onChange={(event) => onLeadUpdate(lead.id, { status: event.target.value as LeadStatus })}>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
+  return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><div className="space-y-2"><Badge status={lead.status} /><select value={lead.status} onChange={(event) => onLeadUpdate(lead.id, { status: event.target.value as LeadStatus })}>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate || "Not scheduled"}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
 }
 
 function jobsGroupedByTime(jobs: Job[]) {

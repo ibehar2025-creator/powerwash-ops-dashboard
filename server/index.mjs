@@ -48,6 +48,21 @@ async function ensureMapSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
+    select
+      'solicitation-' || id::text,
+      'Map follow-up',
+      'Contact info pending',
+      address,
+      'Map solicitation',
+      'new',
+      0,
+      null,
+      notes
+    from solicitations
+    where outcome = 'follow up'
+    on conflict (id) do nothing;
   `);
 }
 
@@ -81,7 +96,7 @@ const toLead = (row) => ({
   source: row.source,
   status: row.status,
   estimatedValue: Number(row.estimated_value),
-  followUpDate: row.follow_up_date?.toISOString?.().slice(0, 10) ?? row.follow_up_date,
+  followUpDate: row.follow_up_date?.toISOString?.().slice(0, 10) ?? row.follow_up_date ?? "",
   notes: row.notes,
 });
 
@@ -152,6 +167,29 @@ const toSolicitation = (row) => ({
   outcome: row.outcome,
   notes: row.notes,
 });
+
+const solicitationLeadId = (solicitationId) => `solicitation-${solicitationId}`;
+
+async function syncSolicitationLead(client, solicitation) {
+  const leadId = solicitationLeadId(solicitation.id);
+  if (solicitation.outcome !== "follow up") {
+    await client.query("delete from leads where id = $1 and source = 'Map solicitation'", [leadId]);
+    return null;
+  }
+
+  const result = await client.query(
+    `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
+     values ($1, 'Map follow-up', 'Contact info pending', $2, 'Map solicitation', 'new', 0, null, $3)
+     on conflict (id) do update set
+       address = excluded.address,
+       source = excluded.source,
+       notes = excluded.notes,
+       updated_at = now()
+     returning *`,
+    [leadId, solicitation.address, solicitation.notes || ""],
+  );
+  return toLead(result.rows[0]);
+}
 
 async function tableRows(table, orderBy = "created_at asc") {
   const result = await pool.query(`select * from ${table} order by ${orderBy}`);
@@ -538,28 +576,38 @@ app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
 });
 
 app.post("/api/solicitations", requireDatabase, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const { address, latitude, longitude, solicitedDate, outcome, notes } = req.body;
     if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
       res.status(400).json({ error: "Address and valid coordinates are required." });
       return;
     }
-    const result = await pool.query(
+    await client.query("begin");
+    const result = await client.query(
       `insert into solicitations (address, latitude, longitude, solicited_date, outcome, notes)
        values ($1, $2, $3, $4, $5, $6)
        returning *`,
       [address, latitude, longitude, solicitedDate || new Date().toISOString().slice(0, 10), outcome || "no answer", notes || ""],
     );
-    res.status(201).json(toSolicitation(result.rows[0]));
+    const solicitation = toSolicitation(result.rows[0]);
+    const lead = await syncSolicitationLead(client, result.rows[0]);
+    await client.query("commit");
+    res.status(201).json({ solicitation, lead, removedLeadId: lead ? undefined : solicitationLeadId(solicitation.id) });
   } catch (error) {
+    await client.query("rollback");
     next(error);
+  } finally {
+    client.release();
   }
 });
 
 app.patch("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const { address, latitude, longitude, solicitedDate, outcome, notes } = req.body;
-    const result = await pool.query(
+    await client.query("begin");
+    const result = await client.query(
       `update solicitations
        set address = coalesce($2, address),
            latitude = coalesce($3, latitude),
@@ -572,21 +620,36 @@ app.patch("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
       [req.params.id, address, latitude, longitude, solicitedDate, outcome, notes],
     );
     if (!result.rows[0]) {
+      await client.query("rollback");
       res.status(404).json({ error: "Solicitation not found." });
       return;
     }
-    res.json(toSolicitation(result.rows[0]));
+    const solicitation = toSolicitation(result.rows[0]);
+    const lead = await syncSolicitationLead(client, result.rows[0]);
+    await client.query("commit");
+    res.json({ solicitation, lead, removedLeadId: lead ? undefined : solicitationLeadId(solicitation.id) });
   } catch (error) {
+    await client.query("rollback");
     next(error);
+  } finally {
+    client.release();
   }
 });
 
 app.delete("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query("delete from solicitations where id = $1 returning id", [req.params.id]);
-    res.json({ deleted: Boolean(result.rows[0]) });
+    await client.query("begin");
+    const removedLeadId = solicitationLeadId(req.params.id);
+    await client.query("delete from leads where id = $1 and source = 'Map solicitation'", [removedLeadId]);
+    const result = await client.query("delete from solicitations where id = $1 returning id", [req.params.id]);
+    await client.query("commit");
+    res.json({ deleted: Boolean(result.rows[0]), removedLeadId });
   } catch (error) {
+    await client.query("rollback");
     next(error);
+  } finally {
+    client.release();
   }
 });
 

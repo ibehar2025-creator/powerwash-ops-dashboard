@@ -11,6 +11,12 @@ export type DatabaseSnapshot = Partial<{
   solicitations: Solicitation[];
 }>;
 
+export interface SolicitationSaveResult {
+  solicitation: Solicitation;
+  lead: Lead | null;
+  removedLeadId?: string;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -60,19 +66,19 @@ export function saveServicePlanPatch(planId: string, patch: Partial<ServicePlan>
 }
 
 export function createSolicitation(solicitation: Omit<Solicitation, "id">) {
-  return request<Solicitation>("/api/solicitations", {
+  return request<SolicitationSaveResult>("/api/solicitations", {
     method: "POST",
     body: JSON.stringify(solicitation),
   });
 }
 
 export function saveSolicitationPatch(solicitationId: string, patch: Partial<Solicitation>) {
-  return request<Solicitation>(`/api/solicitations/${solicitationId}`, {
+  return request<SolicitationSaveResult>(`/api/solicitations/${solicitationId}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
 }
 
 export function deleteSolicitation(solicitationId: string) {
-  return request<{ deleted: boolean }>(`/api/solicitations/${solicitationId}`, { method: "DELETE" });
+  return request<{ deleted: boolean; removedLeadId: string }>(`/api/solicitations/${solicitationId}`, { method: "DELETE" });
 }
