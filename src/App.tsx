@@ -28,7 +28,7 @@ import {
 import { BusinessMap } from "./components/BusinessMap";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { NotificationCenter } from "./components/NotificationCenter";
-import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch, TodayView } from "./components/OperationsUi";
+import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
 import {
   customers as importedCustomers,
@@ -56,14 +56,13 @@ import { followUpLabel, followUpTiming } from "./lib/followUps";
 import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "today" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews";
+type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[] }>;
 type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "today", label: "Today", icon: BriefcaseBusiness, mobileOnly: true },
   { id: "customers", label: "Customers", icon: Users },
   { id: "leads", label: "Leads", icon: Sparkles },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
@@ -534,7 +533,6 @@ export default function App() {
           )}
           <div className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6">
             {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
-            {activeTab === "today" && <TodayView customers={customers} jobs={jobs} currentDate={currentDate} onEditJob={setSelectedJob} onUpdateJob={updateJob} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} currentDate={currentDate} onCustomerClick={setSelectedCustomer} onJobClick={setSelectedJob} />}
             {activeTab === "leads" && <Leads leads={leads} currentDate={currentDate} onLeadClick={setSelectedLead} />}
             {activeTab === "jobs" && <JobsSpreadsheet customers={customers} jobs={jobs} onAddJob={() => setCreateKind("job")} onEditJob={setSelectedJob} />}
