@@ -1,4 +1,4 @@
-import type { Customer, Expense, Invoice, Job, Lead, Review, ServicePlan, Solicitation } from "../types/business";
+import type { CalendarEvent, Customer, Expense, Invoice, Job, Lead, Review, ServicePlan, Solicitation } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -9,6 +9,7 @@ export type DatabaseSnapshot = Partial<{
   reviews: Review[];
   expenses: Expense[];
   solicitations: Solicitation[];
+  calendarEvents: CalendarEvent[];
 }>;
 
 export interface SolicitationSaveResult {
@@ -108,4 +109,16 @@ export function saveSolicitationPatch(solicitationId: string, patch: Partial<Sol
 
 export function deleteSolicitation(solicitationId: string) {
   return request<{ deleted: boolean; removedLeadId: string }>(`/api/solicitations/${solicitationId}`, { method: "DELETE" });
+}
+
+export function createCalendarEvent(event: Omit<CalendarEvent, "id">) {
+  return request<CalendarEvent>("/api/calendar-events", { method: "POST", body: JSON.stringify(event) });
+}
+
+export function saveCalendarEventPatch(eventId: string, patch: Partial<CalendarEvent>) {
+  return request<CalendarEvent>(`/api/calendar-events/${eventId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function deleteCalendarEvent(eventId: string) {
+  return request<{ deleted: boolean }>(`/api/calendar-events/${eventId}`, { method: "DELETE" });
 }

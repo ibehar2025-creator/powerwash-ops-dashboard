@@ -59,6 +59,19 @@ async function ensureMapSchema() {
 
     alter table solicitations add column if not exists follow_up_date date;
 
+    create table if not exists calendar_events (
+      id uuid primary key default gen_random_uuid(),
+      title text not null,
+      type text not null default 'other' check (type in ('meeting', 'soliciting', 'estimate', 'reminder', 'other')),
+      date date not null,
+      start_time text not null default '09:00',
+      end_time text not null default '',
+      location text not null default '',
+      notes text not null default '',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
     insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
     select
       'solicitation-' || id::text,
@@ -182,6 +195,17 @@ const toSolicitation = (row) => ({
   notes: row.notes,
 });
 
+const toCalendarEvent = (row) => ({
+  id: row.id,
+  title: row.title,
+  type: row.type,
+  date: row.date?.toISOString?.().slice(0, 10) ?? row.date,
+  startTime: row.start_time,
+  endTime: row.end_time,
+  location: row.location,
+  notes: row.notes,
+});
+
 const solicitationLeadId = (solicitationId) => `solicitation-${solicitationId}`;
 
 async function syncSolicitationLead(client, solicitation) {
@@ -212,7 +236,7 @@ async function tableRows(table, orderBy = "created_at asc") {
 }
 
 async function loadSnapshot() {
-  const [customers, leads, jobs, invoices, servicePlans, reviews, expenses, solicitations] = await Promise.all([
+  const [customers, leads, jobs, invoices, servicePlans, reviews, expenses, solicitations, calendarEvents] = await Promise.all([
     tableRows("customers", "name asc"),
     tableRows("leads", "follow_up_date asc nulls last, created_at asc"),
     tableRows("jobs", "date asc, time asc"),
@@ -221,6 +245,7 @@ async function loadSnapshot() {
     tableRows("reviews", "submitted_at desc"),
     tableRows("expenses", "date desc"),
     tableRows("solicitations", "solicited_date desc, created_at desc"),
+    tableRows("calendar_events", "date asc, start_time asc, created_at asc"),
   ]);
 
   return {
@@ -232,6 +257,7 @@ async function loadSnapshot() {
     reviews: reviews.map(toReview),
     expenses,
     solicitations: solicitations.map(toSolicitation),
+    calendarEvents: calendarEvents.map(toCalendarEvent),
   };
 }
 
@@ -847,6 +873,49 @@ app.delete("/api/solicitations/:id", requireDatabase, async (req, res, next) => 
     next(error);
   } finally {
     client.release();
+  }
+});
+
+app.post("/api/calendar-events", requireDatabase, async (req, res, next) => {
+  try {
+    const { title, type = "other", date, startTime = "09:00", endTime = "", location = "", notes = "" } = req.body;
+    if (!title?.trim() || !date) return res.status(400).json({ error: "Event title and date are required." });
+    const result = await pool.query(
+      `insert into calendar_events (title, type, date, start_time, end_time, location, notes)
+       values ($1, $2, $3, $4, $5, $6, $7) returning *`,
+      [title.trim(), type, date, startTime || "09:00", endTime || "", location.trim(), notes],
+    );
+    res.status(201).json(toCalendarEvent(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/calendar-events/:id", requireDatabase, async (req, res, next) => {
+  try {
+    const { title, type, date, startTime, endTime, location, notes } = req.body;
+    const result = await pool.query(
+      `update calendar_events
+       set title = coalesce($2, title), type = coalesce($3, type), date = coalesce($4, date),
+           start_time = coalesce($5, start_time), end_time = coalesce($6, end_time),
+           location = coalesce($7, location), notes = coalesce($8, notes), updated_at = now()
+       where id = $1 returning *`,
+      [req.params.id, title?.trim(), type, date, startTime, endTime, location?.trim(), notes],
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Calendar event not found." });
+    res.json(toCalendarEvent(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/calendar-events/:id", requireDatabase, async (req, res, next) => {
+  try {
+    const result = await pool.query("delete from calendar_events where id = $1 returning id", [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Calendar event not found." });
+    res.json({ deleted: true });
+  } catch (error) {
+    next(error);
   }
 });
 

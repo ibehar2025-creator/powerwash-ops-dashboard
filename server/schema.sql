@@ -131,6 +131,19 @@ create table if not exists solicitations (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists calendar_events (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  type text not null default 'other' check (type in ('meeting', 'soliciting', 'estimate', 'reminder', 'other')),
+  date date not null,
+  start_time text not null default '09:00',
+  end_time text not null default '',
+  location text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists business_settings (
   id text primary key default 'default',
   business_name text not null default 'The Powerwashing Pros',
@@ -169,6 +182,7 @@ begin
     'expenses',
     'reviews',
     'solicitations',
+    'calendar_events',
     'business_settings'
   ]
   loop

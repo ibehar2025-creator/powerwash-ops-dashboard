@@ -5,6 +5,7 @@ export type PaymentMethod = "Zelle" | "cash" | "card" | "check" | "other";
 export type CustomerInsight = "repeat customer" | "high-value customer" | "overdue payment" | "inactive customer";
 export type PlanType = "monthly" | "3-month" | "4-month" | "6-month" | "yearly";
 export type SolicitationOutcome = "visited" | "no answer" | "interested" | "follow up" | "not interested";
+export type CalendarEventType = "meeting" | "soliciting" | "estimate" | "reminder" | "other";
 
 export interface Customer {
   id: string;
@@ -49,6 +50,17 @@ export interface Solicitation {
   solicitedDate: string;
   outcome: SolicitationOutcome;
   followUpDate: string;
+  notes: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  type: CalendarEventType;
+  date: string;
+  startTime: string;
+  endTime: string;
+  location: string;
   notes: string;
 }
 

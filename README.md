@@ -144,6 +144,9 @@ The schema is in `server/schema.sql`. The backend exposes:
 - `POST /api/leads`
 - `DELETE /api/leads/:id`
 - `PATCH /api/leads/:id`
+- `POST /api/calendar-events`
+- `PATCH /api/calendar-events/:id`
+- `DELETE /api/calendar-events/:id`
 - `PATCH /api/jobs/:id`
 - `PATCH /api/invoices/:id`
 - `PATCH /api/service-plans/:id`
