@@ -22,6 +22,7 @@ import {
   Sparkles,
   Star,
   Sun,
+  Trash2,
   X,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
@@ -50,7 +51,7 @@ import {
   jobsForCustomer,
   recurringPlanType,
 } from "./lib/calculations";
-import { createCustomer, createJob, createLead, createSolicitation, deleteSolicitation, loadDatabaseSnapshot, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
+import { createCustomer, createJob, createLead, createSolicitation, deleteJob, deleteSolicitation, loadDatabaseSnapshot, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
 import { followUpLabel, followUpTiming } from "./lib/followUps";
 import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
@@ -417,6 +418,14 @@ export default function App() {
     setSyncStatus("New job saved to the database.");
   }
 
+  async function removeJob(jobId: string) {
+    const removed = await deleteJob(jobId);
+    if (!removed?.deleted) throw new Error("Job removal service is unavailable.");
+    setJobs((current) => current.filter((job) => job.id !== jobId));
+    setSelectedJob(null);
+    setSyncStatus("Job removed from the website and Google Sheets.");
+  }
+
   const updateMapLead = useCallback((solicitation: Solicitation, savedLead?: Lead | null) => {
     const leadId = `solicitation-${solicitation.id}`;
     if (solicitation.outcome !== "follow up") {
@@ -550,7 +559,7 @@ export default function App() {
           </div>
         </main>
       </div>
-      {selectedJob && <JobModal key={selectedJob.id} customers={customers} job={selectedJob} onSave={updateJob} onFindOnMap={findJobOnMap} onClose={() => setSelectedJob(null)} />}
+      {selectedJob && <JobModal key={selectedJob.id} customers={customers} job={selectedJob} onSave={updateJob} onDelete={removeJob} onFindOnMap={findJobOnMap} onClose={() => setSelectedJob(null)} />}
       {selectedLead && <LeadModal key={selectedLead.id} lead={selectedLead} onSave={updateLead} onClose={() => setSelectedLead(null)} />}
       {selectedCustomer && <CustomerProfile customer={selectedCustomer} jobs={jobs} onClose={() => setSelectedCustomer(null)} onEditCustomer={() => { setEditingCustomer(selectedCustomer); setSelectedCustomer(null); }} onEditJob={(job) => { setSelectedCustomer(null); setSelectedJob(job); }} />}
       {editingCustomer && <CustomerEditorModal customer={editingCustomer} onClose={() => setEditingCustomer(null)} onSave={updateCustomer} />}
@@ -703,10 +712,23 @@ function sourceSpreadsheetRowUrl(job: Job) {
   return Number.isFinite(rowNumber) ? `${upcomingJobsSheetUrl}#gid=0&range=A${rowNumber + 1}` : upcomingJobsSheetUrl;
 }
 
-function JobModal({ customers, job, onSave, onFindOnMap, onClose }: { customers: Customer[]; job: Job; onSave: (jobId: string, patch: Partial<Job>) => Promise<Job>; onFindOnMap: (job: Job) => void; onClose: () => void }) {
+function JobModal({ customers, job, onSave, onDelete, onFindOnMap, onClose }: { customers: Customer[]; job: Job; onSave: (jobId: string, patch: Partial<Job>) => Promise<Job>; onDelete: (jobId: string) => Promise<void>; onFindOnMap: (job: Job) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(job);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState("");
+
+  async function remove() {
+    setDeleting(true);
+    setError("");
+    try {
+      await onDelete(job.id);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to remove this job.");
+      setDeleting(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -723,7 +745,7 @@ function JobModal({ customers, job, onSave, onFindOnMap, onClose }: { customers:
     }
   }
 
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[94vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Edit job</p><h3 className="text-xl font-bold text-ink dark:text-white">{findCustomer(customers, draft.customerId).name}</h3><p className="mt-1 text-xs text-slate-500">Changes made here are protected from spreadsheet syncs.</p></div><button type="button" className="icon-button shrink-0" onClick={onClose} title="Close" aria-label="Close job editor"><X size={17} /></button></div><div className="settings-grid mt-5"><Field label="Customer"><select value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Job["status"] })}>{jobStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><Field label="Date"><input type="date" required value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></Field><Field label="Time"><input value={draft.time} required placeholder="09:00" onChange={(event) => setDraft({ ...draft, time: event.target.value })} /></Field><Field label="Price"><input type="number" min="0" step="0.01" value={draft.price} onChange={(event) => setDraft({ ...draft, price: Number(event.target.value) || 0 })} /></Field><Field label="Service"><input value={draft.serviceType} required onChange={(event) => setDraft({ ...draft, serviceType: event.target.value })} /></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Address<input value={draft.address} required onChange={(event) => setDraft({ ...draft, address: event.target.value })} /></label><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label></div>{job.websiteEditedFields?.length ? <p className="mt-4 rounded-lg bg-mist px-3 py-2 text-xs font-medium text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200">Website edits saved for: {job.websiteEditedFields.join(", ")}</p> : null}{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex flex-col gap-2 sm:flex-row">{job.source === "spreadsheet-import" && <a className="text-button gap-2" href={sourceSpreadsheetRowUrl(job)} target="_blank" rel="noreferrer"><ExternalLink size={15} />View original spreadsheet row</a>}<button type="button" className="text-button gap-2" onClick={() => onFindOnMap(job)} disabled={!job.address.trim()}><MapPinned size={15} />Find on map</button></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><button type="button" className="text-button" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="primary-button gap-2" disabled={saving}><Save size={16} />{saving ? "Saving..." : "Save changes"}</button></div></div></form></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[94vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Edit job</p><h3 className="text-xl font-bold text-ink dark:text-white">{findCustomer(customers, draft.customerId).name}</h3><p className="mt-1 text-xs text-slate-500">Changes made here are protected from spreadsheet syncs.</p></div><button type="button" className="icon-button shrink-0" onClick={onClose} title="Close" aria-label="Close job editor"><X size={17} /></button></div><div className="settings-grid mt-5"><Field label="Customer"><select value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Job["status"] })}>{jobStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><Field label="Date"><input type="date" required value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></Field><Field label="Time"><input value={draft.time} required placeholder="09:00" onChange={(event) => setDraft({ ...draft, time: event.target.value })} /></Field><Field label="Price"><input type="number" min="0" step="0.01" value={draft.price} onChange={(event) => setDraft({ ...draft, price: Number(event.target.value) || 0 })} /></Field><Field label="Service"><input value={draft.serviceType} required onChange={(event) => setDraft({ ...draft, serviceType: event.target.value })} /></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Address<input value={draft.address} required onChange={(event) => setDraft({ ...draft, address: event.target.value })} /></label><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label></div>{job.websiteEditedFields?.length ? <p className="mt-4 rounded-lg bg-mist px-3 py-2 text-xs font-medium text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200">Website edits saved for: {job.websiteEditedFields.join(", ")}</p> : null}{confirmingDelete && <div className="mt-4 flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 sm:flex-row sm:items-center sm:justify-between"><span>This permanently removes the job from the website and spreadsheet.</span><div className="flex gap-2"><button type="button" className="text-button" onClick={() => setConfirmingDelete(false)} disabled={deleting}>Keep job</button><button type="button" className="primary-button bg-rose-600 gap-2 hover:bg-rose-700" onClick={() => void remove()} disabled={deleting}><Trash2 size={15} />{deleting ? "Removing..." : "Yes, remove"}</button></div></div>}{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex flex-col gap-2 sm:flex-row">{job.source === "spreadsheet-import" && <a className="text-button gap-2" href={sourceSpreadsheetRowUrl(job)} target="_blank" rel="noreferrer"><ExternalLink size={15} />View original spreadsheet row</a>}<button type="button" className="text-button gap-2" onClick={() => onFindOnMap(job)} disabled={!job.address.trim()}><MapPinned size={15} />Find on map</button><button type="button" className="text-button gap-2 text-rose-600 hover:border-rose-300 hover:text-rose-700 dark:text-rose-300" onClick={() => setConfirmingDelete(true)} disabled={saving || deleting}><Trash2 size={15} />Remove job</button></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><button type="button" className="text-button" onClick={onClose} disabled={saving || deleting}>Cancel</button><button type="submit" className="primary-button gap-2" disabled={saving || deleting}><Save size={16} />{saving ? "Saving..." : "Save changes"}</button></div></div></form></div>;
 }
 
 function LeadModal({ lead, onSave, onClose }: { lead: Lead; onSave: (leadId: string, patch: Partial<Lead>) => Promise<Lead>; onClose: () => void }) {

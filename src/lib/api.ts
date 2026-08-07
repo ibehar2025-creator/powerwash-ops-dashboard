@@ -56,6 +56,10 @@ export function createJob(job: Pick<Job, "date" | "time" | "customerId" | "addre
   return request<Job>("/api/jobs", { method: "POST", body: JSON.stringify(job) });
 }
 
+export function deleteJob(jobId: string) {
+  return request<{ deleted: boolean }>(`/api/jobs/${jobId}`, { method: "DELETE" });
+}
+
 export function saveLeadPatch(leadId: string, patch: Partial<Lead>) {
   return request<Lead>(`/api/leads/${leadId}`, {
     method: "PATCH",

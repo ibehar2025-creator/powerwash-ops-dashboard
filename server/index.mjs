@@ -647,6 +647,25 @@ app.post("/api/jobs", requireDatabase, async (req, res, next) => {
   }
 });
 
+app.delete("/api/jobs/:id", requireDatabase, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const existing = await client.query("select id from jobs where id = $1", [req.params.id]);
+    if (!existing.rows[0]) return res.status(404).json({ error: "Job not found." });
+    await runSheetAction("deleteJob", { jobId: req.params.id });
+    await client.query("begin");
+    await client.query("delete from invoices where job_id = $1", [req.params.id]);
+    await client.query("delete from jobs where id = $1", [req.params.id]);
+    await client.query("commit");
+    res.json({ deleted: true });
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
 app.patch("/api/leads/:id", requireDatabase, async (req, res, next) => {
   try {
     const { name, contact, address, status, estimatedValue, notes, followUpDate } = req.body;
