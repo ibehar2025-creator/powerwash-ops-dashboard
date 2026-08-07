@@ -568,6 +568,125 @@ function widestTimeGroup(jobs: Job[]) {
   return Math.max(1, ...jobsGroupedByTime(jobs).map(([, timeJobs]) => timeJobs.length));
 }
 
+function timeToMinutes(time: string) {
+  const match = time.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!match) return 9 * 60;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? 0);
+  const meridiem = match[3]?.toLowerCase();
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  return Math.min(24 * 60 - 1, Math.max(0, hour * 60 + minute));
+}
+
+function hourLabel(hour: number) {
+  if (hour === 0) return "12 AM";
+  if (hour === 12) return "12 PM";
+  return `${hour > 12 ? hour - 12 : hour} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+function timelineStatusClass(status: string) {
+  return `status-${status.replace(/\s+/g, "-")}`;
+}
+
+function TimelineEvent({ customers, job, currentDate, onJobClick }: { customers: Customer[]; job: Job; currentDate: string; onJobClick: (job: Job) => void }) {
+  const status = jobDisplayStatus(job, currentDate);
+  return (
+    <button type="button" className={cx("timeline-event", timelineStatusClass(status))} onClick={() => onJobClick(job)} title={`${findCustomer(customers, job.customerId).name} - ${job.address}`}>
+      <span className="timeline-event-time">{job.time}</span>
+      <strong>{findCustomer(customers, job.customerId).name}</strong>
+      <span className="timeline-event-address">{job.address}</span>
+    </button>
+  );
+}
+
+function TimelineAxis({ startHour, endHour, rowHeight }: { startHour: number; endHour: number; rowHeight: number }) {
+  const hours = Array.from({ length: endHour - startHour + 1 }, (_, index) => startHour + index);
+  return (
+    <div className="timeline-axis" style={{ height: (endHour - startHour) * rowHeight }} aria-hidden="true">
+      {hours.map((hour) => <span key={hour} style={{ top: (hour - startHour) * rowHeight }}>{hourLabel(hour)}</span>)}
+    </div>
+  );
+}
+
+function CalendarTimeline({ customers, days, dayJobs, daySpans, currentDate, onJobClick }: { customers: Customer[]; days: CalendarDay[]; dayJobs: Job[][]; daySpans: number[]; currentDate: string; onJobClick: (job: Job) => void }) {
+  const allJobs = dayJobs.flat();
+  const earliestHour = allJobs.length ? Math.floor(Math.min(...allJobs.map((job) => timeToMinutes(job.time))) / 60) : 8;
+  const latestHour = allJobs.length ? Math.ceil((Math.max(...allJobs.map((job) => timeToMinutes(job.time))) + 60) / 60) : 17;
+  const startHour = Math.min(7, earliestHour);
+  const endHour = Math.max(20, latestHour);
+  const rowHeight = 64;
+  const timelineHeight = (endHour - startHour) * rowHeight;
+  const slotCount = daySpans.reduce((total, span) => total + span, 0);
+  const slotStyle = { gridTemplateColumns: `repeat(${slotCount}, minmax(0, 1fr))` };
+
+  return (
+    <>
+      <div className="timeline-desktop" style={{ "--timeline-row-height": `${rowHeight}px` } as CSSProperties}>
+        <div className="timeline-week-header">
+          <div className="timeline-corner">Time</div>
+          <div className="timeline-day-headings" style={slotStyle}>
+            {days.map((day, index) => <div key={day.date} style={{ gridColumn: `span ${daySpans[index]}` }}><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div>)}
+          </div>
+        </div>
+        <div className="timeline-week-body">
+          <TimelineAxis startHour={startHour} endHour={endHour} rowHeight={rowHeight} />
+          <div className="timeline-canvas" style={{ ...slotStyle, height: timelineHeight }}>
+            {days.map((day, dayIndex) => (
+              <div key={day.date} className="timeline-day-lane" style={{ gridColumn: `span ${daySpans[dayIndex]}` }}>
+                {jobsGroupedByTime(dayJobs[dayIndex]).map(([time, timeJobs]) => (
+                  <div key={time} className="timeline-event-group" style={{ top: ((timeToMinutes(time) - startHour * 60) / 60) * rowHeight, gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>
+                    {timeJobs.map((job) => <TimelineEvent key={job.id} customers={customers} job={job} currentDate={currentDate} onJobClick={onJobClick} />)}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="timeline-mobile">
+        {days.map((day, dayIndex) => {
+          const jobsForDay = dayJobs[dayIndex];
+          if (jobsForDay.length === 0) return <div key={day.date} className="mobile-timeline-day mobile-timeline-empty"><div className="mobile-timeline-heading"><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div><p>No jobs scheduled</p></div>;
+          const firstHour = Math.max(0, Math.floor(Math.min(...jobsForDay.map((job) => timeToMinutes(job.time))) / 60) - 1);
+          const lastHour = Math.min(24, Math.max(firstHour + 3, Math.ceil((Math.max(...jobsForDay.map((job) => timeToMinutes(job.time))) + 60) / 60) + 1));
+          const mobileRowHeight = 56;
+          return (
+            <div key={day.date} className="mobile-timeline-day">
+              <div className="mobile-timeline-heading"><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div>
+              <div className="mobile-timeline-body">
+                <TimelineAxis startHour={firstHour} endHour={lastHour} rowHeight={mobileRowHeight} />
+                <div className="mobile-timeline-canvas" style={{ height: (lastHour - firstHour) * mobileRowHeight, "--timeline-row-height": `${mobileRowHeight}px` } as CSSProperties}>
+                  {jobsGroupedByTime(jobsForDay).map(([time, timeJobs]) => (
+                    <div key={time} className="timeline-event-group" style={{ top: ((timeToMinutes(time) - firstHour * 60) / 60) * mobileRowHeight, gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>
+                      {timeJobs.map((job) => <TimelineEvent key={job.id} customers={customers} job={job} currentDate={currentDate} onJobClick={onJobClick} />)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function CalendarMonth({ customers, days, dayJobs, currentDate, onJobClick }: { customers: Customer[]; days: CalendarDay[]; dayJobs: Job[][]; currentDate: string; onJobClick: (job: Job) => void }) {
+  return (
+    <div className="calendar-grid month-mode">
+      {days.map((day, dayIndex) => (
+        <div key={day.date} className="calendar-day">
+          <div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>
+          {dayJobs[dayIndex].length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}
+          {jobsGroupedByTime(dayJobs[dayIndex]).map(([time, timeJobs]) => <div key={time} className="calendar-time-group" style={{ gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>{timeJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}</div>)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void }) {
   const [mode, setMode] = useState<"day" | "week" | "month">("week");
   const [anchorIso, setAnchorIso] = useState(currentDate);
@@ -575,10 +694,6 @@ function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { custo
   const days = calendarDays(anchorDate, mode);
   const dayJobs = days.map((day) => jobs.filter((job) => job.date === day.date));
   const daySpans = dayJobs.map(widestTimeGroup);
-  const calendarSlotCount = mode === "week" ? daySpans.reduce((total, span) => total + span, 0) : days.length;
-  const calendarStyle = {
-    "--calendar-slot-count": calendarSlotCount,
-  } as CSSProperties;
   const moveCalendar = (direction: -1 | 1) => {
     const next = mode === "month" ? addMonths(anchorDate, direction) : addDays(anchorDate, direction * (mode === "week" ? 7 : 1));
     setAnchorIso(isoFromDate(next));
@@ -614,7 +729,14 @@ function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { custo
       </Section>
     );
   }
-  return <Section title="Scheduling calendar" kicker="Date-matched spreadsheet schedule" action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{dayJobs.reduce((total, jobsForDay) => total + jobsForDay.length, 0)} jobs in view</p></div><div className="calendar-scroll"><div className={cx("calendar-grid", `${mode}-mode`)} style={calendarStyle}>{days.map((day, dayIndex) => { const jobsForDay = dayJobs[dayIndex]; return <div key={day.date} className="calendar-day" style={{ "--calendar-day-span": daySpans[dayIndex] } as CSSProperties}><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{jobsForDay.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{jobsGroupedByTime(jobsForDay).map(([time, timeJobs]) => <div key={time} className="calendar-time-group" style={{ gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>{timeJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}</div>)}</div>; })}</div></div></Section>;
+  return (
+    <Section title="Scheduling calendar" kicker="Date-matched spreadsheet schedule" action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{dayJobs.reduce((total, jobsForDay) => total + jobsForDay.length, 0)} jobs in view</p></div>
+      {mode === "month"
+        ? <CalendarMonth customers={customers} days={days} dayJobs={dayJobs} currentDate={currentDate} onJobClick={onJobClick} />
+        : <CalendarTimeline customers={customers} days={days} dayJobs={dayJobs} daySpans={daySpans} currentDate={currentDate} onJobClick={onJobClick} />}
+    </Section>
+  );
 }
 
 function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void }) {
