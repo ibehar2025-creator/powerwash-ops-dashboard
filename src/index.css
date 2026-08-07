@@ -30,6 +30,29 @@ select {
   font: inherit;
 }
 
+.auth-page {
+  background:
+    linear-gradient(rgba(241, 245, 249, 0.9), rgba(241, 245, 249, 0.9)),
+    repeating-linear-gradient(90deg, #dbe5ea 0, #dbe5ea 1px, transparent 1px, transparent 72px);
+}
+
+.auth-photo {
+  background-image: url("/powerwashing-signin.webp");
+  background-position: center;
+  background-size: cover;
+}
+
+@media (max-width: 767px) {
+  .auth-page {
+    align-items: start;
+    padding-top: max(1.25rem, env(safe-area-inset-top));
+  }
+
+  .auth-photo {
+    background-position: 38% 63%;
+  }
+}
+
 .nav-item {
   @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-ink dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white;
 }

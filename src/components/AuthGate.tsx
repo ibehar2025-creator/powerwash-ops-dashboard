@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { BriefcaseBusiness, LoaderCircle, ShieldCheck, UserRound, Users } from "lucide-react";
+import { BriefcaseBusiness, Check, LoaderCircle, LockKeyhole, ShieldCheck, UserRound, Users } from "lucide-react";
 import { AuthContext } from "../lib/authContext";
 import type { AccountRole, AuthUser } from "../lib/authContext";
 
@@ -39,7 +39,8 @@ function GoogleButton({ clientId, onCredential }: { clientId: string; onCredenti
         callback: (response) => onCredential(response.credential),
         use_fedcm_for_prompt: true,
       });
-      window.google.accounts.id.renderButton(container.current, { type: "standard", theme: "outline", size: "large", shape: "rectangular", text: "continue_with", width: 320 });
+      const width = Math.min(360, Math.max(240, Math.floor(container.current.getBoundingClientRect().width)));
+      window.google.accounts.id.renderButton(container.current, { type: "standard", theme: "outline", size: "large", shape: "rectangular", text: "continue_with", width });
     };
 
     const existing = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
@@ -58,23 +59,32 @@ function GoogleButton({ clientId, onCredential }: { clientId: string; onCredenti
     };
   }, [clientId, onCredential]);
 
-  return <div className="flex min-h-11 w-full justify-center" ref={container} />;
+  return <div className="flex min-h-11 w-full justify-center md:justify-start" ref={container} />;
 }
 
 function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-screen bg-slate-100 px-4 py-8 text-slate-700 sm:place-items-center sm:px-6">
-      <div className="grid w-full max-w-4xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft md:grid-cols-[0.9fr_1.1fr]">
-        <section className="flex min-h-52 flex-col justify-between bg-ink p-7 text-white md:min-h-[560px] md:p-10">
-          <div className="grid h-12 w-12 place-items-center rounded-lg bg-lagoon text-xl font-bold">PP</div>
-          <div>
-            <p className="text-sm font-semibold text-cyan-200">The</p>
-            <h1 className="text-3xl font-bold">Powerwashing Pros</h1>
-            <p className="mt-3 max-w-xs text-sm leading-6 text-slate-300">Secure business access for owners and employees.</p>
+    <div className="auth-page grid min-h-[100dvh] place-items-center px-4 py-5 text-slate-700 sm:px-6 sm:py-8">
+      <main className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.16)] md:min-h-[600px] md:grid-cols-[1.08fr_0.92fr]">
+        <section className="auth-photo relative min-h-[225px] overflow-hidden text-white md:min-h-full">
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,20,32,0.08),rgba(8,20,32,0.86))] md:bg-[linear-gradient(180deg,rgba(8,20,32,0.12),rgba(8,20,32,0.9))]" />
+          <div className="relative flex h-full min-h-[225px] flex-col justify-between p-6 sm:p-8 md:min-h-full md:p-10">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-lg bg-lagoon text-lg font-bold shadow-lg shadow-black/20">PP</div>
+              <div><p className="text-xs font-semibold uppercase text-cyan-100">Private workspace</p><p className="text-sm font-semibold">The Powerwashing Pros</p></div>
+            </div>
+            <div className="max-w-md pt-12 md:pt-0">
+              <p className="text-xs font-semibold uppercase text-cyan-100">Business operations</p>
+              <h1 className="mt-2 text-3xl font-bold leading-tight sm:text-4xl">Your business,<br className="hidden md:block" /> ready for the day.</h1>
+              <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-slate-200">
+                <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-cyan-200" />Secure access</span>
+                <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-cyan-200" />Owner and employee accounts</span>
+              </div>
+            </div>
           </div>
         </section>
-        <section className="flex min-h-[460px] items-center p-6 sm:p-10">{children}</section>
-      </div>
+        <section className="flex items-center p-6 sm:p-10 md:p-12">{children}</section>
+      </main>
     </div>
   );
 }
@@ -170,8 +180,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <AuthShell>
         <form className="w-full" onSubmit={(event) => { event.preventDefault(); void register(); }}>
-          <p className="text-xs font-semibold uppercase text-lagoon">Create account</p>
-          <h2 className="mt-1 text-2xl font-bold text-ink">Complete your profile</h2>
+          <div className="inline-flex items-center gap-2 rounded-md bg-mist px-2.5 py-1.5 text-xs font-semibold text-lagoon"><LockKeyhole size={14} />First-time setup</div>
+          <h2 className="mt-4 text-2xl font-bold text-ink">Complete your profile</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Set your account details for this workspace.</p>
           <div className="mt-6 flex items-center gap-3 rounded-lg border border-slate-200 p-3">
             {profile.pictureUrl ? <img className="h-11 w-11 rounded-full" src={profile.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span className="grid h-11 w-11 place-items-center rounded-full bg-mist text-lagoon"><UserRound size={20} /></span>}
             <div className="min-w-0"><p className="truncate font-semibold text-ink">{profile.name}</p><p className="truncate text-sm text-slate-500">{profile.email}</p></div>
@@ -190,10 +201,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <AuthShell>
       <div className="w-full text-center md:text-left">
-        <p className="text-xs font-semibold uppercase text-lagoon">Business dashboard</p>
-        <h2 className="mt-1 text-3xl font-bold text-ink">Sign in</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">Use your approved Google account to continue.</p>
-        <div className="mt-8"><GoogleButton clientId={config.clientId} onCredential={handleCredential} /></div>
+        <div className="mx-auto max-w-sm md:mx-0">
+          <div className="inline-flex items-center gap-2 rounded-md bg-mist px-2.5 py-1.5 text-xs font-semibold text-lagoon"><LockKeyhole size={14} />Team access</div>
+          <h2 className="mt-5 text-3xl font-bold text-ink sm:text-4xl">Welcome back</h2>
+          <p className="mt-3 text-sm leading-6 text-slate-500">Sign in with an approved Google account to open the business dashboard.</p>
+          <div className="my-7 h-px bg-slate-200" />
+          <GoogleButton clientId={config.clientId} onCredential={handleCredential} />
+          <div className="mt-6 flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3.5 text-left">
+            <ShieldCheck className="mt-0.5 shrink-0 text-lagoon" size={19} />
+            <div><p className="text-sm font-semibold text-ink">Protected workspace</p><p className="mt-1 text-xs leading-5 text-slate-500">Access is limited to approved members of The Powerwashing Pros.</p></div>
+          </div>
+        </div>
         {working && <p className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-500"><LoaderCircle className="animate-spin" size={16} />Verifying Google account</p>}
         {error && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-left text-sm text-rose-700">{error}</p>}
       </div>
