@@ -66,6 +66,110 @@ select {
   @apply border-b border-slate-100 last:border-0 dark:border-slate-800;
 }
 
+.jobs-sheet-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.jobs-sheet-table th,
+.jobs-sheet-table td {
+  border-right: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 9px 11px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.jobs-sheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+}
+
+.jobs-sheet-table th:nth-child(2) { width: 150px; }
+.jobs-sheet-table th:nth-child(3) { width: 185px; }
+.jobs-sheet-table th:nth-child(4) { width: 160px; }
+.jobs-sheet-table th:nth-child(5) { width: 95px; }
+.jobs-sheet-table th:nth-child(6) { width: 120px; }
+.jobs-sheet-table th:nth-child(7) { width: 290px; }
+.jobs-sheet-table th:nth-child(8) { width: 110px; }
+
+.jobs-sheet-table .row-number {
+  width: 48px;
+  background: #f1f5f9;
+  color: #94a3b8;
+  text-align: center;
+  font-weight: 600;
+}
+
+.jobs-sheet-table .edit-column {
+  width: 52px;
+  border-right: 0;
+  text-align: center;
+}
+
+.jobs-sheet-table tbody tr:hover td,
+.jobs-sheet-table tbody tr:hover th {
+  background-color: #f8fafc;
+}
+
+.sheet-status {
+  @apply inline-flex rounded-md px-2 py-1 text-xs font-semibold;
+}
+
+.sheet-status.complete {
+  @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200;
+}
+
+.sheet-status.incomplete {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200;
+}
+
+.sheet-status.canceled {
+  @apply bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-200;
+}
+
+.dark .jobs-sheet-table th,
+.dark .jobs-sheet-table td {
+  border-color: #1e293b;
+}
+
+.dark .jobs-sheet-table thead th,
+.dark .jobs-sheet-table .row-number {
+  background: #020617;
+}
+
+.dark .jobs-sheet-table tbody tr:hover td,
+.dark .jobs-sheet-table tbody tr:hover th {
+  background-color: #0f172a;
+}
+
+@media (max-width: 767px) {
+  .jobs-sheet-mobile dt {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .jobs-sheet-mobile dd {
+    margin-top: 2px;
+    color: #334155;
+  }
+
+  .dark .jobs-sheet-mobile dd {
+    color: #cbd5e1;
+  }
+}
+
 .icon-button {
   @apply inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-cyan-300 dark:hover:text-cyan-200;
 }

@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
+import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch, TodayView } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
 import {
@@ -53,7 +54,7 @@ import { createCustomer, createJob, createLead, createSolicitation, deleteSolici
 import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "today" | "customers" | "leads" | "calendar" | "map" | "plans" | "reviews";
+type TabId = "dashboard" | "today" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[] }>;
 type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
@@ -63,6 +64,7 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "today", label: "Today", icon: BriefcaseBusiness, mobileOnly: true },
   { id: "customers", label: "Customers", icon: Users },
   { id: "leads", label: "Leads", icon: Sparkles },
+  { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "map", label: "Map", icon: MapPinned },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
@@ -533,6 +535,7 @@ export default function App() {
             {activeTab === "today" && <TodayView customers={customers} jobs={jobs} currentDate={currentDate} onEditJob={setSelectedJob} onUpdateJob={updateJob} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} currentDate={currentDate} onCustomerClick={setSelectedCustomer} onJobClick={setSelectedJob} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadClick={setSelectedLead} />}
+            {activeTab === "jobs" && <JobsSpreadsheet customers={customers} jobs={jobs} onAddJob={() => setCreateKind("job")} onEditJob={setSelectedJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
             {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
