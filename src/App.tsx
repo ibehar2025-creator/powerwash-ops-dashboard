@@ -41,12 +41,10 @@ import {
   businessMetrics,
   cumulativeRevenueOverTime,
   currency,
-  customerSpend,
   isoToday,
   isUpcomingJob,
   jobDisplayStatus,
   jobsForCustomer,
-  paymentHistory,
   recurringPlanType,
 } from "./lib/calculations";
 import { createSolicitation, deleteSolicitation, loadDatabaseSnapshot, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
@@ -496,7 +494,7 @@ export default function App() {
           )}
           <div className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6">
             {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
-            {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} onJobClick={setSelectedJob} />}
+            {activeTab === "customers" && <Customers customers={customers} jobs={jobs} currentDate={currentDate} onJobClick={setSelectedJob} />}
             {activeTab === "leads" && <Leads leads={leads} onLeadClick={setSelectedLead} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
             {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
@@ -559,8 +557,8 @@ function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { job
   );
 }
 
-function Customers({ customers, jobs, invoices, currentDate, onJobClick }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; currentDate: string; onJobClick: (job: Job) => void }) {
-  return <Section title="Customer management" kicker="Profiles, spend, payments, and editable jobs"><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Jobs</th><th>Total spent</th><th>Plan</th><th>Insights</th><th>Payment history</th></tr></thead><tbody>{customers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || jobDisplayStatus(job, currentDate) === "past due").length; const upcoming = customerJobs.filter((job) => isUpcomingJob(job, currentDate)).length; return <tr key={customer.id}><td><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td>{customer.phone}<br />{customer.email}</td><td><p className="mb-2 text-xs text-slate-500">{past} past / {upcoming} upcoming</p><div className="flex min-w-44 flex-col gap-1.5">{customerJobs.map((job) => <button key={job.id} type="button" className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-left text-xs font-medium transition hover:border-lagoon hover:text-lagoon dark:border-slate-700" onClick={() => onJobClick(job)}><span className="min-w-0 truncate">{job.date} · {job.serviceType}</span><Pencil size={13} className="shrink-0" /></button>)}{customerJobs.length === 0 && <span className="text-xs text-slate-400">No jobs</span>}</div></td><td>{currency.format(customerSpend(customer.id, jobs))}</td><td>{customer.subscribedPlanId ? <Badge status="paid" /> : <Badge status="unpaid" />}</td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}</td><td>{paymentHistory(customer.id, invoices).map((invoice) => `${invoice.id}: ${currency.format(invoice.amountPaid)}`).join(", ") || "No invoices yet"}</td></tr>; })}</tbody></table></DataTable></Section>;
+function Customers({ customers, jobs, currentDate, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; onJobClick: (job: Job) => void }) {
+  return <Section title="Customer management" kicker="Customer status and editable jobs"><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Jobs</th><th>Status</th></tr></thead><tbody>{customers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || jobDisplayStatus(job, currentDate) === "past due").length; const upcoming = customerJobs.filter((job) => isUpcomingJob(job, currentDate)).length; return <tr key={customer.id}><td><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td><p className="mb-2 text-xs text-slate-500">{past} past / {upcoming} upcoming</p><div className="flex min-w-44 flex-col gap-1.5">{customerJobs.map((job) => <button key={job.id} type="button" className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-left text-xs font-medium transition hover:border-lagoon hover:text-lagoon dark:border-slate-700" onClick={() => onJobClick(job)}><span className="min-w-0 truncate">{job.date} · {job.serviceType}</span><Pencil size={13} className="shrink-0" /></button>)}{customerJobs.length === 0 && <span className="text-xs text-slate-400">No jobs</span>}</div></td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}{customer.insights.length === 0 && <span className="text-xs text-slate-400">No status</span>}</td></tr>; })}</tbody></table></DataTable></Section>;
 }
 
 function Leads({ leads, onLeadClick }: { leads: Lead[]; onLeadClick: (lead: Lead) => void }) {
