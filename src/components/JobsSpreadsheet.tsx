@@ -41,6 +41,11 @@ function customerName(job: Job, customers: Customer[]) {
   return customer?.name ?? "";
 }
 
+function websiteNotes(job: Job) {
+  if (job.source === "spreadsheet-import" && !job.websiteEditedFields?.includes("notes") && job.notes.startsWith("Spreadsheet status:")) return "";
+  return job.notes;
+}
+
 export function JobsSpreadsheet({ customers, jobs, onAddJob, onEditJob }: {
   customers: Customer[];
   jobs: Job[];
@@ -75,13 +80,13 @@ export function JobsSpreadsheet({ customers, jobs, onAddJob, onEditJob }: {
 
       <div className="hidden overflow-x-auto md:block">
         <table className="jobs-sheet-table">
-          <thead><tr><th className="row-number">1</th><th>Column 1</th><th>Address</th><th>Date</th><th>Price</th><th>Status</th><th>Notes</th><th>Column 7</th><th className="edit-column"><span className="sr-only">Edit</span></th></tr></thead>
-          <tbody>{rows.map((job, index) => { const sheetRow = rowNumber(job, index); const status = spreadsheetStatus(job); return <tr key={job.id}><th className="row-number" scope="row">{sheetRow}</th><td>{customerName(job, customers)}</td><td>{job.address}</td><td>{originalDate(job)}</td><td>{job.price ? currency.format(job.price) : ""}</td><td><span className={statusClass(status)}>{status}</span></td><td>{job.serviceType}</td><td /><td className="edit-column"><button type="button" className="icon-button" aria-label={`Edit spreadsheet row ${sheetRow}`} title="Edit job" onClick={() => onEditJob(job)}><Pencil size={15} /></button></td></tr>; })}</tbody>
+          <thead><tr><th className="row-number">1</th><th>Column 1</th><th>Address</th><th>Date</th><th>Price</th><th>Status</th><th>Notes</th><th>Website Notes</th><th className="edit-column"><span className="sr-only">Edit</span></th></tr></thead>
+          <tbody>{rows.map((job, index) => { const sheetRow = rowNumber(job, index); const status = spreadsheetStatus(job); return <tr key={job.id}><th className="row-number" scope="row">{sheetRow}</th><td>{customerName(job, customers)}</td><td>{job.address}</td><td>{originalDate(job)}</td><td>{job.price ? currency.format(job.price) : ""}</td><td><span className={statusClass(status)}>{status}</span></td><td>{job.serviceType}</td><td>{websiteNotes(job)}</td><td className="edit-column"><button type="button" className="icon-button" aria-label={`Edit spreadsheet row ${sheetRow}`} title="Edit job" onClick={() => onEditJob(job)}><Pencil size={15} /></button></td></tr>; })}</tbody>
         </table>
       </div>
 
       <div className="jobs-sheet-mobile divide-y divide-slate-200 md:hidden dark:divide-slate-800">
-        {rows.map((job, index) => { const sheetRow = rowNumber(job, index); const status = spreadsheetStatus(job); return <button key={job.id} type="button" className="block w-full p-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/60" onClick={() => onEditJob(job)}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-slate-400">Row {sheetRow}</p>{customerName(job, customers) && <p className="truncate font-semibold text-ink dark:text-white">{customerName(job, customers)}</p>}{job.address && <p className="mt-1 text-sm text-slate-500">{job.address}</p>}</div><Pencil className="shrink-0 text-slate-400" size={16} /></div><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"><div><dt>Date</dt><dd>{originalDate(job)}</dd></div><div><dt>Price</dt><dd>{job.price ? currency.format(job.price) : ""}</dd></div><div><dt>Status</dt><dd><span className={statusClass(status)}>{status}</span></dd></div><div><dt>Notes</dt><dd>{job.serviceType}</dd></div></dl></button>; })}
+        {rows.map((job, index) => { const sheetRow = rowNumber(job, index); const status = spreadsheetStatus(job); const notes = websiteNotes(job); return <button key={job.id} type="button" className="block w-full p-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/60" onClick={() => onEditJob(job)}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-slate-400">Row {sheetRow}</p>{customerName(job, customers) && <p className="truncate font-semibold text-ink dark:text-white">{customerName(job, customers)}</p>}{job.address && <p className="mt-1 text-sm text-slate-500">{job.address}</p>}</div><Pencil className="shrink-0 text-slate-400" size={16} /></div><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"><div><dt>Date</dt><dd>{originalDate(job)}</dd></div><div><dt>Price</dt><dd>{job.price ? currency.format(job.price) : ""}</dd></div><div><dt>Status</dt><dd><span className={statusClass(status)}>{status}</span></dd></div><div><dt>Service</dt><dd>{job.serviceType}</dd></div>{notes && <div className="col-span-2"><dt>Website notes</dt><dd>{notes}</dd></div>}</dl></button>; })}
       </div>
     </section>
   );

@@ -757,8 +757,45 @@ app.patch("/api/leads/:id", requireDatabase, async (req, res, next) => {
 app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
   try {
     const { date, time, customerId, address, serviceType, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
-    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "price", "notes"];
+    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "paymentStatus", "amountPaid", "tipAmount", "price", "paymentMethod", "notes"];
     const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
+    const existingResult = await pool.query(
+      `select jobs.*, customers.name as customer_name, customers.phone as customer_phone
+       from jobs
+       left join customers on customers.id = jobs.customer_id
+       where jobs.id = $1`,
+      [req.params.id],
+    );
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      res.status(404).json({ error: "Job not found." });
+      return;
+    }
+
+    if (Object.keys(overrides).length > 0) {
+      let customerName = existing.customer_name ?? "Customer";
+      let customerPhone = existing.customer_phone ?? "";
+      if (customerId && customerId !== existing.customer_id) {
+        const customerResult = await pool.query("select name, phone from customers where id = $1", [customerId]);
+        if (!customerResult.rows[0]) {
+          res.status(400).json({ error: "Customer was not found." });
+          return;
+        }
+        customerName = customerResult.rows[0].name;
+        customerPhone = customerResult.rows[0].phone;
+      }
+
+      const sheetRow = { jobId: req.params.id };
+      if (Object.hasOwn(req.body, "customerId")) Object.assign(sheetRow, { customerId, name: customerName, phone: customerPhone });
+      if (Object.hasOwn(req.body, "date") || Object.hasOwn(req.body, "time")) {
+        Object.assign(sheetRow, { date: date ?? databaseDate(existing.date), time: time ?? existing.time });
+      }
+      for (const field of ["address", "serviceType", "status", "paymentStatus", "amountPaid", "tipAmount", "price", "paymentMethod", "notes"]) {
+        if (Object.hasOwn(req.body, field)) sheetRow[field] = req.body[field];
+      }
+      await runSheetAction("updateJob", sheetRow);
+    }
+
     const result = await pool.query(
       `update jobs
        set date = coalesce($2, date),
@@ -786,10 +823,6 @@ app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
        returning *`,
       [req.params.id, date, time, customerId, address, serviceType, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides)],
     );
-    if (!result.rows[0]) {
-      res.status(404).json({ error: "Job not found." });
-      return;
-    }
     res.json(toJob(result.rows[0]));
   } catch (error) {
     next(error);
