@@ -1,5 +1,7 @@
 import { Bell, BriefcaseBusiness, CalendarClock, ClipboardList, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { loadReadNotificationKeys, markNotificationsRead } from "../lib/api";
+import { useAuth } from "../lib/authContext";
 import { followUpTiming } from "../lib/followUps";
 import type { Customer, Job, Lead, ServicePlan } from "../types/business";
 
@@ -12,18 +14,8 @@ type NotificationItem = {
   record: Lead | Job | ServicePlan;
 };
 
-const notificationReadStorageKey = "powerwashing-notifications-read";
-
 function notificationKey(item: NotificationItem) {
   return [item.id, item.tone, item.title, item.detail].join("|");
-}
-
-function storedReadNotifications() {
-  try {
-    return new Set<string>(JSON.parse(localStorage.getItem(notificationReadStorageKey) ?? "[]") as string[]);
-  } catch {
-    return new Set<string>();
-  }
 }
 
 function addDays(isoDate: string, days: number) {
@@ -42,9 +34,26 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
   onJob: (job: Job) => void;
   onPlans: () => void;
 }) {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [readNotificationKeys, setReadNotificationKeys] = useState(storedReadNotifications);
+  const [readNotificationKeys, setReadNotificationKeys] = useState<Set<string>>(new Set());
+  const [readStateLoaded, setReadStateLoaded] = useState(false);
   const customerNames = useMemo(() => new Map(customers.map((customer) => [customer.id, customer.name])), [customers]);
+
+  useEffect(() => {
+    let active = true;
+    setReadStateLoaded(false);
+    setReadNotificationKeys(new Set());
+    loadReadNotificationKeys().then((result) => {
+      if (active) setReadNotificationKeys(new Set(result?.readKeys ?? []));
+    }).catch(() => {
+      // Keep notifications unread if the account-specific state cannot be loaded.
+    }).finally(() => {
+      if (active) setReadStateLoaded(true);
+    });
+    return () => { active = false; };
+  }, [user.id]);
+
   const notifications = useMemo(() => {
     const items: NotificationItem[] = [];
     leads.filter((lead) => !["scheduled", "won", "lost"].includes(lead.status)).forEach((lead) => {
@@ -64,7 +73,7 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
   }, [customerNames, currentDate, jobs, leads, plans]);
   const attentionNotifications = notifications.filter((item) => item.tone === "urgent" || item.tone === "today");
-  const unreadCount = attentionNotifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length;
+  const unreadCount = readStateLoaded ? attentionNotifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length : 0;
 
   function toggleNotifications() {
     if (open) {
@@ -74,11 +83,9 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
     const nextReadKeys = new Set(readNotificationKeys);
     attentionNotifications.forEach((item) => nextReadKeys.add(notificationKey(item)));
     setReadNotificationKeys(nextReadKeys);
-    try {
-      localStorage.setItem(notificationReadStorageKey, JSON.stringify([...nextReadKeys]));
-    } catch {
-      // The badge still clears for this session when browser storage is unavailable.
-    }
+    void markNotificationsRead(attentionNotifications.map(notificationKey)).catch(() => {
+      // The optimistic state lasts for this session; a failed save returns as unread next time.
+    });
     setOpen(true);
   }
 

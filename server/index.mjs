@@ -101,6 +101,13 @@ async function ensureMapSchema() {
 
     create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
 
+    create table if not exists notification_reads (
+      user_id uuid not null references user_accounts(id) on delete cascade,
+      notification_key text not null,
+      read_at timestamptz not null default now(),
+      primary key (user_id, notification_key)
+    );
+
     insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
     select
       'solicitation-' || id::text,
@@ -725,6 +732,39 @@ app.post("/api/auth/logout", async (req, res, next) => {
 });
 
 app.use("/api", requireAuth);
+
+app.get("/api/notifications/read", requireDatabase, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "select notification_key from notification_reads where user_id = $1 order by read_at desc",
+      [req.authUser.id],
+    );
+    res.json({ readKeys: result.rows.map((row) => row.notification_key) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/notifications/read", requireDatabase, async (req, res, next) => {
+  try {
+    const submittedKeys = Array.isArray(req.body?.keys) ? req.body.keys : [];
+    const readKeys = [...new Set(submittedKeys.filter((key) => typeof key === "string" && key.length > 0 && key.length <= 1000))];
+    if (submittedKeys.length > 500 || readKeys.length !== submittedKeys.length) {
+      return res.status(400).json({ error: "Notification keys are invalid." });
+    }
+    if (readKeys.length) {
+      await pool.query(
+        `insert into notification_reads (user_id, notification_key)
+         select $1, unnest($2::text[])
+         on conflict (user_id, notification_key) do update set read_at = now()`,
+        [req.authUser.id, readKeys],
+      );
+    }
+    res.json({ readKeys });
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get("/api/bootstrap", requireDatabase, async (_req, res, next) => {
   try {

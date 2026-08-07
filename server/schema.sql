@@ -167,6 +167,13 @@ create table if not exists auth_sessions (
 
 create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
 
+create table if not exists notification_reads (
+  user_id uuid not null references user_accounts(id) on delete cascade,
+  notification_key text not null,
+  read_at timestamptz not null default now(),
+  primary key (user_id, notification_key)
+);
+
 create table if not exists business_settings (
   id text primary key default 'default',
   business_name text not null default 'The Powerwashing Pros',

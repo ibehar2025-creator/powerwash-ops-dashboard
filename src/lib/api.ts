@@ -122,3 +122,14 @@ export function saveCalendarEventPatch(eventId: string, patch: Partial<CalendarE
 export function deleteCalendarEvent(eventId: string) {
   return request<{ deleted: boolean }>(`/api/calendar-events/${eventId}`, { method: "DELETE" });
 }
+
+export function loadReadNotificationKeys() {
+  return request<{ readKeys: string[] }>("/api/notifications/read");
+}
+
+export function markNotificationsRead(keys: string[]) {
+  return request<{ readKeys: string[] }>("/api/notifications/read", {
+    method: "POST",
+    body: JSON.stringify({ keys }),
+  });
+}
