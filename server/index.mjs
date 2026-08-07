@@ -601,11 +601,13 @@ app.post("/api/leads", requireDatabase, async (req, res, next) => {
   try {
     const { name, contact = "", address = "", status = "new", estimatedValue = 0, followUpDate, notes = "" } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Lead name is required." });
+    const leadId = `manual-lead-${randomUUID()}`;
+    await runSheetAction("addLead", { leadId, name: name.trim(), contact, address, status, estimatedValue, followUpDate, notes });
     const overrides = { name: true, contact: true, address: true, status: true, estimatedValue: true, followUpDate: true, notes: true };
     const result = await pool.query(
       `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes, website_overrides)
        values ($1, $2, $3, $4, 'Manual entry', $5, $6, $7, $8, $9::jsonb) returning *`,
-      [`manual-lead-${randomUUID()}`, name.trim(), contact, address, status, estimatedValue, followUpDate || null, notes, JSON.stringify(overrides)],
+      [leadId, name.trim(), contact, address, status, estimatedValue, followUpDate || null, notes, JSON.stringify(overrides)],
     );
     res.status(201).json(toLead(result.rows[0]));
   } catch (error) {
@@ -656,6 +658,36 @@ app.delete("/api/jobs/:id", requireDatabase, async (req, res, next) => {
     await client.query("begin");
     await client.query("delete from invoices where job_id = $1", [req.params.id]);
     await client.query("delete from jobs where id = $1", [req.params.id]);
+    await client.query("commit");
+    res.json({ deleted: true });
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/leads/:id", requireDatabase, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const existing = await client.query("select id, source from leads where id = $1", [req.params.id]);
+    const lead = existing.rows[0];
+    if (!lead) return res.status(404).json({ error: "Lead not found." });
+
+    if (lead.source === "Check-Ups sheet" || lead.source === "Manual entry") {
+      await runSheetAction("deleteLead", { leadId: lead.id });
+    }
+
+    await client.query("begin");
+    if (lead.source === "Map solicitation" && lead.id.startsWith("solicitation-")) {
+      const solicitationId = lead.id.slice("solicitation-".length);
+      await client.query(
+        `update solicitations set outcome = 'visited', follow_up_date = null, updated_at = now() where id = $1`,
+        [solicitationId],
+      );
+    }
+    await client.query("delete from leads where id = $1", [lead.id]);
     await client.query("commit");
     res.json({ deleted: true });
   } catch (error) {

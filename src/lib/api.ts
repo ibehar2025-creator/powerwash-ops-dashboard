@@ -52,6 +52,10 @@ export function createLead(lead: Omit<Lead, "id" | "source" | "websiteEditedFiel
   return request<Lead>("/api/leads", { method: "POST", body: JSON.stringify(lead) });
 }
 
+export function deleteLead(leadId: string) {
+  return request<{ deleted: boolean }>(`/api/leads/${leadId}`, { method: "DELETE" });
+}
+
 export function createJob(job: Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes">) {
   return request<Job>("/api/jobs", { method: "POST", body: JSON.stringify(job) });
 }

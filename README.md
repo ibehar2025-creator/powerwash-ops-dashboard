@@ -141,6 +141,8 @@ SHEETS_SYNC_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec npm r
 The schema is in `server/schema.sql`. The backend exposes:
 
 - `GET /api/bootstrap`
+- `POST /api/leads`
+- `DELETE /api/leads/:id`
 - `PATCH /api/leads/:id`
 - `PATCH /api/jobs/:id`
 - `PATCH /api/invoices/:id`
