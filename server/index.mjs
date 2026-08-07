@@ -28,6 +28,8 @@ async function ensureMapSchema() {
     alter table jobs add column if not exists latitude double precision;
     alter table jobs add column if not exists longitude double precision;
     alter table jobs add column if not exists geocoded_address text;
+    alter table jobs add column if not exists website_overrides jsonb not null default '{}'::jsonb;
+    alter table leads add column if not exists website_overrides jsonb not null default '{}'::jsonb;
 
     alter table service_plans drop constraint if exists service_plans_type_check;
     alter table service_plans add constraint service_plans_type_check
@@ -98,6 +100,7 @@ const toLead = (row) => ({
   estimatedValue: Number(row.estimated_value),
   followUpDate: row.follow_up_date?.toISOString?.().slice(0, 10) ?? row.follow_up_date ?? "",
   notes: row.notes,
+  websiteEditedFields: Object.keys(row.website_overrides ?? {}),
 });
 
 const toJob = (row) => ({
@@ -120,6 +123,7 @@ const toJob = (row) => ({
   source: row.source,
   latitude: row.latitude == null ? undefined : Number(row.latitude),
   longitude: row.longitude == null ? undefined : Number(row.longitude),
+  websiteEditedFields: Object.keys(row.website_overrides ?? {}),
 });
 
 const toInvoice = (row) => ({
@@ -181,9 +185,9 @@ async function syncSolicitationLead(client, solicitation) {
     `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
      values ($1, 'Map follow-up', 'Contact info pending', $2, 'Map solicitation', 'new', 0, null, $3)
      on conflict (id) do update set
-       address = excluded.address,
+       address = case when leads.website_overrides ? 'address' then leads.address else excluded.address end,
        source = excluded.source,
-       notes = excluded.notes,
+       notes = case when leads.website_overrides ? 'notes' then leads.notes else excluded.notes end,
        updated_at = now()
      returning *`,
     [leadId, solicitation.address, solicitation.notes || ""],
@@ -272,14 +276,14 @@ async function upsertLeads(client, leads = []) {
          estimated_value numeric, follow_up_date date, notes text
        )
        on conflict (id) do update set
-         name = excluded.name,
-         contact = excluded.contact,
-         address = excluded.address,
+         name = case when leads.website_overrides ? 'name' then leads.name else excluded.name end,
+         contact = case when leads.website_overrides ? 'contact' then leads.contact else excluded.contact end,
+         address = case when leads.website_overrides ? 'address' then leads.address else excluded.address end,
          source = excluded.source,
-         status = excluded.status,
-         estimated_value = excluded.estimated_value,
-         follow_up_date = excluded.follow_up_date,
-         notes = excluded.notes`,
+         status = case when leads.website_overrides ? 'status' then leads.status else excluded.status end,
+         estimated_value = case when leads.website_overrides ? 'estimatedValue' then leads.estimated_value else excluded.estimated_value end,
+         follow_up_date = case when leads.website_overrides ? 'followUpDate' then leads.follow_up_date else excluded.follow_up_date end,
+         notes = case when leads.website_overrides ? 'notes' then leads.notes else excluded.notes end`,
       [JSON.stringify(rows)],
     );
 }
@@ -321,25 +325,25 @@ async function upsertJobs(client, jobs = []) {
          after_photo text, source text
        )
        on conflict (id) do update set
-         date = excluded.date,
-         time = excluded.time,
-         customer_id = excluded.customer_id,
-         address = excluded.address,
-         service_type = excluded.service_type,
-         status = excluded.status,
+         date = case when jobs.website_overrides ? 'date' then jobs.date else excluded.date end,
+         time = case when jobs.website_overrides ? 'time' then jobs.time else excluded.time end,
+         customer_id = case when jobs.website_overrides ? 'customerId' then jobs.customer_id else excluded.customer_id end,
+         address = case when jobs.website_overrides ? 'address' then jobs.address else excluded.address end,
+         service_type = case when jobs.website_overrides ? 'serviceType' then jobs.service_type else excluded.service_type end,
+         status = case when jobs.website_overrides ? 'status' then jobs.status else excluded.status end,
          crew_ids = excluded.crew_ids,
-         price = excluded.price,
+         price = case when jobs.website_overrides ? 'price' then jobs.price else excluded.price end,
          amount_paid = excluded.amount_paid,
          tip_amount = excluded.tip_amount,
          payment_status = excluded.payment_status,
          payment_method = excluded.payment_method,
-         notes = excluded.notes,
+         notes = case when jobs.website_overrides ? 'notes' then jobs.notes else excluded.notes end,
          before_photo = excluded.before_photo,
          after_photo = excluded.after_photo,
          source = excluded.source,
-         latitude = case when jobs.address is distinct from excluded.address then null else jobs.latitude end,
-         longitude = case when jobs.address is distinct from excluded.address then null else jobs.longitude end,
-         geocoded_address = case when jobs.address is distinct from excluded.address then null else jobs.geocoded_address end`,
+         latitude = case when not (jobs.website_overrides ? 'address') and jobs.address is distinct from excluded.address then null else jobs.latitude end,
+         longitude = case when not (jobs.website_overrides ? 'address') and jobs.address is distinct from excluded.address then null else jobs.longitude end,
+         geocoded_address = case when not (jobs.website_overrides ? 'address') and jobs.address is distinct from excluded.address then null else jobs.geocoded_address end`,
       [JSON.stringify(rows)],
     );
 }
@@ -531,16 +535,28 @@ app.post("/api/sync-sheets", requireDatabase, async (_req, res, next) => {
 
 app.patch("/api/leads/:id", requireDatabase, async (req, res, next) => {
   try {
-    const { status, notes, followUpDate } = req.body;
+    const { name, contact, address, status, estimatedValue, notes, followUpDate } = req.body;
+    const editableFields = ["name", "contact", "address", "status", "estimatedValue", "followUpDate", "notes"];
+    const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
     const result = await pool.query(
       `update leads
-       set status = coalesce($2, status),
-           notes = coalesce($3, notes),
-           follow_up_date = coalesce($4, follow_up_date)
+       set name = coalesce($2, name),
+           contact = coalesce($3, contact),
+           address = coalesce($4, address),
+           status = coalesce($5, status),
+           estimated_value = coalesce($6, estimated_value),
+           follow_up_date = case when $9::jsonb ? 'followUpDate' then $7::date else follow_up_date end,
+           notes = coalesce($8, notes),
+           website_overrides = website_overrides || $9::jsonb,
+           updated_at = now()
        where id = $1
        returning *`,
-      [req.params.id, status, notes, followUpDate],
+      [req.params.id, name, contact, address, status, estimatedValue, followUpDate || null, notes, JSON.stringify(overrides)],
     );
+    if (!result.rows[0]) {
+      res.status(404).json({ error: "Lead not found." });
+      return;
+    }
     res.json(toLead(result.rows[0]));
   } catch (error) {
     next(error);
@@ -549,26 +565,40 @@ app.patch("/api/leads/:id", requireDatabase, async (req, res, next) => {
 
 app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
   try {
-    const { status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
+    const { date, time, customerId, address, serviceType, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
+    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "price", "notes"];
+    const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
     const result = await pool.query(
       `update jobs
-       set status = coalesce($2, status),
-           payment_status = coalesce($3, payment_status),
-           amount_paid = coalesce($4, amount_paid),
-           tip_amount = coalesce($5, tip_amount),
-           price = coalesce($6, price),
-           payment_method = coalesce($7, payment_method),
-           notes = coalesce($8, notes),
-           latitude = coalesce($9, latitude),
-           longitude = coalesce($10, longitude),
+       set date = coalesce($2, date),
+           time = coalesce($3, time),
+           customer_id = coalesce($4, customer_id),
+           address = coalesce($5, address),
+           service_type = coalesce($6, service_type),
+           status = coalesce($7, status),
+           payment_status = coalesce($8, payment_status),
+           amount_paid = coalesce($9, amount_paid),
+           tip_amount = coalesce($10, tip_amount),
+           price = coalesce($11, price),
+           payment_method = coalesce($12, payment_method),
+           notes = coalesce($13, notes),
+           latitude = case when $5::text is not null and $5::text is distinct from address then null else coalesce($14, latitude) end,
+           longitude = case when $5::text is not null and $5::text is distinct from address then null else coalesce($15, longitude) end,
            geocoded_address = case
-             when $9::double precision is not null and $10::double precision is not null then address
+             when $5::text is not null and $5::text is distinct from address then null
+             when $14::double precision is not null and $15::double precision is not null then address
              else geocoded_address
-           end
+           end,
+           website_overrides = website_overrides || $16::jsonb,
+           updated_at = now()
        where id = $1
        returning *`,
-      [req.params.id, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude],
+      [req.params.id, date, time, customerId, address, serviceType, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides)],
     );
+    if (!result.rows[0]) {
+      res.status(404).json({ error: "Job not found." });
+      return;
+    }
     res.json(toJob(result.rows[0]));
   } catch (error) {
     next(error);

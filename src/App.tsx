@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ElementType, ReactNode } from "react";
+import type { ElementType, FormEvent, ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   BadgeDollarSign,
@@ -10,12 +10,15 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  ExternalLink,
   LayoutDashboard,
   MapPinned,
   Menu,
   Moon,
+  Pencil,
   ReceiptText,
   RefreshCw,
+  Save,
   Sparkles,
   Star,
   Sun,
@@ -67,6 +70,8 @@ const tabs: { id: TabId; label: string; icon: ElementType }[] = [
 
 const planTypes = ["monthly", "3-month", "4-month", "6-month", "yearly"];
 const leadStatuses: LeadStatus[] = ["new", "contacted", "quoted", "scheduled", "won", "lost"];
+const jobStatuses: Job["status"][] = ["scheduled", "in progress", "completed", "canceled", "past due"];
+const upcomingJobsSheetUrl = "https://docs.google.com/spreadsheets/d/19LNiR-1HTfT8wwdAZtGnqXlCJh6y-HbxeuqZuo95p2Q/edit";
 const dayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
 const fullDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -270,6 +275,7 @@ export default function App() {
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
   const [solicitations, setSolicitations] = useState<Solicitation[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
   const [syncing, setSyncing] = useState(false);
@@ -359,11 +365,20 @@ export default function App() {
     if (calendarSkeletonTimer.current !== null) window.clearTimeout(calendarSkeletonTimer.current);
   }, []);
 
-  function updateLead(leadId: string, patch: Partial<Lead>) {
-    setLeads((current) => current.map((lead) => lead.id === leadId ? { ...lead, ...patch } : lead));
-    void saveLeadPatch(leadId, patch).catch((error) => {
-      setSyncStatus(error instanceof Error ? error.message : "Lead save failed.");
-    });
+  async function updateLead(leadId: string, patch: Partial<Lead>) {
+    const saved = await saveLeadPatch(leadId, patch);
+    if (!saved) throw new Error("Lead save service is unavailable.");
+    setLeads((current) => current.map((lead) => lead.id === leadId ? saved : lead));
+    setSyncStatus("Lead changes saved to the database.");
+    return saved;
+  }
+
+  async function updateJob(jobId: string, patch: Partial<Job>) {
+    const saved = await saveJobPatch(jobId, patch);
+    if (!saved) throw new Error("Job save service is unavailable.");
+    setJobs((current) => current.map((job) => job.id === jobId ? { ...saved, crewIds: saved.crewIds ?? [] } : job));
+    setSyncStatus("Job changes saved to the database.");
+    return saved;
   }
 
   const updateMapLead = useCallback((solicitation: Solicitation, savedLead?: Lead | null) => {
@@ -481,8 +496,8 @@ export default function App() {
           )}
           <div className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6">
             {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
-            {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} />}
-            {activeTab === "leads" && <Leads leads={leads} onLeadUpdate={updateLead} />}
+            {activeTab === "customers" && <Customers customers={customers} jobs={jobs} invoices={invoices} currentDate={currentDate} onJobClick={setSelectedJob} />}
+            {activeTab === "leads" && <Leads leads={leads} onLeadClick={setSelectedLead} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
             {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
@@ -490,7 +505,8 @@ export default function App() {
           </div>
         </main>
       </div>
-      {selectedJob && <JobModal customers={customers} job={selectedJob} onClose={() => setSelectedJob(null)} />}
+      {selectedJob && <JobModal key={selectedJob.id} customers={customers} job={selectedJob} onSave={updateJob} onClose={() => setSelectedJob(null)} />}
+      {selectedLead && <LeadModal key={selectedLead.id} lead={selectedLead} onSave={updateLead} onClose={() => setSelectedLead(null)} />}
     </div>
   );
 }
@@ -543,13 +559,13 @@ function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { job
   );
 }
 
-function Customers({ customers, jobs, invoices, currentDate }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; currentDate: string }) {
-  return <Section title="Customer management" kicker="Profiles, spend, payments, and jobs"><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Past / Upcoming</th><th>Total spent</th><th>Plan</th><th>Insights</th><th>Payment history</th></tr></thead><tbody>{customers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || jobDisplayStatus(job, currentDate) === "past due").length; const upcoming = customerJobs.filter((job) => isUpcomingJob(job, currentDate)).length; return <tr key={customer.id}><td><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td>{customer.phone}<br />{customer.email}</td><td>{past} past / {upcoming} upcoming</td><td>{currency.format(customerSpend(customer.id, jobs))}</td><td>{customer.subscribedPlanId ? <Badge status="paid" /> : <Badge status="unpaid" />}</td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}</td><td>{paymentHistory(customer.id, invoices).map((invoice) => `${invoice.id}: ${currency.format(invoice.amountPaid)}`).join(", ") || "No invoices yet"}</td></tr>; })}</tbody></table></DataTable></Section>;
+function Customers({ customers, jobs, invoices, currentDate, onJobClick }: { customers: Customer[]; jobs: Job[]; invoices: Invoice[]; currentDate: string; onJobClick: (job: Job) => void }) {
+  return <Section title="Customer management" kicker="Profiles, spend, payments, and editable jobs"><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Jobs</th><th>Total spent</th><th>Plan</th><th>Insights</th><th>Payment history</th></tr></thead><tbody>{customers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || jobDisplayStatus(job, currentDate) === "past due").length; const upcoming = customerJobs.filter((job) => isUpcomingJob(job, currentDate)).length; return <tr key={customer.id}><td><p className="font-semibold text-ink dark:text-white">{customer.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td>{customer.phone}<br />{customer.email}</td><td><p className="mb-2 text-xs text-slate-500">{past} past / {upcoming} upcoming</p><div className="flex min-w-44 flex-col gap-1.5">{customerJobs.map((job) => <button key={job.id} type="button" className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-left text-xs font-medium transition hover:border-lagoon hover:text-lagoon dark:border-slate-700" onClick={() => onJobClick(job)}><span className="min-w-0 truncate">{job.date} · {job.serviceType}</span><Pencil size={13} className="shrink-0" /></button>)}{customerJobs.length === 0 && <span className="text-xs text-slate-400">No jobs</span>}</div></td><td>{currency.format(customerSpend(customer.id, jobs))}</td><td>{customer.subscribedPlanId ? <Badge status="paid" /> : <Badge status="unpaid" />}</td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}</td><td>{paymentHistory(customer.id, invoices).map((invoice) => `${invoice.id}: ${currency.format(invoice.amountPaid)}`).join(", ") || "No invoices yet"}</td></tr>; })}</tbody></table></DataTable></Section>;
 }
 
-function Leads({ leads, onLeadUpdate }: { leads: Lead[]; onLeadUpdate: (leadId: string, patch: Partial<Lead>) => void }) {
+function Leads({ leads, onLeadClick }: { leads: Lead[]; onLeadClick: (lead: Lead) => void }) {
   const wins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
-  return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><div className="space-y-2"><Badge status={lead.status} /><select value={lead.status} onChange={(event) => onLeadUpdate(lead.id, { status: event.target.value as LeadStatus })}>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate || "Not scheduled"}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
+  return <Section title="Leads & prospects" kicker={`${leads.length ? Math.round((wins / leads.length) * 100) : 0}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate || "Not scheduled"}</td><td>{lead.notes}</td><td><button type="button" className="icon-button" title={`Edit ${lead.name}`} aria-label={`Edit ${lead.name}`} onClick={() => onLeadClick(lead)}><Pencil size={15} /></button></td></tr>)}</tbody></table></DataTable></Section>;
 }
 
 function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void }) {
@@ -609,6 +625,53 @@ function Reviews({ reviews }: { reviews: ReviewRow[] }) {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
-function JobModal({ customers, job, onClose }: { customers: Customer[]; job: Job; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4"><div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Job details</p><h3 className="text-xl font-bold text-ink dark:text-white">{findCustomer(customers, job.customerId).name}</h3><p className="text-sm text-slate-500">{job.date} at {job.time}</p></div><button className="icon-button" onClick={onClose} title="Close">x</button></div><div className="mt-5 grid gap-4 md:grid-cols-2"><div className="detail-row"><span>Address</span><strong>{job.address}</strong></div><div className="detail-row"><span>Service</span><strong>{job.serviceType}</strong></div><div className="detail-row"><span>Assignment</span><strong>Unassigned</strong></div><div className="detail-row"><span>Status</span><Badge status={job.status} /></div><div className="detail-row"><span>Price</span><strong>{currency.format(job.price)}</strong></div><div className="detail-row md:col-span-2"><span>Notes</span><strong>{job.notes}</strong></div></div><div className="mt-5 grid gap-3 md:grid-cols-2"><div className="photo-box">Before photo placeholder</div><div className="photo-box">After photo placeholder</div></div></div></div>;
+function sourceSpreadsheetRowUrl(job: Job) {
+  const rowNumber = Number(job.id.match(/(\d+)$/)?.[1]);
+  return Number.isFinite(rowNumber) ? `${upcomingJobsSheetUrl}#gid=0&range=A${rowNumber + 1}` : upcomingJobsSheetUrl;
+}
+
+function JobModal({ customers, job, onSave, onClose }: { customers: Customer[]; job: Job; onSave: (jobId: string, patch: Partial<Job>) => Promise<Job>; onClose: () => void }) {
+  const [draft, setDraft] = useState(job);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    const editableFields: Array<keyof Job> = ["date", "time", "customerId", "address", "serviceType", "status", "price", "notes"];
+    const patch = Object.fromEntries(editableFields.filter((field) => draft[field] !== job[field]).map((field) => [field, draft[field]])) as Partial<Job>;
+    try {
+      if (Object.keys(patch).length) await onSave(job.id, patch);
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save this job.");
+      setSaving(false);
+    }
+  }
+
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[94vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Edit job</p><h3 className="text-xl font-bold text-ink dark:text-white">{findCustomer(customers, draft.customerId).name}</h3><p className="mt-1 text-xs text-slate-500">Changes made here are protected from spreadsheet syncs.</p></div><button type="button" className="icon-button shrink-0" onClick={onClose} title="Close" aria-label="Close job editor"><X size={17} /></button></div><div className="settings-grid mt-5"><Field label="Customer"><select value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Status"><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Job["status"] })}>{jobStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><Field label="Date"><input type="date" required value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></Field><Field label="Time"><input value={draft.time} required placeholder="09:00" onChange={(event) => setDraft({ ...draft, time: event.target.value })} /></Field><Field label="Price"><input type="number" min="0" step="0.01" value={draft.price} onChange={(event) => setDraft({ ...draft, price: Number(event.target.value) || 0 })} /></Field><Field label="Service"><input value={draft.serviceType} required onChange={(event) => setDraft({ ...draft, serviceType: event.target.value })} /></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Address<input value={draft.address} required onChange={(event) => setDraft({ ...draft, address: event.target.value })} /></label><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label></div>{job.websiteEditedFields?.length ? <p className="mt-4 rounded-lg bg-mist px-3 py-2 text-xs font-medium text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200">Website edits saved for: {job.websiteEditedFields.join(", ")}</p> : null}{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between"><div>{job.source === "spreadsheet-import" && <a className="text-button gap-2" href={sourceSpreadsheetRowUrl(job)} target="_blank" rel="noreferrer"><ExternalLink size={15} />View original spreadsheet row</a>}</div><div className="flex flex-col-reverse gap-2 sm:flex-row"><button type="button" className="text-button" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="primary-button gap-2" disabled={saving}><Save size={16} />{saving ? "Saving..." : "Save changes"}</button></div></div></form></div>;
+}
+
+function LeadModal({ lead, onSave, onClose }: { lead: Lead; onSave: (leadId: string, patch: Partial<Lead>) => Promise<Lead>; onClose: () => void }) {
+  const [draft, setDraft] = useState(lead);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    const editableFields: Array<keyof Lead> = ["name", "contact", "address", "status", "estimatedValue", "followUpDate", "notes"];
+    const patch = Object.fromEntries(editableFields.filter((field) => draft[field] !== lead[field]).map((field) => [field, draft[field]])) as Partial<Lead>;
+    try {
+      if (Object.keys(patch).length) await onSave(lead.id, patch);
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save this lead.");
+      setSaving(false);
+    }
+  }
+
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[94vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Edit lead</p><h3 className="text-xl font-bold text-ink dark:text-white">{draft.name}</h3><p className="mt-1 text-xs text-slate-500">Source: {lead.source || "Manual entry"}</p></div><button type="button" className="icon-button shrink-0" onClick={onClose} title="Close" aria-label="Close lead editor"><X size={17} /></button></div><div className="settings-grid mt-5"><Field label="Name"><input value={draft.name} required onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Status"><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as LeadStatus })}>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><Field label="Contact information"><input value={draft.contact} onChange={(event) => setDraft({ ...draft, contact: event.target.value })} /></Field><Field label="Estimated value"><input type="number" min="0" step="0.01" value={draft.estimatedValue} onChange={(event) => setDraft({ ...draft, estimatedValue: Number(event.target.value) || 0 })} /></Field><Field label="Follow-up date"><input type="date" value={draft.followUpDate} onChange={(event) => setDraft({ ...draft, followUpDate: event.target.value })} /></Field><Field label="Address"><input value={draft.address} onChange={(event) => setDraft({ ...draft, address: event.target.value })} /></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label></div>{lead.websiteEditedFields?.length ? <p className="mt-4 rounded-lg bg-mist px-3 py-2 text-xs font-medium text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200">Website edits saved for: {lead.websiteEditedFields.join(", ")}</p> : null}{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="text-button" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="primary-button gap-2" disabled={saving}><Save size={16} />{saving ? "Saving..." : "Save changes"}</button></div></form></div>;
 }

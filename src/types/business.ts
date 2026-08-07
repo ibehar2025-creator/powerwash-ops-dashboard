@@ -37,6 +37,7 @@ export interface Job {
   source: "mock" | "spreadsheet-import";
   latitude?: number;
   longitude?: number;
+  websiteEditedFields?: string[];
 }
 
 export interface Solicitation {
@@ -59,6 +60,7 @@ export interface Lead {
   estimatedValue: number;
   followUpDate: string;
   notes: string;
+  websiteEditedFields?: string[];
 }
 
 export interface CrewMember {

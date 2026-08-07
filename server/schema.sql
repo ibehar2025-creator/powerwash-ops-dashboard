@@ -23,6 +23,7 @@ create table if not exists leads (
   estimated_value numeric(12,2) not null default 0,
   follow_up_date date,
   notes text not null default '',
+  website_overrides jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -48,6 +49,7 @@ create table if not exists jobs (
   latitude double precision,
   longitude double precision,
   geocoded_address text,
+  website_overrides jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
