@@ -432,6 +432,12 @@ select {
 }
 
 @media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
   .data-table th,
   .data-table td {
     @apply px-3 py-2;

@@ -41,6 +41,9 @@ async function ensureMapSchema() {
     set latitude = null, longitude = null
     where geocoded_address is null and (latitude is not null or longitude is not null);
 
+    delete from jobs where id = 'manual-job-919ceff4-f534-422a-9d7b-d2eadcbeb2b5';
+    delete from customers where id = 'manual-customer-eed7d291-ad25-4d10-a330-a918df033120';
+
     create table if not exists solicitations (
       id uuid primary key default gen_random_uuid(),
       address text not null,
@@ -524,6 +527,20 @@ async function runSheetSync() {
   return loadSnapshot();
 }
 
+async function runSheetAction(action, row) {
+  if (!syncUrl) throw new Error("SHEETS_SYNC_URL is not configured.");
+  const response = await fetch(syncUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, row }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`Sheet write endpoint failed with ${response.status}`);
+  const payload = await response.json();
+  if (payload?.ok === false) throw new Error(payload.error || "Google Sheets rejected the update.");
+  return payload;
+}
+
 app.post("/api/sync-sheets", requireDatabase, async (_req, res, next) => {
   try {
     if (!syncUrl) {
@@ -545,12 +562,14 @@ app.post("/api/customers", requireDatabase, async (req, res, next) => {
   try {
     const { name, phone = "", email = "", address = "", notes = "" } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Customer name is required." });
+    const customerId = `manual-customer-${randomUUID()}`;
+    await runSheetAction("addCustomer", { customerId, name: name.trim(), phone, email, address, notes });
     const overrides = { name: true, phone: true, email: true, address: true, notes: true };
     const result = await pool.query(
       `insert into customers (id, name, phone, email, address, notes, insights, website_overrides)
        values ($1, $2, $3, $4, $5, $6, '{}', $7::jsonb)
        returning *`,
-      [`manual-customer-${randomUUID()}`, name.trim(), phone, email, address, notes, JSON.stringify(overrides)],
+      [customerId, name.trim(), phone, email, address, notes, JSON.stringify(overrides)],
     );
     res.status(201).json(toCustomer(result.rows[0]));
   } catch (error) {
@@ -600,11 +619,27 @@ app.post("/api/jobs", requireDatabase, async (req, res, next) => {
     if (!date || !customerId || !address?.trim() || !serviceType?.trim()) {
       return res.status(400).json({ error: "Date, customer, address, and service are required." });
     }
+    const customerResult = await pool.query("select name, phone from customers where id = $1", [customerId]);
+    if (!customerResult.rows[0]) return res.status(400).json({ error: "Customer was not found." });
+    const jobId = `manual-job-${randomUUID()}`;
+    await runSheetAction("addUpcomingJob", {
+      jobId,
+      customerId,
+      name: customerResult.rows[0].name,
+      phone: customerResult.rows[0].phone,
+      date,
+      time,
+      address: address.trim(),
+      serviceType: serviceType.trim(),
+      status,
+      price,
+      notes,
+    });
     const overrides = { date: true, time: true, customerId: true, address: true, serviceType: true, status: true, price: true, notes: true };
     const result = await pool.query(
       `insert into jobs (id, date, time, customer_id, address, service_type, status, price, payment_status, notes, source, website_overrides)
        values ($1, $2, $3, $4, $5, $6, $7, $8, 'unpaid', $9, 'manual', $10::jsonb) returning *`,
-      [`manual-job-${randomUUID()}`, date, time, customerId, address.trim(), serviceType.trim(), status, price, notes, JSON.stringify(overrides)],
+      [jobId, date, time, customerId, address.trim(), serviceType.trim(), status, price, notes, JSON.stringify(overrides)],
     );
     res.status(201).json(toJob(result.rows[0]));
   } catch (error) {
