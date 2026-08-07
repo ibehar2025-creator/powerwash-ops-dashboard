@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { randomUUID } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, randomUUID, verify } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const distPath = path.join(projectRoot, "dist");
 const syncUrl = process.env.SHEETS_SYNC_URL || process.env.VITE_SHEETS_SYNC_URL;
+const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
+const signupAccessCode = process.env.AUTH_SIGNUP_CODE || "";
+const sessionCookieName = "powerwash_session";
+const authStateCookieName = "powerwash_auth_state";
+const sessionDurationMs = 30 * 24 * 60 * 60 * 1000;
 let activeSheetSync = null;
+let googleCertCache = { expiresAt: 0, keys: [] };
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
@@ -72,6 +78,29 @@ async function ensureMapSchema() {
       updated_at timestamptz not null default now()
     );
 
+    create table if not exists user_accounts (
+      id uuid primary key default gen_random_uuid(),
+      google_sub text not null unique,
+      email text not null unique,
+      name text not null,
+      picture_url text not null default '',
+      age integer not null check (age between 13 and 120),
+      role text not null check (role in ('owner', 'employee')),
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      last_login_at timestamptz not null default now()
+    );
+
+    create table if not exists auth_sessions (
+      id uuid primary key default gen_random_uuid(),
+      user_id uuid not null references user_accounts(id) on delete cascade,
+      token_hash text not null unique,
+      expires_at timestamptz not null,
+      created_at timestamptz not null default now()
+    );
+
+    create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
+
     insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
     select
       'solicitation-' || id::text,
@@ -90,6 +119,11 @@ async function ensureMapSchema() {
 }
 
 app.use(cors());
+app.use((_request, response, next) => {
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
 app.use(express.json({ limit: "2mb" }));
 
 function requireDatabase(_req, res, next) {
@@ -228,6 +262,89 @@ async function syncSolicitationLead(client, solicitation) {
     [leadId, solicitation.address, solicitation.follow_up_date, solicitation.notes || ""],
   );
   return toLead(result.rows[0]);
+}
+
+function parseCookies(req) {
+  return Object.fromEntries((req.headers.cookie || "").split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
+    const separator = part.indexOf("=");
+    return separator < 0 ? [part, ""] : [part.slice(0, separator), decodeURIComponent(part.slice(separator + 1))];
+  }));
+}
+
+function cookie(name, value, { maxAge, httpOnly = true } = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "SameSite=Lax"];
+  if (httpOnly) parts.push("HttpOnly");
+  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  if (typeof maxAge === "number") parts.push(`Max-Age=${Math.max(0, Math.floor(maxAge / 1000))}`);
+  return parts.join("; ");
+}
+
+const hashToken = (token) => createHash("sha256").update(token).digest("hex");
+const encodeBase64Url = (value) => Buffer.from(value, "base64url");
+
+async function googleSigningKeys() {
+  if (googleCertCache.expiresAt > Date.now() && googleCertCache.keys.length) return googleCertCache.keys;
+  const response = await fetch("https://www.googleapis.com/oauth2/v3/certs", { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error("Unable to verify Google sign-in right now.");
+  const payload = await response.json();
+  const maxAge = Number(response.headers.get("cache-control")?.match(/max-age=(\d+)/)?.[1] || 3600);
+  googleCertCache = { keys: payload.keys || [], expiresAt: Date.now() + maxAge * 1000 };
+  return googleCertCache.keys;
+}
+
+async function verifyGoogleCredential(credential) {
+  if (!googleClientId) throw new Error("Google sign-in is not configured.");
+  const parts = String(credential || "").split(".");
+  if (parts.length !== 3) throw new Error("Google sign-in did not return a valid credential.");
+  const header = JSON.parse(encodeBase64Url(parts[0]).toString("utf8"));
+  const claims = JSON.parse(encodeBase64Url(parts[1]).toString("utf8"));
+  if (header.alg !== "RS256" || !header.kid) throw new Error("Unsupported Google credential.");
+  const key = (await googleSigningKeys()).find((item) => item.kid === header.kid);
+  if (!key) {
+    googleCertCache.expiresAt = 0;
+    throw new Error("Google's signing key could not be verified. Please try again.");
+  }
+  const validSignature = verify("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), createPublicKey({ key, format: "jwk" }), encodeBase64Url(parts[2]));
+  const now = Math.floor(Date.now() / 1000);
+  const validIssuer = claims.iss === "accounts.google.com" || claims.iss === "https://accounts.google.com";
+  const validAudience = Array.isArray(claims.aud) ? claims.aud.includes(googleClientId) : claims.aud === googleClientId;
+  if (!validSignature || !validIssuer || !validAudience || Number(claims.exp) <= now || !claims.sub || !claims.email || claims.email_verified !== true) {
+    throw new Error("Google could not verify this account.");
+  }
+  return { googleSub: claims.sub, email: claims.email.toLowerCase(), name: claims.name || claims.email, pictureUrl: claims.picture || "" };
+}
+
+const toAuthUser = (row) => ({ id: row.id, email: row.email, name: row.name, pictureUrl: row.picture_url, age: row.age, role: row.role });
+
+async function createSession(res, userId) {
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + sessionDurationMs);
+  await pool.query("delete from auth_sessions where expires_at <= now()");
+  await pool.query("insert into auth_sessions (user_id, token_hash, expires_at) values ($1, $2, $3)", [userId, hashToken(token), expiresAt]);
+  res.setHeader("Set-Cookie", cookie(sessionCookieName, token, { maxAge: sessionDurationMs }));
+}
+
+async function sessionUser(req) {
+  const token = parseCookies(req)[sessionCookieName];
+  if (!token || !pool) return null;
+  const result = await pool.query(
+    `select user_accounts.* from auth_sessions
+     join user_accounts on user_accounts.id = auth_sessions.user_id
+     where auth_sessions.token_hash = $1 and auth_sessions.expires_at > now()`,
+    [hashToken(token)],
+  );
+  return result.rows[0] || null;
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const user = await sessionUser(req);
+    if (!user) return res.status(401).json({ error: "Sign in is required." });
+    req.authUser = user;
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function tableRows(table, orderBy = "created_at asc") {
@@ -531,6 +648,83 @@ async function syncSheetsIntoDatabase(payload) {
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, database: Boolean(pool) });
 });
+
+app.get("/api/auth/config", (_req, res) => {
+  const state = randomBytes(24).toString("base64url");
+  res.setHeader("Set-Cookie", cookie(authStateCookieName, state, { maxAge: 10 * 60 * 1000 }));
+  res.json({ enabled: Boolean(googleClientId && pool), clientId: googleClientId, state, signupCodeRequired: Boolean(signupAccessCode) });
+});
+
+app.get("/api/auth/session", async (req, res, next) => {
+  try {
+    const user = await sessionUser(req);
+    res.json({ user: user ? toAuthUser(user) : null });
+  } catch (error) {
+    next(error);
+  }
+});
+
+function validAuthState(req) {
+  const cookieState = parseCookies(req)[authStateCookieName];
+  return Boolean(cookieState && req.body?.state && cookieState === req.body.state);
+}
+
+app.post("/api/auth/google", requireDatabase, async (req, res, next) => {
+  try {
+    if (!validAuthState(req)) return res.status(403).json({ error: "The sign-in page expired. Refresh and try again." });
+    const profile = await verifyGoogleCredential(req.body.credential);
+    const result = await pool.query("select * from user_accounts where google_sub = $1", [profile.googleSub]);
+    const user = result.rows[0];
+    if (!user) return res.json({ needsProfile: true, profile: { email: profile.email, name: profile.name, pictureUrl: profile.pictureUrl } });
+    await pool.query(
+      "update user_accounts set email = $2, name = $3, picture_url = $4, last_login_at = now(), updated_at = now() where id = $1",
+      [user.id, profile.email, profile.name, profile.pictureUrl],
+    );
+    await createSession(res, user.id);
+    res.json({ user: { ...toAuthUser(user), email: profile.email, name: profile.name, pictureUrl: profile.pictureUrl } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/register", requireDatabase, async (req, res, next) => {
+  try {
+    if (!validAuthState(req)) return res.status(403).json({ error: "The signup page expired. Refresh and try again." });
+    const age = Number(req.body.age);
+    const role = req.body.role;
+    if (!Number.isInteger(age) || age < 13 || age > 120) return res.status(400).json({ error: "Enter an age between 13 and 120." });
+    if (role !== "owner" && role !== "employee") return res.status(400).json({ error: "Choose owner or employee." });
+    if (signupAccessCode && req.body.accessCode !== signupAccessCode) return res.status(403).json({ error: "The signup access code is incorrect." });
+    const profile = await verifyGoogleCredential(req.body.credential);
+    const result = await pool.query(
+      `insert into user_accounts (google_sub, email, name, picture_url, age, role)
+       values ($1, $2, $3, $4, $5, $6)
+       on conflict (google_sub) do update set email = excluded.email, name = excluded.name,
+         picture_url = excluded.picture_url, age = excluded.age, role = excluded.role,
+         last_login_at = now(), updated_at = now()
+       returning *`,
+      [profile.googleSub, profile.email, profile.name, profile.pictureUrl, age, role],
+    );
+    await createSession(res, result.rows[0].id);
+    res.status(201).json({ user: toAuthUser(result.rows[0]) });
+  } catch (error) {
+    if (error?.code === "23505") return res.status(409).json({ error: "That Google email is already connected to another account." });
+    next(error);
+  }
+});
+
+app.post("/api/auth/logout", async (req, res, next) => {
+  try {
+    const token = parseCookies(req)[sessionCookieName];
+    if (token && pool) await pool.query("delete from auth_sessions where token_hash = $1", [hashToken(token)]);
+    res.setHeader("Set-Cookie", cookie(sessionCookieName, "", { maxAge: 0 }));
+    res.json({ signedOut: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use("/api", requireAuth);
 
 app.get("/api/bootstrap", requireDatabase, async (_req, res, next) => {
   try {

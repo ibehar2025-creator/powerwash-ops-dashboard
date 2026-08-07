@@ -144,6 +144,29 @@ create table if not exists calendar_events (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists user_accounts (
+  id uuid primary key default gen_random_uuid(),
+  google_sub text not null unique,
+  email text not null unique,
+  name text not null,
+  picture_url text not null default '',
+  age integer not null check (age between 13 and 120),
+  role text not null check (role in ('owner', 'employee')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_login_at timestamptz not null default now()
+);
+
+create table if not exists auth_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references user_accounts(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
+
 create table if not exists business_settings (
   id text primary key default 'default',
   business_name text not null default 'The Powerwashing Pros',
@@ -183,6 +206,7 @@ begin
     'reviews',
     'solicitations',
     'calendar_events',
+    'user_accounts',
     'business_settings'
   ]
   loop

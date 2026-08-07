@@ -1,6 +1,6 @@
 # The Powerwashing Pros Dashboard
 
-A clean full-stack-ready React, TypeScript, and Tailwind CSS dashboard for running a pressure washing business. The current version uses local mock data, with data boundaries and comments in place so jobs, customers, invoices, payments, and settings can later move to a database/API.
+A full-stack React, TypeScript, Tailwind CSS, Express, and PostgreSQL dashboard for running a pressure washing business. Google Sheets remains the import source for operational records, while PostgreSQL preserves website-created records and edits.
 
 ## Features
 
@@ -99,7 +99,29 @@ npm run lint
 npm run build
 ```
 
-## Render
+## Google Sign-In
+
+Authentication uses Google Identity Services. Google verifies the person, and the server stores the app-specific age and role (`owner` or `employee`) in PostgreSQL. Both roles currently enter the same dashboard; their stored roles provide the base for separate owner and employee experiences later.
+
+1. In Google Cloud, open **Google Auth Platform > Clients** and create an **OAuth 2.0 Client ID** with application type **Web application**.
+2. Add `https://powerwash-ops-dashboard.onrender.com` and `http://localhost:4173` as authorized JavaScript origins.
+3. Add the client ID to the Render web service:
+
+```bash
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+```
+
+4. To prevent unauthorized people from creating accounts, set an optional shared signup code:
+
+```bash
+AUTH_SIGNUP_CODE=your-private-invite-code
+```
+
+If `AUTH_SIGNUP_CODE` is set, every first-time owner or employee must enter it. Returning users only use Google sign-in. The Google client ID is public by design; never expose `DATABASE_URL` or other server secrets in a `VITE_` variable.
+
+Both roles currently have the same dashboard permissions. The stored role is the base for separate owner and employee views and server permissions later.
+
+## Render Deployment
 
 For a Render Web Service:
 
