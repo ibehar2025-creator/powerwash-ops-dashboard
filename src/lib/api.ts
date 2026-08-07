@@ -24,7 +24,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T | null
   });
 
   if (response.status === 503 || response.status === 404) return null;
-  if (!response.ok) throw new Error(`API request failed: ${response.status}`);
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(detail?.error ?? `API request failed: ${response.status}`);
+  }
 
   return response.json() as Promise<T>;
 }
@@ -35,6 +38,22 @@ export function loadDatabaseSnapshot() {
 
 export function syncSheetsToDatabase() {
   return request<DatabaseSnapshot>("/api/sync-sheets", { method: "POST" });
+}
+
+export function createCustomer(customer: Omit<Customer, "id" | "insights" | "subscribedPlanId" | "websiteEditedFields">) {
+  return request<Customer>("/api/customers", { method: "POST", body: JSON.stringify(customer) });
+}
+
+export function saveCustomerPatch(customerId: string, patch: Partial<Customer>) {
+  return request<Customer>(`/api/customers/${customerId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function createLead(lead: Omit<Lead, "id" | "source" | "websiteEditedFields">) {
+  return request<Lead>("/api/leads", { method: "POST", body: JSON.stringify(lead) });
+}
+
+export function createJob(job: Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes">) {
+  return request<Job>("/api/jobs", { method: "POST", body: JSON.stringify(job) });
 }
 
 export function saveLeadPatch(leadId: string, patch: Partial<Lead>) {

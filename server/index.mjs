@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,7 @@ async function ensureMapSchema() {
     alter table jobs add column if not exists geocoded_address text;
     alter table jobs add column if not exists website_overrides jsonb not null default '{}'::jsonb;
     alter table leads add column if not exists website_overrides jsonb not null default '{}'::jsonb;
+    alter table customers add column if not exists website_overrides jsonb not null default '{}'::jsonb;
 
     alter table service_plans drop constraint if exists service_plans_type_check;
     alter table service_plans add constraint service_plans_type_check
@@ -88,6 +90,7 @@ const toCustomer = (row) => ({
   notes: row.notes,
   subscribedPlanId: row.subscribed_plan_id ?? undefined,
   insights: row.insights ?? [],
+  websiteEditedFields: Object.keys(row.website_overrides ?? {}),
 });
 
 const toLead = (row) => ({
@@ -244,11 +247,11 @@ async function upsertCustomers(client, customers = []) {
          subscribed_plan_id text, insights text[]
        )
        on conflict (id) do update set
-         name = excluded.name,
-         phone = excluded.phone,
-         email = excluded.email,
-         address = excluded.address,
-         notes = excluded.notes,
+         name = case when customers.website_overrides ? 'name' then customers.name else excluded.name end,
+         phone = case when customers.website_overrides ? 'phone' then customers.phone else excluded.phone end,
+         email = case when customers.website_overrides ? 'email' then customers.email else excluded.email end,
+         address = case when customers.website_overrides ? 'address' then customers.address else excluded.address end,
+         notes = case when customers.website_overrides ? 'notes' then customers.notes else excluded.notes end,
          subscribed_plan_id = excluded.subscribed_plan_id,
          insights = excluded.insights`,
       [JSON.stringify(rows)],
@@ -528,6 +531,77 @@ app.post("/api/sync-sheets", requireDatabase, async (_req, res, next) => {
       });
     }
     res.json(await activeSheetSync);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/customers", requireDatabase, async (req, res, next) => {
+  try {
+    const { name, phone = "", email = "", address = "", notes = "" } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: "Customer name is required." });
+    const overrides = { name: true, phone: true, email: true, address: true, notes: true };
+    const result = await pool.query(
+      `insert into customers (id, name, phone, email, address, notes, insights, website_overrides)
+       values ($1, $2, $3, $4, $5, $6, '{}', $7::jsonb)
+       returning *`,
+      [`manual-customer-${randomUUID()}`, name.trim(), phone, email, address, notes, JSON.stringify(overrides)],
+    );
+    res.status(201).json(toCustomer(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/customers/:id", requireDatabase, async (req, res, next) => {
+  try {
+    const { name, phone, email, address, notes } = req.body;
+    const editableFields = ["name", "phone", "email", "address", "notes"];
+    const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
+    const result = await pool.query(
+      `update customers
+       set name = coalesce($2, name), phone = coalesce($3, phone), email = coalesce($4, email),
+           address = coalesce($5, address), notes = coalesce($6, notes),
+           website_overrides = website_overrides || $7::jsonb, updated_at = now()
+       where id = $1 returning *`,
+      [req.params.id, name, phone, email, address, notes, JSON.stringify(overrides)],
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Customer not found." });
+    res.json(toCustomer(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/leads", requireDatabase, async (req, res, next) => {
+  try {
+    const { name, contact = "", address = "", status = "new", estimatedValue = 0, followUpDate, notes = "" } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: "Lead name is required." });
+    const overrides = { name: true, contact: true, address: true, status: true, estimatedValue: true, followUpDate: true, notes: true };
+    const result = await pool.query(
+      `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes, website_overrides)
+       values ($1, $2, $3, $4, 'Manual entry', $5, $6, $7, $8, $9::jsonb) returning *`,
+      [`manual-lead-${randomUUID()}`, name.trim(), contact, address, status, estimatedValue, followUpDate || null, notes, JSON.stringify(overrides)],
+    );
+    res.status(201).json(toLead(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/jobs", requireDatabase, async (req, res, next) => {
+  try {
+    const { date, time = "09:00", customerId, address, serviceType, status = "scheduled", price = 0, notes = "" } = req.body;
+    if (!date || !customerId || !address?.trim() || !serviceType?.trim()) {
+      return res.status(400).json({ error: "Date, customer, address, and service are required." });
+    }
+    const overrides = { date: true, time: true, customerId: true, address: true, serviceType: true, status: true, price: true, notes: true };
+    const result = await pool.query(
+      `insert into jobs (id, date, time, customer_id, address, service_type, status, price, payment_status, notes, source, website_overrides)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'unpaid', $9, 'manual', $10::jsonb) returning *`,
+      [`manual-job-${randomUUID()}`, date, time, customerId, address.trim(), serviceType.trim(), status, price, notes, JSON.stringify(overrides)],
+    );
+    res.status(201).json(toJob(result.rows[0]));
   } catch (error) {
     next(error);
   }

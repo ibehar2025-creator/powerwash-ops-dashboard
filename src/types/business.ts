@@ -15,6 +15,7 @@ export interface Customer {
   notes: string;
   subscribedPlanId?: string;
   insights: CustomerInsight[];
+  websiteEditedFields?: string[];
 }
 
 export interface Job {
@@ -34,7 +35,7 @@ export interface Job {
   notes: string;
   beforePhoto?: string;
   afterPhoto?: string;
-  source: "mock" | "spreadsheet-import";
+  source: "mock" | "spreadsheet-import" | "manual";
   latitude?: number;
   longitude?: number;
   websiteEditedFields?: string[];

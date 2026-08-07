@@ -9,6 +9,7 @@ create table if not exists customers (
   notes text not null default '',
   subscribed_plan_id text,
   insights text[] not null default '{}',
+  website_overrides jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
