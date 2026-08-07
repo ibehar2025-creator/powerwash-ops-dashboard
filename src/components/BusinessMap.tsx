@@ -683,7 +683,7 @@ function GoogleBusinessMap({
             mapTypeControl={false}
             streetViewControl={false}
             clickableIcons={false}
-            fullscreenControl
+            fullscreenControl={false}
             reuseMaps
             onClick={handleMapClick}
           >
@@ -733,14 +733,14 @@ function GoogleBusinessMap({
               </InfoWindow>
             )}
           </Map>
-          <div className="absolute left-3 right-16 top-3 z-10 max-w-md">
+          <div className="absolute left-3 right-3 top-3 z-10 max-w-md">
             <form className="relative" onSubmit={submitMapSearch}>
               <Search className="pointer-events-none absolute left-3 top-3 text-slate-400" size={18} />
-              <input value={mapSearch} onFocus={() => setMapSearchOpen(true)} onChange={(event) => { setMapSearch(event.target.value); setMapSearchOpen(true); setMapSearchStatus(""); }} placeholder="Search customer or address" aria-label="Search map by customer or address" className="h-11 w-full rounded-lg border border-slate-200 bg-white/95 pl-10 pr-12 text-sm text-ink shadow-soft outline-none backdrop-blur focus:border-lagoon dark:border-slate-700 dark:bg-slate-900/95 dark:text-white" />
+              <input value={mapSearch} onFocus={() => setMapSearchOpen(true)} onChange={(event) => { setMapSearch(event.target.value); setMapSearchOpen(true); setMapSearchStatus(""); }} placeholder="Search customer or address" aria-label="Search map by customer or address" className="h-11 w-full rounded-lg border border-slate-200 bg-white/95 pl-10 pr-12 text-base text-ink shadow-soft outline-none backdrop-blur focus:border-lagoon dark:border-slate-700 dark:bg-slate-900/95 dark:text-white sm:text-sm" />
               <button type="submit" className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-lagoon dark:hover:bg-slate-800" aria-label="Search map" title="Search map"><Search size={17} /></button>
-              {mapSearchOpen && customerSuggestions.length > 0 && <div className="absolute left-0 right-0 top-12 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900">{customerSuggestions.map((customer) => <button key={customer.id} type="button" className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800" onClick={() => void focusCustomer(customer).catch(() => setMapSearchStatus("Customer address could not be located."))}><strong className="block text-sm text-ink dark:text-white">{customer.name}</strong><span className="block truncate text-xs text-slate-500">{customer.address || "No address listed"}</span></button>)}</div>}
+              {mapSearchOpen && customerSuggestions.length > 0 && <div className="absolute left-0 right-0 top-12 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900">{customerSuggestions.map((customer) => <button key={customer.id} type="button" className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800" onClick={() => void focusCustomer(customer).catch(() => setMapSearchStatus("Customer address could not be located."))}><strong className="block break-words text-sm text-ink dark:text-white">{customer.name}</strong><span className="mt-0.5 block break-words text-xs leading-5 text-slate-500">{customer.address || "No address listed"}</span></button>)}</div>}
             </form>
-            {mapSearchStatus && <p className="mt-2 w-fit max-w-full rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
+            {mapSearchStatus && <p className="mt-2 w-fit max-w-full break-words rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium leading-5 text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
           </div>
           <button type="button" className="absolute bottom-10 right-3 z-10 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft transition hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" aria-label="Show my location" title="Show my location" onClick={() => void locateUser()}><LocateFixed size={20} className={trackingLocation ? "text-blue-600" : ""} /></button>
           {locationStatus && <p className="absolute bottom-10 left-3 z-10 max-w-[calc(100%-76px)] rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{locationStatus}</p>}
