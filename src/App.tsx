@@ -529,7 +529,7 @@ export default function App() {
           </header>
           {activeTab !== "map" && <GlobalSearch customers={customers} jobs={jobs} leads={leads} onCustomer={setSelectedCustomer} onJob={setSelectedJob} onLead={setSelectedLead} onNew={setCreateKind} />}
           {mobileMenuOpen && (
-            <div className="fixed inset-0 z-40 lg:hidden">
+            <div className="fixed inset-0 z-[60] lg:hidden">
               <button className="absolute inset-0 bg-ink/45" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} />
               <aside className="relative flex h-full w-[min(86vw,340px)] flex-col border-r border-slate-200 bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
                 <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-ink p-4 text-white">
