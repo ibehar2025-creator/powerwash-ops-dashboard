@@ -392,6 +392,7 @@ export default function App() {
     if (!saved) throw new Error("Customer creation service is unavailable.");
     setCustomers((current) => [...current, saved].sort((a, b) => a.name.localeCompare(b.name)));
     setSyncStatus("New customer saved to the database.");
+    return saved;
   }
 
   async function updateCustomer(customerId: string, patch: Partial<Customer>) {

@@ -96,7 +96,7 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
         {unreadCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{unreadCount > 99 ? "99+" : unreadCount}</span>}
       </button>
       {open && <>
-        <button type="button" className="fixed inset-0 z-40 bg-ink/35 sm:hidden" aria-label="Close notifications" onClick={() => setOpen(false)} />
+        <button type="button" className="fixed inset-0 z-40 bg-ink/35 sm:bg-transparent" aria-label="Close notifications" onClick={() => setOpen(false)} />
         <div className="fixed inset-x-3 top-20 z-50 max-h-[calc(100dvh-6rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[390px]">
           <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4 dark:border-slate-800">
             <div><p className="text-xs font-semibold uppercase text-lagoon dark:text-cyan-300">Notification center</p><h2 className="font-semibold text-ink dark:text-white">Business reminders</h2></div>
