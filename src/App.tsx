@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ElementType, ReactNode } from "react";
+import type { ElementType, ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   BadgeDollarSign,
@@ -579,92 +579,72 @@ function timeToMinutes(time: string) {
   return Math.min(24 * 60 - 1, Math.max(0, hour * 60 + minute));
 }
 
-function hourLabel(hour: number) {
-  if (hour === 0) return "12 AM";
-  if (hour === 12) return "12 PM";
-  return `${hour > 12 ? hour - 12 : hour} ${hour >= 12 ? "PM" : "AM"}`;
+function calendarTimeLabel(time: string) {
+  const minutes = timeToMinutes(time);
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}${minute ? `:${String(minute).padStart(2, "0")}` : ""} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
-function timelineStatusClass(status: string) {
-  return `status-${status.replace(/\s+/g, "-")}`;
-}
-
-function TimelineEvent({ customers, job, currentDate, onJobClick }: { customers: Customer[]; job: Job; currentDate: string; onJobClick: (job: Job) => void }) {
-  const status = jobDisplayStatus(job, currentDate);
+function CompactCalendarJob({ customers, job, currentDate, onJobClick }: { customers: Customer[]; job: Job; currentDate: string; onJobClick: (job: Job) => void }) {
   return (
-    <button type="button" className={cx("timeline-event", timelineStatusClass(status))} onClick={() => onJobClick(job)} title={`${findCustomer(customers, job.customerId).name} - ${job.address}`}>
-      <span className="timeline-event-time">{job.time}</span>
-      <strong>{findCustomer(customers, job.customerId).name}</strong>
-      <span className="timeline-event-address">{job.address}</span>
+    <button type="button" onClick={() => onJobClick(job)} className="calendar-job compact-calendar-job">
+      <span className="font-semibold">{findCustomer(customers, job.customerId).name}</span>
+      <span className="text-xs">{job.address}</span>
+      <span className="text-xs">Unassigned</span>
+      <Badge status={jobDisplayStatus(job, currentDate)} />
     </button>
   );
 }
 
-function TimelineAxis({ startHour, endHour, rowHeight }: { startHour: number; endHour: number; rowHeight: number }) {
-  const hours = Array.from({ length: endHour - startHour + 1 }, (_, index) => startHour + index);
-  return (
-    <div className="timeline-axis" style={{ height: (endHour - startHour) * rowHeight }} aria-hidden="true">
-      {hours.map((hour) => <span key={hour} style={{ top: (hour - startHour) * rowHeight }}>{hourLabel(hour)}</span>)}
-    </div>
-  );
-}
-
-function CalendarTimeline({ customers, days, dayJobs, daySpans, currentDate, onJobClick }: { customers: Customer[]; days: CalendarDay[]; dayJobs: Job[][]; daySpans: number[]; currentDate: string; onJobClick: (job: Job) => void }) {
-  const allJobs = dayJobs.flat();
-  const earliestHour = allJobs.length ? Math.floor(Math.min(...allJobs.map((job) => timeToMinutes(job.time))) / 60) : 8;
-  const latestHour = allJobs.length ? Math.ceil((Math.max(...allJobs.map((job) => timeToMinutes(job.time))) + 60) / 60) : 17;
-  const startHour = Math.min(7, earliestHour);
-  const endHour = Math.max(20, latestHour);
-  const rowHeight = 64;
-  const timelineHeight = (endHour - startHour) * rowHeight;
+function CompactCalendarSchedule({ customers, days, dayJobs, daySpans, currentDate, onJobClick }: { customers: Customer[]; days: CalendarDay[]; dayJobs: Job[][]; daySpans: number[]; currentDate: string; onJobClick: (job: Job) => void }) {
   const slotCount = daySpans.reduce((total, span) => total + span, 0);
   const slotStyle = { gridTemplateColumns: `repeat(${slotCount}, minmax(0, 1fr))` };
+  const times = [...new Set(dayJobs.flat().map((job) => job.time))].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
 
   return (
     <>
-      <div className="timeline-desktop" style={{ "--timeline-row-height": `${rowHeight}px` } as CSSProperties}>
-        <div className="timeline-week-header">
-          <div className="timeline-corner">Time</div>
-          <div className="timeline-day-headings" style={slotStyle}>
+      <div className="compact-calendar-desktop">
+        <div className="compact-calendar-header">
+          <div className="compact-time-heading">Time</div>
+          <div className="compact-day-headings" style={slotStyle}>
             {days.map((day, index) => <div key={day.date} style={{ gridColumn: `span ${daySpans[index]}` }}><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div>)}
           </div>
         </div>
-        <div className="timeline-week-body">
-          <TimelineAxis startHour={startHour} endHour={endHour} rowHeight={rowHeight} />
-          <div className="timeline-canvas" style={{ ...slotStyle, height: timelineHeight }}>
-            {days.map((day, dayIndex) => (
-              <div key={day.date} className="timeline-day-lane" style={{ gridColumn: `span ${daySpans[dayIndex]}` }}>
-                {jobsGroupedByTime(dayJobs[dayIndex]).map(([time, timeJobs]) => (
-                  <div key={time} className="timeline-event-group" style={{ top: ((timeToMinutes(time) - startHour * 60) / 60) * rowHeight, gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>
-                    {timeJobs.map((job) => <TimelineEvent key={job.id} customers={customers} job={job} currentDate={currentDate} onJobClick={onJobClick} />)}
+        {times.length === 0 && <p className="compact-calendar-empty">No jobs scheduled</p>}
+        {times.map((time) => (
+          <div key={time} className="compact-time-row">
+            <div className="compact-time-label">{calendarTimeLabel(time)}</div>
+            <div className="compact-time-cells" style={slotStyle}>
+              {days.map((day, dayIndex) => {
+                const timeJobs = dayJobs[dayIndex].filter((job) => job.time === time);
+                return (
+                  <div key={day.date} className="compact-day-cell" style={{ gridColumn: `span ${daySpans[dayIndex]}` }}>
+                    {timeJobs.length > 0 && <div className="compact-job-group" style={{ gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>{timeJobs.map((job) => <CompactCalendarJob key={job.id} customers={customers} job={job} currentDate={currentDate} onJobClick={onJobClick} />)}</div>}
                   </div>
-                ))}
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ))}
       </div>
 
-      <div className="timeline-mobile">
+      <div className="compact-calendar-mobile">
         {days.map((day, dayIndex) => {
           const jobsForDay = dayJobs[dayIndex];
-          if (jobsForDay.length === 0) return <div key={day.date} className="mobile-timeline-day mobile-timeline-empty"><div className="mobile-timeline-heading"><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div><p>No jobs scheduled</p></div>;
-          const firstHour = Math.max(0, Math.floor(Math.min(...jobsForDay.map((job) => timeToMinutes(job.time))) / 60) - 1);
-          const lastHour = Math.min(24, Math.max(firstHour + 3, Math.ceil((Math.max(...jobsForDay.map((job) => timeToMinutes(job.time))) + 60) / 60) + 1));
-          const mobileRowHeight = 56;
           return (
-            <div key={day.date} className="mobile-timeline-day">
-              <div className="mobile-timeline-heading"><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div>
-              <div className="mobile-timeline-body">
-                <TimelineAxis startHour={firstHour} endHour={lastHour} rowHeight={mobileRowHeight} />
-                <div className="mobile-timeline-canvas" style={{ height: (lastHour - firstHour) * mobileRowHeight, "--timeline-row-height": `${mobileRowHeight}px` } as CSSProperties}>
-                  {jobsGroupedByTime(jobsForDay).map(([time, timeJobs]) => (
-                    <div key={time} className="timeline-event-group" style={{ top: ((timeToMinutes(time) - firstHour * 60) / 60) * mobileRowHeight, gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>
-                      {timeJobs.map((job) => <TimelineEvent key={job.id} customers={customers} job={job} currentDate={currentDate} onJobClick={onJobClick} />)}
-                    </div>
-                  ))}
+            <div key={day.date} className="compact-mobile-day">
+              <div className="compact-mobile-heading"><strong>{day.label}</strong><span>{day.date.slice(5)}</span></div>
+              {jobsForDay.length === 0 && <p className="compact-mobile-empty">No jobs scheduled</p>}
+              {jobsGroupedByTime(jobsForDay).map(([time, timeJobs]) => (
+                <div key={time} className="compact-mobile-time-row">
+                  <div className="compact-mobile-time-label">{calendarTimeLabel(time)}</div>
+                  <div className="compact-job-group compact-mobile-jobs" style={{ gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>
+                    {timeJobs.map((job) => <CompactCalendarJob key={job.id} customers={customers} job={job} currentDate={currentDate} onJobClick={onJobClick} />)}
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           );
         })}
@@ -734,7 +714,7 @@ function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { custo
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{dayJobs.reduce((total, jobsForDay) => total + jobsForDay.length, 0)} jobs in view</p></div>
       {mode === "month"
         ? <CalendarMonth customers={customers} days={days} dayJobs={dayJobs} currentDate={currentDate} onJobClick={onJobClick} />
-        : <CalendarTimeline customers={customers} days={days} dayJobs={dayJobs} daySpans={daySpans} currentDate={currentDate} onJobClick={onJobClick} />}
+        : <CompactCalendarSchedule customers={customers} days={days} dayJobs={dayJobs} daySpans={daySpans} currentDate={currentDate} onJobClick={onJobClick} />}
     </Section>
   );
 }
