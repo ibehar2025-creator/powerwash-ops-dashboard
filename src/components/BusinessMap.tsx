@@ -33,6 +33,7 @@ type Props = {
   customers: Customer[];
   jobs: Job[];
   solicitations: Solicitation[];
+  jobFocusRequest?: { jobId: string; requestId: number } | null;
   onSaveJobCoordinates: (jobIds: string[], coordinates: Coordinates) => Promise<void>;
   onCreateSolicitation: (solicitation: Omit<Solicitation, "id">) => Promise<void>;
   onUpdateSolicitation: (id: string, patch: Partial<Solicitation>) => Promise<void>;
@@ -241,6 +242,7 @@ function GoogleBusinessMap({
   customers,
   jobs,
   solicitations,
+  jobFocusRequest,
   onSaveJobCoordinates,
   onCreateSolicitation,
   onUpdateSolicitation,
@@ -402,6 +404,23 @@ function GoogleBusinessMap({
   const requestMapFocus = useCallback((points: google.maps.LatLngLiteral[], zoom?: number) => {
     setMapFocusRequest({ id: Date.now(), points, zoom });
   }, []);
+
+  useEffect(() => {
+    if (!jobFocusRequest) return;
+    const location = jobLocations.find((item) => item.jobs.some((job) => job.id === jobFocusRequest.jobId));
+    if (!location) {
+      setMapSearchStatus("Locating this job on the map...");
+      return;
+    }
+    const job = location.jobs.find((item) => item.id === jobFocusRequest.jobId) ?? location.jobs[0];
+    setShowJobs(true);
+    setSelected({ kind: "job", location });
+    setMapSearchResult(null);
+    setMapSearch(customerName(customers, job.customerId));
+    setMapSearchOpen(false);
+    setMapSearchStatus(`${customerName(customers, job.customerId)} - ${location.address}`);
+    requestMapFocus([{ lat: location.latitude, lng: location.longitude }], 18);
+  }, [customers, jobFocusRequest, jobLocations, requestMapFocus]);
 
   const focusCustomer = useCallback(async (customer: Customer) => {
     const matchingLocations = jobLocations.filter((location) => location.jobs.some((job) => job.customerId === customer.id));
