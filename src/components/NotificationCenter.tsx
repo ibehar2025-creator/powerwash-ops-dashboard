@@ -12,6 +12,20 @@ type NotificationItem = {
   record: Lead | Job | ServicePlan;
 };
 
+const notificationReadStorageKey = "powerwashing-notifications-read";
+
+function notificationKey(item: NotificationItem) {
+  return [item.id, item.tone, item.title, item.detail].join("|");
+}
+
+function storedReadNotifications() {
+  try {
+    return new Set<string>(JSON.parse(localStorage.getItem(notificationReadStorageKey) ?? "[]") as string[]);
+  } catch {
+    return new Set<string>();
+  }
+}
+
 function addDays(isoDate: string, days: number) {
   const date = new Date(`${isoDate}T12:00:00`);
   date.setDate(date.getDate() + days);
@@ -29,6 +43,7 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
   onPlans: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [readNotificationKeys, setReadNotificationKeys] = useState(storedReadNotifications);
   const customerNames = useMemo(() => new Map(customers.map((customer) => [customer.id, customer.name])), [customers]);
   const notifications = useMemo(() => {
     const items: NotificationItem[] = [];
@@ -48,7 +63,24 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
     const rank = { urgent: 0, today: 1, upcoming: 2 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
   }, [customerNames, currentDate, jobs, leads, plans]);
-  const urgentCount = notifications.filter((item) => item.tone === "urgent" || item.tone === "today").length;
+  const attentionNotifications = notifications.filter((item) => item.tone === "urgent" || item.tone === "today");
+  const unreadCount = attentionNotifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length;
+
+  function toggleNotifications() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const nextReadKeys = new Set(readNotificationKeys);
+    attentionNotifications.forEach((item) => nextReadKeys.add(notificationKey(item)));
+    setReadNotificationKeys(nextReadKeys);
+    try {
+      localStorage.setItem(notificationReadStorageKey, JSON.stringify([...nextReadKeys]));
+    } catch {
+      // The badge still clears for this session when browser storage is unavailable.
+    }
+    setOpen(true);
+  }
 
   function openItem(item: NotificationItem) {
     setOpen(false);
@@ -59,9 +91,9 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
 
   return (
     <div className="relative z-50">
-      <button type="button" className="icon-button relative" aria-label="Open notifications" aria-expanded={open} title="Notifications" onClick={() => setOpen(!open)}>
+      <button type="button" className="icon-button relative" aria-label="Open notifications" aria-expanded={open} title="Notifications" onClick={toggleNotifications}>
         <Bell size={17} />
-        {urgentCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{urgentCount > 99 ? "99+" : urgentCount}</span>}
+        {unreadCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{unreadCount > 99 ? "99+" : unreadCount}</span>}
       </button>
       {open && <>
         <button type="button" className="fixed inset-0 z-40 bg-ink/35 sm:hidden" aria-label="Close notifications" onClick={() => setOpen(false)} />
