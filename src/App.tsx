@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ElementType, ReactNode } from "react";
+import type { ElementType, ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   BadgeDollarSign,
@@ -552,33 +552,11 @@ function Leads({ leads, onLeadUpdate }: { leads: Lead[]; onLeadUpdate: (leadId: 
   return <Section title="Leads & prospects" kicker={`${Math.round((wins / leads.length) * 100)}% conversion tracked`}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th></tr></thead><tbody>{leads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><div className="space-y-2"><Badge status={lead.status} /><select value={lead.status} onChange={(event) => onLeadUpdate(lead.id, { status: event.target.value as LeadStatus })}>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate || "Not scheduled"}</td><td>{lead.notes}</td></tr>)}</tbody></table></DataTable></Section>;
 }
 
-function jobsGroupedByTime(jobs: Job[]) {
-  const groups = new Map<string, Job[]>();
-
-  [...jobs].sort((a, b) => a.time.localeCompare(b.time)).forEach((job) => {
-    const timeJobs = groups.get(job.time) ?? [];
-    timeJobs.push(job);
-    groups.set(job.time, timeJobs);
-  });
-
-  return [...groups.entries()];
-}
-
-function widestTimeGroup(jobs: Job[]) {
-  return Math.max(1, ...jobsGroupedByTime(jobs).map(([, timeJobs]) => timeJobs.length));
-}
-
 function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void }) {
   const [mode, setMode] = useState<"day" | "week" | "month">("week");
   const [anchorIso, setAnchorIso] = useState(currentDate);
   const anchorDate = dateFromIso(anchorIso);
   const days = calendarDays(anchorDate, mode);
-  const dayJobs = days.map((day) => jobs.filter((job) => job.date === day.date));
-  const daySpans = dayJobs.map(widestTimeGroup);
-  const calendarSlotCount = mode === "week" ? daySpans.reduce((total, span) => total + span, 0) : days.length;
-  const calendarStyle = {
-    "--calendar-slot-count": calendarSlotCount,
-  } as CSSProperties;
   const moveCalendar = (direction: -1 | 1) => {
     const next = mode === "month" ? addMonths(anchorDate, direction) : addDays(anchorDate, direction * (mode === "week" ? 7 : 1));
     setAnchorIso(isoFromDate(next));
@@ -595,7 +573,7 @@ function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { custo
             <div className="skeleton-shimmer h-6 w-48 rounded" />
             <div className="skeleton-shimmer h-4 w-24 rounded" />
           </div>
-          <div className={cx("calendar-grid", `${mode}-mode`)}>
+          <div className={cx("calendar-grid", mode === "month" && "month-mode")}>
             {days.map((day, index) => (
               <div key={day.date} className="calendar-day" aria-hidden="true">
                 <div className="mb-4 flex items-center justify-between gap-3">
@@ -614,7 +592,7 @@ function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { custo
       </Section>
     );
   }
-  return <Section title="Scheduling calendar" kicker="Date-matched spreadsheet schedule" action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{dayJobs.reduce((total, jobsForDay) => total + jobsForDay.length, 0)} jobs in view</p></div><div className="calendar-scroll"><div className={cx("calendar-grid", `${mode}-mode`)} style={calendarStyle}>{days.map((day, dayIndex) => { const jobsForDay = dayJobs[dayIndex]; return <div key={day.date} className="calendar-day" style={{ "--calendar-day-span": daySpans[dayIndex] } as CSSProperties}><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{jobsForDay.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{jobsGroupedByTime(jobsForDay).map(([time, timeJobs]) => <div key={time} className="calendar-time-group" style={{ gridTemplateColumns: `repeat(${timeJobs.length}, minmax(0, 1fr))` }}>{timeJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}</div>)}</div>; })}</div></div></Section>;
+  return <Section title="Scheduling calendar" kicker="Date-matched spreadsheet schedule" action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{days.reduce((total, day) => total + jobs.filter((job) => job.date === day.date).length, 0)} jobs in view</p></div><div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">No jobs scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}</div>; })}</div></Section>;
 }
 
 function Plans({ customers, plans, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void }) {
