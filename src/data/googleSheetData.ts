@@ -99,8 +99,6 @@ export const jobs: Job[] = sheetRows.map((row, index) => {
     paymentStatus: paymentStatus(row),
     paymentMethod: status === "completed" ? (index % 2 === 0 ? "Zelle" : "cash") : undefined,
     notes: `Spreadsheet status: ${row.status || "blank"}. Original date text: ${row.originalDate}.`,
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "spreadsheet-import",
   };
 });

@@ -101,8 +101,6 @@ export const jobs: Job[] = [
     tipAmount: 0,
     paymentStatus: "unpaid",
     notes: "Upcoming spreadsheet placeholder: first job of the day.",
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "mock",
   },
   {
@@ -120,8 +118,6 @@ export const jobs: Job[] = [
     paymentStatus: "partially paid",
     paymentMethod: "card",
     notes: "Monthly plan visit. Avoid lunch rush.",
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "mock",
   },
   {
@@ -138,8 +134,6 @@ export const jobs: Job[] = [
     tipAmount: 0,
     paymentStatus: "unpaid",
     notes: "Spreadsheet import target row: HOA common area job.",
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "mock",
   },
   {
@@ -157,8 +151,6 @@ export const jobs: Job[] = [
     paymentStatus: "past due",
     paymentMethod: "cash",
     notes: "Payment reminder needed.",
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "mock",
   },
   {
@@ -176,8 +168,6 @@ export const jobs: Job[] = [
     paymentStatus: "paid",
     paymentMethod: "Zelle",
     notes: "Potential yearly plan candidate.",
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "mock",
   },
   {
@@ -195,8 +185,6 @@ export const jobs: Job[] = [
     paymentStatus: "partially paid",
     paymentMethod: "check",
     notes: "Future spreadsheet placeholder.",
-    beforePhoto: "Before photo placeholder",
-    afterPhoto: "After photo placeholder",
     source: "mock",
   },
 ];
