@@ -4,6 +4,7 @@ import {
   InfoWindow,
   Map,
   Marker,
+  useMap,
   useMapsLibrary,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
@@ -12,6 +13,9 @@ import { currency, isoToday } from "../lib/calculations";
 import type { Customer, Job, Solicitation, SolicitationOutcome } from "../types/business";
 
 type Coordinates = { latitude: number; longitude: number };
+type MapFocusRequest = { id: number; points: google.maps.LatLngLiteral[]; zoom?: number };
+type CompassEvent = DeviceOrientationEvent & { webkitCompassHeading?: number };
+type CompassEventConstructor = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<"granted" | "denied"> };
 
 type JobLocation = {
   key: string;
@@ -179,6 +183,34 @@ function markerIcon(color: string, scale = 7): google.maps.Symbol {
   };
 }
 
+function userLocationIcon(heading: number | null): google.maps.Icon {
+  const direction = heading ?? 0;
+  const cone = heading == null
+    ? ""
+    : `<path d="M32 4 L20 31 L44 31 Z" fill="#2563eb" fill-opacity=".3" transform="rotate(${direction} 32 32)"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">${cone}<circle cx="32" cy="32" r="12" fill="#fff" fill-opacity=".96"/><circle cx="32" cy="32" r="8" fill="#2563eb"/><circle cx="32" cy="32" r="3" fill="#fff"/></svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(64, 64),
+    anchor: new google.maps.Point(32, 32),
+  };
+}
+
+function MapFocusController({ request }: { request: MapFocusRequest | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !request?.points.length) return;
+    if (request.points.length === 1) {
+      map.moveCamera({ center: request.points[0], zoom: request.zoom ?? 18 });
+      return;
+    }
+    const bounds = new google.maps.LatLngBounds();
+    request.points.forEach((point) => bounds.extend(point));
+    map.fitBounds(bounds, 72);
+  }, [map, request]);
+  return null;
+}
+
 function JobMarkers({
   locations,
   onSelect,
@@ -239,6 +271,17 @@ function GoogleBusinessMap({
   const [deleting, setDeleting] = useState(false);
   const [geocodingProgress, setGeocodingProgress] = useState("");
   const [jobCoordinateCache, setJobCoordinateCache] = useState(readJobCoordinateCache);
+  const [mapSearch, setMapSearch] = useState("");
+  const [mapSearchOpen, setMapSearchOpen] = useState(false);
+  const [mapSearchStatus, setMapSearchStatus] = useState("");
+  const [mapSearchResult, setMapSearchResult] = useState<{ position: google.maps.LatLngLiteral; label: string } | null>(null);
+  const [mapFocusRequest, setMapFocusRequest] = useState<MapFocusRequest | null>(null);
+  const [userLocation, setUserLocation] = useState<google.maps.LatLngLiteral | null>(null);
+  const [userHeading, setUserHeading] = useState<number | null>(null);
+  const [locationStatus, setLocationStatus] = useState("");
+  const [trackingLocation, setTrackingLocation] = useState(false);
+  const locationWatchId = useRef<number | null>(null);
+  const orientationHandler = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
 
@@ -340,6 +383,128 @@ function GoogleBusinessMap({
     () => solicitations.filter((item) => outcomeFilter === "all" || item.outcome === outcomeFilter),
     [outcomeFilter, solicitations],
   );
+
+  const customerSuggestions = useMemo(() => {
+    const query = mapSearch.trim().toLowerCase();
+    if (!query) return [];
+    return customers
+      .filter((customer) => customer.name.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const aStarts = a.name.toLowerCase().startsWith(query) ? 0 : 1;
+        const bStarts = b.name.toLowerCase().startsWith(query) ? 0 : 1;
+        return aStarts - bStarts || a.name.localeCompare(b.name);
+      })
+      .slice(0, 6);
+  }, [customers, mapSearch]);
+
+  const requestMapFocus = useCallback((points: google.maps.LatLngLiteral[], zoom?: number) => {
+    setMapFocusRequest({ id: Date.now(), points, zoom });
+  }, []);
+
+  const focusCustomer = useCallback(async (customer: Customer) => {
+    const matchingLocations = jobLocations.filter((location) => location.jobs.some((job) => job.customerId === customer.id));
+    if (matchingLocations.length) {
+      const latest = [...matchingLocations].sort((a, b) => b.jobs[0].date.localeCompare(a.jobs[0].date))[0];
+      setSelected({ kind: "job", location: latest });
+      setMapSearchResult(null);
+      requestMapFocus(matchingLocations.map((location) => ({ lat: location.latitude, lng: location.longitude })), matchingLocations.length === 1 ? 18 : undefined);
+      setMapSearchStatus(`${customer.name} - ${latest.address}`);
+      setMapSearch(customer.name);
+      setMapSearchOpen(false);
+      return;
+    }
+    if (!geocoder || !customer.address.trim()) {
+      setMapSearchStatus("This customer does not have a mapped address yet.");
+      return;
+    }
+    setMapSearchStatus("Locating customer...");
+    const response = await geocoder.geocode({ address: geocodingQuery(customer.address), region: "US" });
+    const result = response.results[0];
+    if (!result) throw new Error("Customer address not found");
+    const position = { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() };
+    setMapSearchResult({ position, label: customer.name });
+    requestMapFocus([position], 18);
+    setMapSearchStatus(`${customer.name} - ${result.formatted_address}`);
+    setMapSearch(customer.name);
+    setMapSearchOpen(false);
+  }, [geocoder, jobLocations, requestMapFocus]);
+
+  async function submitMapSearch(event: React.FormEvent) {
+    event.preventDefault();
+    const query = mapSearch.trim();
+    if (!query) return;
+    const exactCustomer = customers.find((customer) => customer.name.toLowerCase() === query.toLowerCase());
+    const customerMatch = exactCustomer ?? (customerSuggestions.length === 1 ? customerSuggestions[0] : null);
+    try {
+      if (customerMatch) {
+        await focusCustomer(customerMatch);
+        return;
+      }
+      if (!geocoder) return;
+      setMapSearchOpen(false);
+      setMapSearchStatus("Finding address...");
+      const response = await geocoder.geocode({ address: geocodingQuery(query), region: "US" });
+      const result = response.results[0];
+      if (!result) throw new Error("Address not found");
+      const position = { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() };
+      setSelected(null);
+      setMapSearchResult({ position, label: result.formatted_address });
+      requestMapFocus([position], 18);
+      setMapSearch(result.formatted_address);
+      setMapSearchStatus(result.formatted_address);
+    } catch {
+      setMapSearchStatus("No matching customer or address was found.");
+    }
+  }
+
+  const enableCompass = useCallback(async () => {
+    if (typeof DeviceOrientationEvent === "undefined" || orientationHandler.current) return;
+    const constructor = DeviceOrientationEvent as CompassEventConstructor;
+    if (constructor.requestPermission && await constructor.requestPermission() !== "granted") return;
+    const handler = (event: DeviceOrientationEvent) => {
+      const compassEvent = event as CompassEvent;
+      const heading = compassEvent.webkitCompassHeading ?? (event.absolute && event.alpha != null ? (360 - event.alpha) % 360 : null);
+      if (heading != null && Number.isFinite(heading)) setUserHeading(heading);
+    };
+    orientationHandler.current = handler;
+    window.addEventListener("deviceorientation", handler, true);
+  }, []);
+
+  const locateUser = useCallback(async () => {
+    if (!navigator.geolocation) {
+      setLocationStatus("Location is not supported by this browser.");
+      return;
+    }
+    setLocationStatus("Finding your location...");
+    await enableCompass().catch(() => undefined);
+    if (locationWatchId.current != null) {
+      if (userLocation) {
+        requestMapFocus([userLocation], 18);
+        setLocationStatus("Showing your current location.");
+      }
+      return;
+    }
+    locationWatchId.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const current = { lat: position.coords.latitude, lng: position.coords.longitude };
+        setUserLocation(current);
+        if (position.coords.heading != null && Number.isFinite(position.coords.heading)) setUserHeading(position.coords.heading);
+        setTrackingLocation(true);
+        setLocationStatus("Live location is on.");
+        requestMapFocus([current], 18);
+      },
+      (error) => {
+        setTrackingLocation(false);
+        setLocationStatus(error.code === error.PERMISSION_DENIED ? "Allow location access to show your position." : "Your location could not be determined.");
+      },
+      { enableHighAccuracy: true, maximumAge: 5_000, timeout: 15_000 },
+    );
+  }, [enableCompass, requestMapFocus, userLocation]);
+
+  useEffect(() => () => {
+    if (locationWatchId.current != null) navigator.geolocation?.clearWatch(locationWatchId.current);
+    if (orientationHandler.current) window.removeEventListener("deviceorientation", orientationHandler.current, true);
+  }, []);
 
   const reverseGeocode = useCallback(async (position: google.maps.LatLngLiteral) => {
     setDraftCoordinates({ latitude: position.lat, longitude: position.lng });
@@ -516,6 +681,7 @@ function GoogleBusinessMap({
             reuseMaps
             onClick={handleMapClick}
           >
+            <MapFocusController request={mapFocusRequest} />
             {showJobs && <JobMarkers locations={jobLocations} onSelect={(location) => setSelected({ kind: "job", location })} />}
             {showSolicitations && visibleSolicitations.map((location) => (
               <Marker
@@ -532,6 +698,12 @@ function GoogleBusinessMap({
                 icon={markerIcon("#0f172a", 8)}
                 title="New solicitation"
               />
+            )}
+            {mapSearchResult && (
+              <Marker position={mapSearchResult.position} icon={markerIcon("#0f766e", 8)} title={mapSearchResult.label} />
+            )}
+            {userLocation && (
+              <Marker position={userLocation} icon={userLocationIcon(userHeading)} title="Your current location" zIndex={1000} />
             )}
             {selected && selectedPosition && (
               <InfoWindow position={selectedPosition} onCloseClick={() => setSelected(null)}>
@@ -555,6 +727,17 @@ function GoogleBusinessMap({
               </InfoWindow>
             )}
           </Map>
+          <div className="absolute left-3 right-16 top-3 z-10 max-w-md">
+            <form className="relative" onSubmit={submitMapSearch}>
+              <Search className="pointer-events-none absolute left-3 top-3 text-slate-400" size={18} />
+              <input value={mapSearch} onFocus={() => setMapSearchOpen(true)} onChange={(event) => { setMapSearch(event.target.value); setMapSearchOpen(true); setMapSearchStatus(""); }} placeholder="Search customer or address" aria-label="Search map by customer or address" className="h-11 w-full rounded-lg border border-slate-200 bg-white/95 pl-10 pr-12 text-sm text-ink shadow-soft outline-none backdrop-blur focus:border-lagoon dark:border-slate-700 dark:bg-slate-900/95 dark:text-white" />
+              <button type="submit" className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-lagoon dark:hover:bg-slate-800" aria-label="Search map" title="Search map"><Search size={17} /></button>
+              {mapSearchOpen && customerSuggestions.length > 0 && <div className="absolute left-0 right-0 top-12 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900">{customerSuggestions.map((customer) => <button key={customer.id} type="button" className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800" onClick={() => void focusCustomer(customer).catch(() => setMapSearchStatus("Customer address could not be located."))}><strong className="block text-sm text-ink dark:text-white">{customer.name}</strong><span className="block truncate text-xs text-slate-500">{customer.address || "No address listed"}</span></button>)}</div>}
+            </form>
+            {mapSearchStatus && <p className="mt-2 w-fit max-w-full rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
+          </div>
+          <button type="button" className="absolute bottom-10 right-3 z-10 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft transition hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" aria-label="Show my location" title="Show my location" onClick={() => void locateUser()}><LocateFixed size={20} className={trackingLocation ? "text-blue-600" : ""} /></button>
+          {locationStatus && <p className="absolute bottom-10 left-3 z-10 max-w-[calc(100%-76px)] rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{locationStatus}</p>}
           {geocodingProgress && <div className="absolute bottom-3 left-3 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow dark:bg-slate-900/95 dark:text-slate-200">{geocodingProgress}</div>}
         </div>
 
