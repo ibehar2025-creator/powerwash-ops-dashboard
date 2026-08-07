@@ -255,6 +255,7 @@ function GoogleBusinessMap({
   const [address, setAddress] = useState("");
   const [solicitedDate, setSolicitedDate] = useState(isoToday());
   const [outcome, setOutcome] = useState<SolicitationOutcome>("no answer");
+  const [followUpDate, setFollowUpDate] = useState("");
   const [notes, setNotes] = useState("");
   const [draftCoordinates, setDraftCoordinates] = useState<Coordinates | null>(null);
   const [locatedAddress, setLocatedAddress] = useState("");
@@ -264,6 +265,7 @@ function GoogleBusinessMap({
   const [editAddress, setEditAddress] = useState("");
   const [editDate, setEditDate] = useState(isoToday());
   const [editOutcome, setEditOutcome] = useState<SolicitationOutcome>("no answer");
+  const [editFollowUpDate, setEditFollowUpDate] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editStatus, setEditStatus] = useState("");
   const [updating, setUpdating] = useState(false);
@@ -565,6 +567,7 @@ function GoogleBusinessMap({
         longitude: coordinates.longitude,
         solicitedDate,
         outcome,
+        followUpDate: outcome === "follow up" ? followUpDate : "",
         notes: notes.trim(),
       });
       setAddress("");
@@ -572,6 +575,7 @@ function GoogleBusinessMap({
       setDraftCoordinates(null);
       setLocatedAddress("");
       setOutcome("no answer");
+      setFollowUpDate("");
       setFormStatus("Solicitation saved to the map.");
     } catch (error) {
       setFormStatus(error instanceof Error ? error.message : "Unable to save this location.");
@@ -585,6 +589,7 @@ function GoogleBusinessMap({
     setEditAddress(item.address);
     setEditDate(item.solicitedDate);
     setEditOutcome(item.outcome);
+    setEditFollowUpDate(item.followUpDate || "");
     setEditNotes(item.notes);
     setEditStatus("");
     setConfirmingDelete(false);
@@ -603,6 +608,7 @@ function GoogleBusinessMap({
         address: editAddress.trim(),
         solicitedDate: editDate,
         outcome: editOutcome,
+        followUpDate: editOutcome === "follow up" ? editFollowUpDate : "",
         notes: editNotes.trim(),
       };
       if (editAddress.trim() !== editing.address && geocoder) {
@@ -759,6 +765,7 @@ function GoogleBusinessMap({
                 <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={solicitedDate} onChange={(event) => setSolicitedDate(event.target.value)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
                 <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={outcome} onChange={(event) => setOutcome(event.target.value as SolicitationOutcome)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
               </div>
+              {outcome === "follow up" && <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Follow-up date<input type="date" required value={followUpDate} onChange={(event) => setFollowUpDate(event.target.value)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>}
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Name, interest, follow-up details..." className="mt-2 min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
               <p className="min-h-8 text-xs leading-4 text-slate-500 dark:text-slate-400">{formStatus}</p>
               <button className="primary-button w-full gap-2" disabled={saving}><MapPin size={17} />{saving ? "Saving..." : "Save solicitation"}</button>
@@ -778,11 +785,12 @@ function GoogleBusinessMap({
                     <div className="flex items-start gap-2"><span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: outcomeColors[item.outcome] }} /><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink dark:text-white">{item.address}</p><p className="text-xs text-slate-500">{item.solicitedDate}</p></div></div>
                   </button>
                   <div className="mt-2 flex items-center gap-2">
-                    <select value={item.outcome} onChange={(event) => void onUpdateSolicitation(item.id, { outcome: event.target.value as SolicitationOutcome })} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{outcomes.map((result) => <option key={result} value={result}>{result}</option>)}</select>
+                    <select value={item.outcome} onChange={(event) => { const nextOutcome = event.target.value as SolicitationOutcome; if (nextOutcome === "follow up") { beginEditing({ ...item, outcome: nextOutcome }); } else { void onUpdateSolicitation(item.id, { outcome: nextOutcome, followUpDate: "" }); } }} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{outcomes.map((result) => <option key={result} value={result}>{result}</option>)}</select>
                     <button type="button" className="icon-button h-8 w-8 shrink-0" title="Edit solicitation" aria-label={`Edit solicitation at ${item.address}`} onClick={() => beginEditing(item)}><Pencil size={15} /></button>
                     <button type="button" className="icon-button h-8 w-8 shrink-0" title="Delete solicitation" aria-label={`Delete solicitation at ${item.address}`} onClick={() => void onDeleteSolicitation(item.id)}><Trash2 size={15} /></button>
                   </div>
                   {item.notes && <p className="mt-2 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{item.notes}</p>}
+                  {item.outcome === "follow up" && <p className="mt-2 text-xs font-semibold text-lagoon dark:text-cyan-300">Follow up: {item.followUpDate || "Date needed"}</p>}
                 </article>
               ))}
             </div>
@@ -809,6 +817,7 @@ function GoogleBusinessMap({
                 <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={editDate} onChange={(event) => setEditDate(event.target.value)} className="mt-2 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
                 <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={editOutcome} onChange={(event) => setEditOutcome(event.target.value as SolicitationOutcome)} className="mt-2 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
               </div>
+              {editOutcome === "follow up" && <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Follow-up date<input type="date" required value={editFollowUpDate} onChange={(event) => setEditFollowUpDate(event.target.value)} className="mt-2 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>}
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={editNotes} onChange={(event) => setEditNotes(event.target.value)} className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
               {editStatus && <p className="text-sm text-slate-500 dark:text-slate-400">{editStatus}</p>}
               {confirmingDelete ? (

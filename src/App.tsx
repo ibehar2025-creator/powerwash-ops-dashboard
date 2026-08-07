@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
+import { NotificationCenter } from "./components/NotificationCenter";
 import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch, TodayView } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
 import {
@@ -51,6 +52,7 @@ import {
   recurringPlanType,
 } from "./lib/calculations";
 import { createCustomer, createJob, createLead, createSolicitation, deleteSolicitation, loadDatabaseSnapshot, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
+import { followUpLabel, followUpTiming } from "./lib/followUps";
 import type { Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
@@ -431,7 +433,7 @@ export default function App() {
       source: "Map solicitation",
       status: "new" as LeadStatus,
       estimatedValue: 0,
-      followUpDate: "",
+      followUpDate: solicitation.followUpDate || "",
       notes: solicitation.notes,
     };
     setLeads((current) => current.some((item) => item.id === lead.id)
@@ -514,7 +516,7 @@ export default function App() {
                 <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="text-2xl font-bold text-ink dark:text-white">{activeLabel}</h1><p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p></div>
               </div>
-              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /></div>
+              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} currentDate={currentDate} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /></div>
             </div>
           </header>
           <GlobalSearch customers={customers} jobs={jobs} leads={leads} onCustomer={setSelectedCustomer} onJob={setSelectedJob} onLead={setSelectedLead} onNew={setCreateKind} />
@@ -534,7 +536,7 @@ export default function App() {
             {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
             {activeTab === "today" && <TodayView customers={customers} jobs={jobs} currentDate={currentDate} onEditJob={setSelectedJob} onUpdateJob={updateJob} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} currentDate={currentDate} onCustomerClick={setSelectedCustomer} onJobClick={setSelectedJob} />}
-            {activeTab === "leads" && <Leads leads={leads} onLeadClick={setSelectedLead} />}
+            {activeTab === "leads" && <Leads leads={leads} currentDate={currentDate} onLeadClick={setSelectedLead} />}
             {activeTab === "jobs" && <JobsSpreadsheet customers={customers} jobs={jobs} onAddJob={() => setCreateKind("job")} onEditJob={setSelectedJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} />}
             {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
@@ -606,11 +608,32 @@ function Customers({ customers, jobs, currentDate, onCustomerClick, onJobClick }
   return <Section title="Customer management" kicker="Customer status and editable jobs" action={<select aria-label="Customer status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="repeat customer">Repeat customers</option><option value="high-value customer">High-value</option><option value="overdue payment">Overdue</option><option value="inactive customer">Inactive</option></select>}><DataTable><table className="data-table"><thead><tr><th>Customer</th><th>Jobs</th><th>Status</th></tr></thead><tbody>{filteredCustomers.map((customer) => { const customerJobs = jobsForCustomer(customer.id, jobs); const past = customerJobs.filter((job) => job.status === "completed" || jobDisplayStatus(job, currentDate) === "past due").length; const upcoming = customerJobs.filter((job) => isUpcomingJob(job, currentDate)).length; return <tr key={customer.id}><td><button type="button" className="font-semibold text-ink hover:text-lagoon dark:text-white" onClick={() => onCustomerClick(customer)}>{customer.name}</button><p className="text-xs text-slate-500 dark:text-slate-400">{customer.address}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.notes}</p></td><td><p className="mb-2 text-xs text-slate-500">{past} past / {upcoming} upcoming</p><div className="flex min-w-44 flex-col gap-1.5">{customerJobs.map((job) => <button key={job.id} type="button" className="inline-flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-left text-xs font-medium transition hover:border-lagoon hover:text-lagoon dark:border-slate-700" onClick={() => onJobClick(job)}><span className="min-w-0 truncate">{job.date} · {job.serviceType}</span><Pencil size={13} className="shrink-0" /></button>)}{customerJobs.length === 0 && <span className="text-xs text-slate-400">No jobs</span>}</div></td><td className="space-y-1">{customer.insights.map((insight) => <Badge key={insight} status={insight.includes("overdue") ? "past due" : "completed"} />)}{customer.insights.length === 0 && <span className="text-xs text-slate-400">No status</span>}</td></tr>; })}</tbody></table></DataTable></Section>;
 }
 
-function Leads({ leads, onLeadClick }: { leads: Lead[]; onLeadClick: (lead: Lead) => void }) {
+function Leads({ leads, currentDate, onLeadClick }: { leads: Lead[]; currentDate: string; onLeadClick: (lead: Lead) => void }) {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [followUpFilter, setFollowUpFilter] = useState("all");
   const wins = leads.filter((lead) => lead.status === "won" || lead.status === "scheduled").length;
-  const filteredLeads = statusFilter === "all" ? leads : leads.filter((lead) => lead.status === statusFilter);
-  return <Section title="Leads & prospects" kicker={`${leads.length ? Math.round((wins / leads.length) * 100) : 0}% conversion tracked`} action={<select aria-label="Lead status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select>}><DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredLeads.map((lead) => <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td>{lead.followUpDate || "Not scheduled"}</td><td>{lead.notes}</td><td><button type="button" className="icon-button" title={`Edit ${lead.name}`} aria-label={`Edit ${lead.name}`} onClick={() => onLeadClick(lead)}><Pencil size={15} /></button></td></tr>)}</tbody></table></DataTable></Section>;
+  const overdueCount = leads.filter((lead) => followUpTiming(lead.followUpDate, currentDate) === "overdue" && !["scheduled", "won", "lost"].includes(lead.status)).length;
+  const filteredLeads = leads
+    .filter((lead) => statusFilter === "all" || lead.status === statusFilter)
+    .filter((lead) => {
+      if (followUpFilter === "all") return true;
+      const timing = followUpTiming(lead.followUpDate, currentDate);
+      return followUpFilter === "upcoming" ? timing === "upcoming" || timing === "later" : timing === followUpFilter;
+    })
+    .sort((a, b) => (a.followUpDate || "9999-12-31").localeCompare(b.followUpDate || "9999-12-31") || a.name.localeCompare(b.name));
+
+  return (
+    <Section
+      title="Leads & prospects"
+      kicker={`${leads.length ? Math.round((wins / leads.length) * 100) : 0}% conversion tracked${overdueCount ? ` - ${overdueCount} overdue` : ""}`}
+      action={<div className="flex flex-wrap gap-2"><select aria-label="Lead status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{leadStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select><select aria-label="Follow-up timing filter" value={followUpFilter} onChange={(event) => setFollowUpFilter(event.target.value)}><option value="all">All follow-ups</option><option value="overdue">Overdue</option><option value="today">Due today</option><option value="upcoming">Upcoming</option><option value="unscheduled">Not scheduled</option></select></div>}
+    >
+      <DataTable><table className="data-table"><thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Est. value</th><th>Follow-up</th><th>Notes</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredLeads.map((lead) => {
+        const timing = followUpTiming(lead.followUpDate, currentDate);
+        return <tr key={lead.id}><td><p className="font-semibold text-ink dark:text-white">{lead.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.contact}</p><p className="text-xs text-slate-500 dark:text-slate-400">{lead.address}</p></td><td>{lead.source}</td><td><Badge status={lead.status} /></td><td>{currency.format(lead.estimatedValue)}</td><td><p className="whitespace-nowrap text-sm font-medium">{lead.followUpDate || "Not scheduled"}</p><span className={cx("mt-1 inline-flex rounded-md px-2 py-0.5 text-xs font-semibold", timing === "overdue" && "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200", timing === "today" && "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200", (timing === "upcoming" || timing === "later") && "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200", timing === "unscheduled" && "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300")}>{followUpLabel(timing)}</span></td><td>{lead.notes}</td><td><button type="button" className="icon-button" title={`Edit ${lead.name}`} aria-label={`Edit ${lead.name}`} onClick={() => onLeadClick(lead)}><Pencil size={15} /></button></td></tr>;
+      })}</tbody></table></DataTable>
+    </Section>
+  );
 }
 
 function Calendar({ customers, jobs, currentDate, loading, onJobClick }: { customers: Customer[]; jobs: Job[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void }) {

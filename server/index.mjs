@@ -48,10 +48,13 @@ async function ensureMapSchema() {
       longitude double precision not null,
       solicited_date date not null default current_date,
       outcome text not null default 'visited' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
+      follow_up_date date,
       notes text not null default '',
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    alter table solicitations add column if not exists follow_up_date date;
 
     insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
     select
@@ -62,7 +65,7 @@ async function ensureMapSchema() {
       'Map solicitation',
       'new',
       0,
-      null,
+      follow_up_date,
       notes
     from solicitations
     where outcome = 'follow up'
@@ -172,6 +175,7 @@ const toSolicitation = (row) => ({
   longitude: Number(row.longitude),
   solicitedDate: row.solicited_date?.toISOString?.().slice(0, 10) ?? row.solicited_date,
   outcome: row.outcome,
+  followUpDate: row.follow_up_date?.toISOString?.().slice(0, 10) ?? row.follow_up_date ?? "",
   notes: row.notes,
 });
 
@@ -186,14 +190,15 @@ async function syncSolicitationLead(client, solicitation) {
 
   const result = await client.query(
     `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
-     values ($1, 'Map follow-up', 'Contact info pending', $2, 'Map solicitation', 'new', 0, null, $3)
+     values ($1, 'Map follow-up', 'Contact info pending', $2, 'Map solicitation', 'new', 0, $3, $4)
      on conflict (id) do update set
        address = case when leads.website_overrides ? 'address' then leads.address else excluded.address end,
        source = excluded.source,
+       follow_up_date = case when leads.website_overrides ? 'followUpDate' then leads.follow_up_date else excluded.follow_up_date end,
        notes = case when leads.website_overrides ? 'notes' then leads.notes else excluded.notes end,
        updated_at = now()
      returning *`,
-    [leadId, solicitation.address, solicitation.notes || ""],
+    [leadId, solicitation.address, solicitation.follow_up_date, solicitation.notes || ""],
   );
   return toLead(result.rows[0]);
 }
@@ -682,17 +687,17 @@ app.patch("/api/jobs/:id", requireDatabase, async (req, res, next) => {
 app.post("/api/solicitations", requireDatabase, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { address, latitude, longitude, solicitedDate, outcome, notes } = req.body;
+    const { address, latitude, longitude, solicitedDate, outcome, followUpDate, notes } = req.body;
     if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
       res.status(400).json({ error: "Address and valid coordinates are required." });
       return;
     }
     await client.query("begin");
     const result = await client.query(
-      `insert into solicitations (address, latitude, longitude, solicited_date, outcome, notes)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into solicitations (address, latitude, longitude, solicited_date, outcome, follow_up_date, notes)
+       values ($1, $2, $3, $4, $5, $6, $7)
        returning *`,
-      [address, latitude, longitude, solicitedDate || new Date().toISOString().slice(0, 10), outcome || "no answer", notes || ""],
+      [address, latitude, longitude, solicitedDate || new Date().toISOString().slice(0, 10), outcome || "no answer", followUpDate || null, notes || ""],
     );
     const solicitation = toSolicitation(result.rows[0]);
     const lead = await syncSolicitationLead(client, result.rows[0]);
@@ -709,7 +714,8 @@ app.post("/api/solicitations", requireDatabase, async (req, res, next) => {
 app.patch("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { address, latitude, longitude, solicitedDate, outcome, notes } = req.body;
+    const { address, latitude, longitude, solicitedDate, outcome, followUpDate, notes } = req.body;
+    const hasFollowUpDate = Object.hasOwn(req.body, "followUpDate");
     await client.query("begin");
     const result = await client.query(
       `update solicitations
@@ -718,10 +724,11 @@ app.patch("/api/solicitations/:id", requireDatabase, async (req, res, next) => {
            longitude = coalesce($4, longitude),
            solicited_date = coalesce($5, solicited_date),
            outcome = coalesce($6, outcome),
-           notes = coalesce($7, notes)
+           follow_up_date = case when $8::boolean then nullif($7, '')::date else follow_up_date end,
+           notes = coalesce($9, notes)
        where id = $1
        returning *`,
-      [req.params.id, address, latitude, longitude, solicitedDate, outcome, notes],
+      [req.params.id, address, latitude, longitude, solicitedDate, outcome, followUpDate, hasFollowUpDate, notes],
     );
     if (!result.rows[0]) {
       await client.query("rollback");

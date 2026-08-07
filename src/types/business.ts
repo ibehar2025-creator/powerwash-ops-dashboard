@@ -48,6 +48,7 @@ export interface Solicitation {
   longitude: number;
   solicitedDate: string;
   outcome: SolicitationOutcome;
+  followUpDate: string;
   notes: string;
 }
 
