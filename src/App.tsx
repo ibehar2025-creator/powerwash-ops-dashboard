@@ -549,7 +549,7 @@ export default function App() {
               <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} currentDate={currentDate} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /></div>
             </div>
           </header>
-          {activeTab !== "map" && <GlobalSearch customers={customers} jobs={jobs} leads={leads} onCustomer={setSelectedCustomer} onJob={setSelectedJob} onLead={setSelectedLead} onNew={setCreateKind} />}
+          {activeTab === "jobs" && <GlobalSearch customers={customers} jobs={jobs} leads={leads} onCustomer={setSelectedCustomer} onJob={setSelectedJob} onLead={setSelectedLead} onNew={setCreateKind} />}
           {mobileMenuOpen && (
             <div className="fixed inset-0 z-[60] lg:hidden">
               <button className="absolute inset-0 bg-ink/45" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} />
