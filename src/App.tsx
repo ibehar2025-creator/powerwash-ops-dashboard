@@ -22,7 +22,6 @@ import {
   Sparkles,
   Star,
   Sun,
-  Users,
   X,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
@@ -63,7 +62,6 @@ type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "customers", label: "Customers", icon: Users },
   { id: "leads", label: "Leads", icon: Sparkles },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
