@@ -1,4 +1,4 @@
-import { Bell, BriefcaseBusiness, CalendarClock, ClipboardList } from "lucide-react";
+import { Bell, BriefcaseBusiness, CalendarClock, ClipboardList, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { followUpTiming } from "../lib/followUps";
 import type { Customer, Job, Lead, ServicePlan } from "../types/business";
@@ -57,5 +57,28 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
     if (item.kind === "plan") onPlans();
   }
 
-  return <div className="relative"><button type="button" className="icon-button relative" aria-label="Open notifications" title="Notifications" onClick={() => setOpen(!open)}><Bell size={17} />{urgentCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{urgentCount > 99 ? "99+" : urgentCount}</span>}</button>{open && <div className="absolute right-0 top-12 z-50 w-[min(92vw,390px)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900"><div className="border-b border-slate-200 p-4 dark:border-slate-800"><p className="text-xs font-semibold uppercase text-lagoon dark:text-cyan-300">Notification center</p><h2 className="font-semibold text-ink dark:text-white">Business reminders</h2></div><div className="max-h-[min(65vh,520px)] overflow-y-auto p-2">{notifications.map((item) => { const Icon = item.kind === "lead" ? CalendarClock : item.kind === "job" ? BriefcaseBusiness : ClipboardList; return <button key={item.id} type="button" className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block truncate text-xs text-slate-500">{item.detail}</span></span></button>; })}{notifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No follow-ups, jobs, or renewals need attention.</p></div>}</div></div>}</div>;
+  return (
+    <div className="relative z-50">
+      <button type="button" className="icon-button relative" aria-label="Open notifications" aria-expanded={open} title="Notifications" onClick={() => setOpen(!open)}>
+        <Bell size={17} />
+        {urgentCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{urgentCount > 99 ? "99+" : urgentCount}</span>}
+      </button>
+      {open && <>
+        <button type="button" className="fixed inset-0 z-40 bg-ink/35 sm:hidden" aria-label="Close notifications" onClick={() => setOpen(false)} />
+        <div className="fixed inset-x-3 top-20 z-50 max-h-[calc(100dvh-6rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[390px]">
+          <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4 dark:border-slate-800">
+            <div><p className="text-xs font-semibold uppercase text-lagoon dark:text-cyan-300">Notification center</p><h2 className="font-semibold text-ink dark:text-white">Business reminders</h2></div>
+            <button type="button" className="icon-button h-8 w-8 shrink-0" aria-label="Close notifications" title="Close notifications" onClick={() => setOpen(false)}><X size={16} /></button>
+          </div>
+          <div className="max-h-[calc(100dvh-11rem)] overflow-y-auto p-2 sm:max-h-[min(65vh,520px)]">
+            {notifications.map((item) => {
+              const Icon = item.kind === "lead" ? CalendarClock : item.kind === "job" ? BriefcaseBusiness : ClipboardList;
+              return <button key={item.id} type="button" className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block truncate text-xs text-slate-500">{item.detail}</span></span></button>;
+            })}
+            {notifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No follow-ups, jobs, or renewals need attention.</p></div>}
+          </div>
+        </div>
+      </>}
+    </div>
+  );
 }
