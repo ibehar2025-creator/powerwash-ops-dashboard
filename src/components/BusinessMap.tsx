@@ -14,8 +14,6 @@ import type { Customer, Job, Solicitation, SolicitationOutcome } from "../types/
 
 type Coordinates = { latitude: number; longitude: number };
 type MapFocusRequest = { id: number; points: google.maps.LatLngLiteral[]; zoom?: number };
-type CompassEvent = DeviceOrientationEvent & { webkitCompassHeading?: number };
-type CompassEventConstructor = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<"granted" | "denied"> };
 
 type JobLocation = {
   key: string;
@@ -362,9 +360,7 @@ function GoogleBusinessMap({
   const [userLocation, setUserLocation] = useState<google.maps.LatLngLiteral | null>(null);
   const [userHeading, setUserHeading] = useState<number | null>(null);
   const [locationStatus, setLocationStatus] = useState("");
-  const [trackingLocation, setTrackingLocation] = useState(false);
-  const locationWatchId = useRef<number | null>(null);
-  const orientationHandler = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
+  const [locatingUser, setLocatingUser] = useState(false);
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
 
@@ -557,54 +553,29 @@ function GoogleBusinessMap({
     }
   }
 
-  const enableCompass = useCallback(async () => {
-    if (typeof DeviceOrientationEvent === "undefined" || orientationHandler.current) return;
-    const constructor = DeviceOrientationEvent as CompassEventConstructor;
-    if (constructor.requestPermission && await constructor.requestPermission() !== "granted") return;
-    const handler = (event: DeviceOrientationEvent) => {
-      const compassEvent = event as CompassEvent;
-      const heading = compassEvent.webkitCompassHeading ?? (event.absolute && event.alpha != null ? (360 - event.alpha) % 360 : null);
-      if (heading != null && Number.isFinite(heading)) setUserHeading(heading);
-    };
-    orientationHandler.current = handler;
-    window.addEventListener("deviceorientation", handler, true);
-  }, []);
-
-  const locateUser = useCallback(async () => {
+  const locateUser = useCallback(() => {
     if (!navigator.geolocation) {
       setLocationStatus("Location is not supported by this browser.");
       return;
     }
+    setLocatingUser(true);
     setLocationStatus("Finding your location...");
-    await enableCompass().catch(() => undefined);
-    if (locationWatchId.current != null) {
-      if (userLocation) {
-        requestMapFocus([userLocation], 18);
-        setLocationStatus("Showing your current location.");
-      }
-      return;
-    }
-    locationWatchId.current = navigator.geolocation.watchPosition(
+    navigator.geolocation.getCurrentPosition(
       (position) => {
         const current = { lat: position.coords.latitude, lng: position.coords.longitude };
         setUserLocation(current);
-        if (position.coords.heading != null && Number.isFinite(position.coords.heading)) setUserHeading(position.coords.heading);
-        setTrackingLocation(true);
-        setLocationStatus("Live location is on.");
+        setUserHeading(position.coords.heading != null && Number.isFinite(position.coords.heading) ? position.coords.heading : null);
+        setLocatingUser(false);
+        setLocationStatus("Location marked. Tap the location button again to refresh it.");
         requestMapFocus([current], 18);
       },
       (error) => {
-        setTrackingLocation(false);
+        setLocatingUser(false);
         setLocationStatus(error.code === error.PERMISSION_DENIED ? "Allow location access to show your position." : "Your location could not be determined.");
       },
-      { enableHighAccuracy: true, maximumAge: 5_000, timeout: 15_000 },
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
     );
-  }, [enableCompass, requestMapFocus, userLocation]);
-
-  useEffect(() => () => {
-    if (locationWatchId.current != null) navigator.geolocation?.clearWatch(locationWatchId.current);
-    if (orientationHandler.current) window.removeEventListener("deviceorientation", orientationHandler.current, true);
-  }, []);
+  }, [requestMapFocus]);
 
   const reverseGeocode = useCallback(async (position: google.maps.LatLngLiteral) => {
     setDraftCoordinates({ latitude: position.lat, longitude: position.lng });
@@ -838,7 +809,7 @@ function GoogleBusinessMap({
             </form>
             {mapSearchStatus && <p className="mt-2 w-fit max-w-full break-words rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium leading-5 text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
           </div>
-          <button type="button" className="absolute bottom-10 right-3 z-10 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft transition hover:border-blue-500 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" aria-label="Show my location" title="Show my location" onClick={() => void locateUser()}><LocateFixed size={20} className={trackingLocation ? "text-blue-600" : ""} /></button>
+          <button type="button" className="absolute bottom-10 right-3 z-10 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft transition hover:border-blue-500 hover:text-blue-600 disabled:cursor-wait disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" aria-label="Show my location" title="Show my location" disabled={locatingUser} onClick={locateUser}><LocateFixed size={20} className={locatingUser ? "animate-pulse text-blue-600" : userLocation ? "text-blue-600" : ""} /></button>
           {locationStatus && <p className="absolute bottom-10 left-3 z-10 max-w-[calc(100%-76px)] rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{locationStatus}</p>}
           {geocodingProgress && <div className="absolute bottom-3 left-3 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow dark:bg-slate-900/95 dark:text-slate-200">{geocodingProgress}</div>}
         </div>
