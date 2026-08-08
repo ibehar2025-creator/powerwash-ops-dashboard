@@ -16,6 +16,16 @@ A full-stack React, TypeScript, Tailwind CSS, Express, and PostgreSQL dashboard 
 - Reviews dashboard imported from the **Powerwashing reviews** spreadsheet
 - Reports with charts for revenue over time, paid vs unpaid invoices, service mix, best customers, average job value, repeat customer rate, lead conversion, tips, and payouts
 - Light/dark mode toggle in the app header
+- Installable iPhone, Android, and desktop web app with dedicated Home Screen icons
+- Account-specific notification inbox for follow-ups, jobs, schedule conflicts, missing job details, plan renewals, and spreadsheet sync failures
+
+## Install The App
+
+The dashboard is a Progressive Web App. It uses the same deployed website and database, so there is no separate App Store build to maintain.
+
+On iPhone, open the dashboard in Safari, tap **Share**, choose **Add to Home Screen**, enable **Open as Web App**, and tap **Add**. On Android or desktop Chrome, use the install button in the dashboard header and accept the browser installation prompt.
+
+The service worker caches only the application shell and static assets. API responses and business records are excluded from offline caching so outdated customer or job data is not presented as current.
 
 ## Upcoming Jobs Spreadsheet
 

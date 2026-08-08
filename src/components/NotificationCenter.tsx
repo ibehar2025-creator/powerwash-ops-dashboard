@@ -1,17 +1,30 @@
-import { Bell, BriefcaseBusiness, CalendarClock, ClipboardList, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Bell,
+  BriefcaseBusiness,
+  CalendarClock,
+  CircleDollarSign,
+  ClipboardList,
+  MapPinOff,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { loadReadNotificationKeys, markNotificationsRead } from "../lib/api";
 import { useAuth } from "../lib/authContext";
 import { followUpTiming } from "../lib/followUps";
 import type { Customer, Job, Lead, ServicePlan } from "../types/business";
 
+type NotificationTone = "urgent" | "today" | "upcoming";
+type NotificationKind = "lead" | "job" | "plan" | "sync";
+
 type NotificationItem = {
   id: string;
-  tone: "urgent" | "today" | "upcoming";
+  tone: NotificationTone;
   title: string;
   detail: string;
-  kind: "lead" | "job" | "plan";
-  record: Lead | Job | ServicePlan;
+  kind: NotificationKind;
+  record?: Lead | Job | ServicePlan;
 };
 
 function notificationKey(item: NotificationItem) {
@@ -24,15 +37,54 @@ function addDays(isoDate: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-export function NotificationCenter({ customers, leads, jobs, plans, currentDate, onLead, onJob, onPlans }: {
+function validIsoDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function missingAddress(address: string) {
+  return !address.trim() || ["unknown", "n/a", "not listed"].includes(address.trim().toLowerCase());
+}
+
+function notificationIcon(item: NotificationItem) {
+  if (item.kind === "sync") return RefreshCw;
+  if (item.kind === "lead") return CalendarClock;
+  if (item.kind === "plan") return ClipboardList;
+  if (item.id.startsWith("missing-address")) return MapPinOff;
+  if (item.id.startsWith("missing-price")) return CircleDollarSign;
+  if (item.id.startsWith("conflict")) return AlertTriangle;
+  return BriefcaseBusiness;
+}
+
+const toneLabels: Record<NotificationTone, string> = {
+  urgent: "Needs attention",
+  today: "Today",
+  upcoming: "Coming up",
+};
+
+export function NotificationCenter({
+  customers,
+  leads,
+  jobs,
+  plans,
+  currentDate,
+  syncStatus,
+  syncing,
+  onLead,
+  onJob,
+  onPlans,
+  onSync,
+}: {
   customers: Customer[];
   leads: Lead[];
   jobs: Job[];
   plans: ServicePlan[];
   currentDate: string;
+  syncStatus: string;
+  syncing: boolean;
   onLead: (lead: Lead) => void;
   onJob: (job: Job) => void;
   onPlans: () => void;
+  onSync: () => void;
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -56,34 +108,132 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
 
   const notifications = useMemo(() => {
     const items: NotificationItem[] = [];
+    const tomorrow = addDays(currentDate, 1);
+
     leads.filter((lead) => !["scheduled", "won", "lost"].includes(lead.status)).forEach((lead) => {
       const timing = followUpTiming(lead.followUpDate, currentDate);
-      if (!["overdue", "today", "upcoming"].includes(timing)) return;
-      items.push({ id: `lead-${lead.id}`, tone: timing === "overdue" ? "urgent" : timing as "today" | "upcoming", title: timing === "overdue" ? `Overdue: ${lead.name}` : `Follow up with ${lead.name}`, detail: `${lead.followUpDate} - ${lead.address}`, kind: "lead", record: lead });
+      if (["overdue", "today", "upcoming"].includes(timing)) {
+        items.push({
+          id: `lead-${lead.id}`,
+          tone: timing === "overdue" ? "urgent" : timing as "today" | "upcoming",
+          title: timing === "overdue" ? `Overdue follow-up: ${lead.name}` : `Follow up with ${lead.name}`,
+          detail: `${lead.followUpDate} - ${lead.address || "Address not listed"}`,
+          kind: "lead",
+          record: lead,
+        });
+      } else if (timing === "unscheduled" && ["new", "contacted", "quoted"].includes(lead.status)) {
+        items.push({
+          id: `lead-date-${lead.id}`,
+          tone: "upcoming",
+          title: `Add a follow-up date: ${lead.name}`,
+          detail: `${lead.status} lead - ${lead.address || "Address not listed"}`,
+          kind: "lead",
+          record: lead,
+        });
+      }
     });
-    jobs.filter((job) => job.status !== "completed" && job.status !== "canceled" && (job.date === currentDate || job.date === addDays(currentDate, 1))).forEach((job) => {
+
+    const activeJobs = jobs.filter((job) => job.status !== "completed" && job.status !== "canceled");
+    activeJobs.filter((job) => job.date === currentDate || job.date === tomorrow).forEach((job) => {
       const today = job.date === currentDate;
-      items.push({ id: `job-${job.id}`, tone: today ? "today" : "upcoming", title: `${today ? "Today" : "Tomorrow"}: ${customerNames.get(job.customerId) ?? "Job"}`, detail: `${job.time} - ${job.address}`, kind: "job", record: job });
+      items.push({
+        id: `job-${job.id}`,
+        tone: today ? "today" : "upcoming",
+        title: `${today ? "Today" : "Tomorrow"}: ${customerNames.get(job.customerId) ?? "Job"}`,
+        detail: `${job.time || "Time not listed"} - ${job.address || "Address not listed"}`,
+        kind: "job",
+        record: job,
+      });
     });
+    activeJobs.filter((job) => job.status === "past due").forEach((job) => {
+      items.push({
+        id: `past-due-${job.id}`,
+        tone: "urgent",
+        title: `Past-due job: ${customerNames.get(job.customerId) ?? "Customer"}`,
+        detail: `${job.date} - ${job.address || "Address not listed"}`,
+        kind: "job",
+        record: job,
+      });
+    });
+    activeJobs.filter((job) => job.date >= currentDate && missingAddress(job.address)).forEach((job) => {
+      items.push({
+        id: `missing-address-${job.id}`,
+        tone: job.date <= tomorrow ? "urgent" : "upcoming",
+        title: `Job needs an address: ${customerNames.get(job.customerId) ?? "Customer"}`,
+        detail: `${job.date} at ${job.time || "time not listed"}`,
+        kind: "job",
+        record: job,
+      });
+    });
+    activeJobs.filter((job) => job.date >= currentDate && job.price <= 0).forEach((job) => {
+      items.push({
+        id: `missing-price-${job.id}`,
+        tone: job.date <= tomorrow ? "urgent" : "upcoming",
+        title: `Job needs a price: ${customerNames.get(job.customerId) ?? "Customer"}`,
+        detail: `${job.date} - ${job.address || "Address not listed"}`,
+        kind: "job",
+        record: job,
+      });
+    });
+
+    const scheduleGroups = new Map<string, Job[]>();
+    activeJobs.filter((job) => job.date >= currentDate && job.time).forEach((job) => {
+      const key = `${job.date}|${job.time}`;
+      scheduleGroups.set(key, [...(scheduleGroups.get(key) ?? []), job]);
+    });
+    scheduleGroups.forEach((scheduledJobs, key) => {
+      if (scheduledJobs.length < 2) return;
+      const [date, time] = key.split("|");
+      items.push({
+        id: `conflict-${key}`,
+        tone: date === currentDate ? "today" : "upcoming",
+        title: `${scheduledJobs.length} jobs scheduled together`,
+        detail: `${date} at ${time} - check staffing and timing`,
+        kind: "job",
+        record: scheduledJobs[0],
+      });
+    });
+
     const planCutoff = addDays(currentDate, 30);
-    plans.filter((plan) => plan.renewalDate >= currentDate && plan.renewalDate <= planCutoff).forEach((plan) => {
-      items.push({ id: `plan-${plan.id}`, tone: plan.renewalDate === currentDate ? "today" : "upcoming", title: `Plan renewal: ${customerNames.get(plan.customerId) ?? "Customer"}`, detail: `${plan.renewalDate} - ${plan.type} plan`, kind: "plan", record: plan });
+    plans.filter((plan) => validIsoDate(plan.renewalDate) && plan.renewalDate <= planCutoff).forEach((plan) => {
+      const overdue = plan.renewalDate < currentDate;
+      items.push({
+        id: `plan-${plan.id}`,
+        tone: overdue ? "urgent" : plan.renewalDate === currentDate ? "today" : "upcoming",
+        title: `${overdue ? "Overdue renewal" : "Plan renewal"}: ${customerNames.get(plan.customerId) ?? "Customer"}`,
+        detail: `${plan.renewalDate} - ${plan.type} plan`,
+        kind: "plan",
+        record: plan,
+      });
     });
+
+    const normalizedSyncStatus = syncStatus.toLowerCase();
+    if (["failed", "error", "unavailable", "could not", "not configured"].some((word) => normalizedSyncStatus.includes(word))) {
+      items.push({
+        id: "sheet-sync-failure",
+        tone: "urgent",
+        title: "Google Sheets needs attention",
+        detail: syncStatus,
+        kind: "sync",
+      });
+    }
+
     const rank = { urgent: 0, today: 1, upcoming: 2 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
-  }, [customerNames, currentDate, jobs, leads, plans]);
-  const attentionNotifications = notifications.filter((item) => item.tone === "urgent" || item.tone === "today");
-  const unreadCount = readStateLoaded ? attentionNotifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length : 0;
+  }, [customerNames, currentDate, jobs, leads, plans, syncStatus]);
+
+  const unreadCount = readStateLoaded
+    ? notifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length
+    : 0;
 
   function toggleNotifications() {
     if (open) {
       setOpen(false);
       return;
     }
-    const nextReadKeys = new Set(readNotificationKeys);
-    attentionNotifications.forEach((item) => nextReadKeys.add(notificationKey(item)));
-    setReadNotificationKeys(nextReadKeys);
-    void markNotificationsRead(attentionNotifications.map(notificationKey)).catch(() => {
+    const keys = notifications.map(notificationKey);
+    setReadNotificationKeys((current) => new Set([...current, ...keys]));
+    void markNotificationsRead(keys).catch(() => {
       // The optimistic state lasts for this session; a failed save returns as unread next time.
     });
     setOpen(true);
@@ -91,9 +241,10 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
 
   function openItem(item: NotificationItem) {
     setOpen(false);
-    if (item.kind === "lead") onLead(item.record as Lead);
-    if (item.kind === "job") onJob(item.record as Job);
+    if (item.kind === "lead" && item.record) onLead(item.record as Lead);
+    if (item.kind === "job" && item.record) onJob(item.record as Job);
     if (item.kind === "plan") onPlans();
+    if (item.kind === "sync") onSync();
   }
 
   return (
@@ -104,17 +255,25 @@ export function NotificationCenter({ customers, leads, jobs, plans, currentDate,
       </button>
       {open && <>
         <button type="button" className="fixed inset-0 z-40 bg-ink/35 sm:bg-transparent" aria-label="Close notifications" onClick={() => setOpen(false)} />
-        <div className="fixed inset-x-3 top-20 z-50 max-h-[calc(100dvh-6rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[390px]" onClick={() => setOpen(false)}>
+        <div className="fixed inset-x-3 top-20 z-50 max-h-[calc(100dvh-6rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[410px]">
           <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4 dark:border-slate-800">
-            <div><p className="text-xs font-semibold uppercase text-lagoon dark:text-cyan-300">Notification center</p><h2 className="font-semibold text-ink dark:text-white">Business reminders</h2></div>
+            <div>
+              <p className="text-xs font-semibold uppercase text-lagoon dark:text-cyan-300">Notification center</p>
+              <h2 className="font-semibold text-ink dark:text-white">Business reminders</h2>
+              <p className="mt-1 text-xs text-slate-500">{notifications.length} active reminder{notifications.length === 1 ? "" : "s"} - marked read for {user.name}</p>
+            </div>
             <button type="button" className="icon-button h-8 w-8 shrink-0" aria-label="Close notifications" title="Close notifications" onClick={() => setOpen(false)}><X size={16} /></button>
           </div>
-          <div className="max-h-[calc(100dvh-11rem)] overflow-y-auto p-2 sm:max-h-[min(65vh,520px)]">
-            {notifications.map((item) => {
-              const Icon = item.kind === "lead" ? CalendarClock : item.kind === "job" ? BriefcaseBusiness : ClipboardList;
-              return <button key={item.id} type="button" className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block truncate text-xs text-slate-500">{item.detail}</span></span></button>;
+          <div className="max-h-[calc(100dvh-12rem)] overflow-y-auto p-2 sm:max-h-[min(68vh,560px)]">
+            {(["urgent", "today", "upcoming"] as NotificationTone[]).map((tone) => {
+              const group = notifications.filter((item) => item.tone === tone);
+              if (!group.length) return null;
+              return <section key={tone} className="mb-2 last:mb-0"><h3 className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">{toneLabels[tone]} - {group.length}</h3>{group.map((item) => {
+                const Icon = notificationIcon(item);
+                return <button key={item.id} type="button" className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800" disabled={item.kind === "sync" && syncing} onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block break-words text-xs leading-5 text-slate-500">{item.kind === "sync" && syncing ? "Syncing Google Sheets..." : item.detail}</span></span></button>;
+              })}</section>;
             })}
-            {notifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No follow-ups, jobs, or renewals need attention.</p></div>}
+            {notifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No follow-ups, jobs, renewals, schedule issues, or sync problems need attention.</p></div>}
           </div>
         </div>
       </>}
