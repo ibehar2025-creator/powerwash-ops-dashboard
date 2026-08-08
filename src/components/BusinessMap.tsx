@@ -566,7 +566,7 @@ function GoogleBusinessMap({
         setUserLocation(current);
         setUserHeading(position.coords.heading != null && Number.isFinite(position.coords.heading) ? position.coords.heading : null);
         setLocatingUser(false);
-        setLocationStatus("Location marked. Tap the location button again to refresh it.");
+        setLocationStatus("");
         requestMapFocus([current], 18);
       },
       (error) => {
