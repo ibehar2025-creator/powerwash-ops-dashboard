@@ -219,23 +219,102 @@ function JobMarkers({
   locations: JobLocation[];
   onSelect: (location: JobLocation) => void;
 }) {
-  function handleClick(event: google.maps.MapMouseEvent, location: JobLocation) {
-    event.stop();
-    onSelect(location);
-  }
+  const map = useMap();
+  const onSelectRef = useRef(onSelect);
 
-  return locations.map((location) => (
-    <Marker
-      key={location.key}
-      position={{ lat: location.latitude, lng: location.longitude }}
-      icon={markerIcon(
-        location.jobs.every((job) => job.status === "completed") ? "#059669" : "#2563eb",
-        6,
-      )}
-      title={`${location.jobs[0].date} job at ${location.address}`}
-      onClick={(event) => handleClick(event, location)}
-    />
-  ));
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
+    if (!map) return;
+    const layer = new google.maps.Data({ map });
+    const locationsByKey = new globalThis.Map(locations.map((location) => [location.key, location]));
+    const completedIcon = markerIcon("#059669", 6);
+    const scheduledIcon = markerIcon("#2563eb", 6);
+
+    locations.forEach((location) => {
+      layer.add({
+        id: location.key,
+        geometry: new google.maps.Data.Point({ lat: location.latitude, lng: location.longitude }),
+        properties: {
+          completed: location.jobs.every((job) => job.status === "completed"),
+          title: `${location.jobs[0].date} job at ${location.address}`,
+        },
+      });
+    });
+    layer.setStyle((feature) => ({
+      clickable: true,
+      icon: feature.getProperty("completed") ? completedIcon : scheduledIcon,
+      title: String(feature.getProperty("title") ?? "Job"),
+      zIndex: 1,
+    }));
+    const clickListener = layer.addListener("click", (event: google.maps.Data.MouseEvent) => {
+      event.stop();
+      const location = locationsByKey.get(String(event.feature.getId()));
+      if (location) onSelectRef.current(location);
+    });
+
+    return () => {
+      clickListener.remove();
+      layer.setMap(null);
+    };
+  }, [locations, map]);
+
+  return null;
+}
+
+function SolicitationMarkers({
+  locations,
+  onSelect,
+}: {
+  locations: Solicitation[];
+  onSelect: (location: Solicitation) => void;
+}) {
+  const map = useMap();
+  const onSelectRef = useRef(onSelect);
+
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
+    if (!map) return;
+    const layer = new google.maps.Data({ map });
+    const locationsById = new globalThis.Map(locations.map((location) => [location.id, location]));
+    const icons = Object.fromEntries(
+      outcomes.map((outcome) => [outcome, markerIcon(outcomeColors[outcome])]),
+    ) as Record<SolicitationOutcome, google.maps.Symbol>;
+
+    locations.forEach((location) => {
+      layer.add({
+        id: location.id,
+        geometry: new google.maps.Data.Point({ lat: location.latitude, lng: location.longitude }),
+        properties: {
+          outcome: location.outcome,
+          title: `${location.outcome} at ${location.address}`,
+        },
+      });
+    });
+    layer.setStyle((feature) => ({
+      clickable: true,
+      icon: icons[feature.getProperty("outcome") as SolicitationOutcome],
+      title: String(feature.getProperty("title") ?? "Solicitation"),
+      zIndex: 2,
+    }));
+    const clickListener = layer.addListener("click", (event: google.maps.Data.MouseEvent) => {
+      event.stop();
+      const location = locationsById.get(String(event.feature.getId()));
+      if (location) onSelectRef.current(location);
+    });
+
+    return () => {
+      clickListener.remove();
+      layer.setMap(null);
+    };
+  }, [locations, map]);
+
+  return null;
 }
 
 function GoogleBusinessMap({
@@ -671,6 +750,12 @@ function GoogleBusinessMap({
     : selected?.kind === "solicitation"
       ? { lat: selected.location.latitude, lng: selected.location.longitude }
       : null;
+  const selectJobLocation = useCallback((location: JobLocation) => {
+    setSelected({ kind: "job", location });
+  }, []);
+  const selectSolicitation = useCallback((location: Solicitation) => {
+    setSelected({ kind: "solicitation", location });
+  }, []);
 
   return (
     <div className="min-w-0 space-y-4 overflow-x-hidden">
@@ -707,16 +792,8 @@ function GoogleBusinessMap({
             onClick={handleMapClick}
           >
             <MapFocusController request={mapFocusRequest} />
-            {showJobs && <JobMarkers locations={jobLocations} onSelect={(location) => setSelected({ kind: "job", location })} />}
-            {showSolicitations && visibleSolicitations.map((location) => (
-              <Marker
-                key={location.id}
-                position={{ lat: location.latitude, lng: location.longitude }}
-                icon={markerIcon(outcomeColors[location.outcome])}
-                title={`${location.outcome} at ${location.address}`}
-                onClick={(event) => { event.stop(); setSelected({ kind: "solicitation", location }); }}
-              />
-            ))}
+            {showJobs && <JobMarkers locations={jobLocations} onSelect={selectJobLocation} />}
+            {showSolicitations && <SolicitationMarkers locations={visibleSolicitations} onSelect={selectSolicitation} />}
             {draftCoordinates && (
               <Marker
                 position={{ lat: draftCoordinates.latitude, lng: draftCoordinates.longitude }}
