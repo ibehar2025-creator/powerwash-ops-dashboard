@@ -3,6 +3,7 @@ import {
   Bell,
   BriefcaseBusiness,
   CalendarClock,
+  Check,
   CircleDollarSign,
   ClipboardList,
   MapPinOff,
@@ -226,17 +227,20 @@ export function NotificationCenter({
     ? notifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length
     : 0;
 
+  const visibleNotifications = readStateLoaded
+    ? notifications.filter((item) => !readNotificationKeys.has(notificationKey(item)))
+    : notifications;
+
   function toggleNotifications() {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    const keys = notifications.map(notificationKey);
-    setReadNotificationKeys((current) => new Set([...current, ...keys]));
-    void markNotificationsRead(keys).catch(() => {
+    setOpen((current) => !current);
+  }
+
+  function markItemRead(item: NotificationItem) {
+    const key = notificationKey(item);
+    setReadNotificationKeys((current) => new Set([...current, key]));
+    void markNotificationsRead([key]).catch(() => {
       // The optimistic state lasts for this session; a failed save returns as unread next time.
     });
-    setOpen(true);
   }
 
   function openItem(item: NotificationItem) {
@@ -260,20 +264,20 @@ export function NotificationCenter({
             <div>
               <p className="text-xs font-semibold uppercase text-lagoon dark:text-cyan-300">Notification center</p>
               <h2 className="font-semibold text-ink dark:text-white">Business reminders</h2>
-              <p className="mt-1 text-xs text-slate-500">{notifications.length} active reminder{notifications.length === 1 ? "" : "s"} - marked read for {user.name}</p>
+              <p className="mt-1 text-xs text-slate-500">{visibleNotifications.length} unread reminder{visibleNotifications.length === 1 ? "" : "s"} for {user.name}</p>
             </div>
             <button type="button" className="icon-button h-8 w-8 shrink-0" aria-label="Close notifications" title="Close notifications" onClick={() => setOpen(false)}><X size={16} /></button>
           </div>
           <div className="max-h-[calc(100dvh-12rem)] overflow-y-auto p-2 sm:max-h-[min(68vh,560px)]">
             {(["urgent", "today", "upcoming"] as NotificationTone[]).map((tone) => {
-              const group = notifications.filter((item) => item.tone === tone);
+              const group = visibleNotifications.filter((item) => item.tone === tone);
               if (!group.length) return null;
               return <section key={tone} className="mb-2 last:mb-0"><h3 className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">{toneLabels[tone]} - {group.length}</h3>{group.map((item) => {
                 const Icon = notificationIcon(item);
-                return <button key={item.id} type="button" className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800" disabled={item.kind === "sync" && syncing} onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block break-words text-xs leading-5 text-slate-500">{item.kind === "sync" && syncing ? "Syncing Google Sheets..." : item.detail}</span></span></button>;
+                return <div key={item.id} className="flex items-start rounded-lg transition hover:bg-slate-50 dark:hover:bg-slate-800"><button type="button" className="flex min-w-0 flex-1 items-start gap-3 p-3 text-left" disabled={item.kind === "sync" && syncing} onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block break-words text-xs leading-5 text-slate-500">{item.kind === "sync" && syncing ? "Syncing Google Sheets..." : item.detail}</span></span></button><button type="button" className="icon-button mr-2 mt-3 h-8 w-8 shrink-0" aria-label={`Mark ${item.title} as read`} title="Mark as read" onClick={() => markItemRead(item)}><Check size={16} /></button></div>;
               })}</section>;
             })}
-            {notifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No follow-ups, jobs, renewals, schedule issues, or sync problems need attention.</p></div>}
+            {visibleNotifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No unread follow-ups, jobs, renewals, schedule issues, or sync problems need attention.</p></div>}
           </div>
         </div>
       </>}
