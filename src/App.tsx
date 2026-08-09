@@ -120,10 +120,6 @@ function findCustomer(customers: Customer[], customerId: string) {
   return customers.find((customer) => customer.id === customerId) ?? customers[0];
 }
 
-function moneyInput(value: number, onChange: (value: number) => void) {
-  return <input type="number" value={value} onChange={(event) => onChange(Number.parseFloat(event.target.value) || 0)} />;
-}
-
 function dateFromIso(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);
   return new Date(year, month - 1, day);
@@ -525,11 +521,12 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
       : [lead, ...current]);
   }, []);
 
-  function updatePlan(planId: string, patch: Partial<ServicePlan>) {
-    setPlans((current) => current.map((plan) => plan.id === planId ? { ...plan, ...patch } : plan));
-    void saveServicePlanPatch(planId, patch).catch((error) => {
-      setSyncStatus(error instanceof Error ? error.message : "Service plan save failed.");
-    });
+  async function updatePlan(planId: string, patch: Partial<ServicePlan>) {
+    const saved = await saveServicePlanPatch(planId, patch);
+    if (!saved) throw new Error("Service plan save service is unavailable.");
+    setPlans((current) => normalizePlans(current.map((plan) => plan.id === planId ? saved : plan)));
+    setSyncStatus("Service plan changes saved.");
+    return saved;
   }
 
   const saveMapJobCoordinates = useCallback(async (jobIds: string[], coordinates: { latitude: number; longitude: number }) => {
@@ -828,7 +825,7 @@ function CalendarEventModal({ event, onCreate, onUpdate, onDelete, onClose }: { 
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[94vh] w-full max-w-xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{isNew ? "New calendar event" : "Edit calendar event"}</p><h3 className="text-xl font-bold text-ink dark:text-white">{draft.title || "Untitled event"}</h3></div><button type="button" className="icon-button shrink-0" onClick={onClose} title="Close" aria-label="Close calendar event editor"><X size={17} /></button></div><div className="settings-grid mt-5"><Field label="Title"><input required value={draft.title} placeholder="Team meeting" onChange={(change) => setDraft({ ...draft, title: change.target.value })} /></Field><Field label="Event type"><select value={draft.type} onChange={(change) => setDraft({ ...draft, type: change.target.value as CalendarEventType })}>{calendarEventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field><Field label="Date"><input required type="date" value={draft.date} onChange={(change) => setDraft({ ...draft, date: change.target.value })} /></Field><Field label="Location"><input value={draft.location} placeholder="Address or meeting place" onChange={(change) => setDraft({ ...draft, location: change.target.value })} /></Field><Field label="Start time"><input required type="time" value={draft.startTime} onChange={(change) => setDraft({ ...draft, startTime: change.target.value })} /></Field><Field label="End time"><input type="time" value={draft.endTime} onChange={(change) => setDraft({ ...draft, endTime: change.target.value })} /></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={draft.notes} placeholder="Details, preparation, or people involved" onChange={(change) => setDraft({ ...draft, notes: change.target.value })} /></label></div>{confirmingDelete && <div className="mt-4 flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 sm:flex-row sm:items-center sm:justify-between"><span>This permanently removes the calendar event.</span><div className="flex gap-2"><button type="button" className="text-button" onClick={() => setConfirmingDelete(false)} disabled={deleting}>Keep event</button><button type="button" className="primary-button bg-rose-600 gap-2 hover:bg-rose-700" onClick={() => void remove()} disabled={deleting}><Trash2 size={15} />{deleting ? "Removing..." : "Yes, remove"}</button></div></div>}{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">{isNew ? <span /> : <button type="button" className="text-button gap-2 text-rose-600 hover:border-rose-300 hover:text-rose-700 dark:text-rose-300" onClick={() => setConfirmingDelete(true)} disabled={saving || deleting}><Trash2 size={15} />Remove event</button>}<div className="flex flex-col-reverse gap-2 sm:flex-row"><button type="button" className="text-button" onClick={onClose} disabled={saving || deleting}>Cancel</button><button type="submit" className="primary-button gap-2" disabled={saving || deleting}><Save size={16} />{saving ? "Saving..." : isNew ? "Add event" : "Save changes"}</button></div></div></form></div>;
 }
 
-function Plans({ customers, plans, onPlanCreate, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanCreate: (plan: ServicePlanCreateInput) => Promise<ServicePlan>; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => void }) {
+function Plans({ customers, plans, onPlanCreate, onPlanUpdate }: { customers: Customer[]; plans: ServicePlan[]; onPlanCreate: (plan: ServicePlanCreateInput) => Promise<ServicePlan>; onPlanUpdate: (planId: string, patch: Partial<ServicePlan>) => Promise<ServicePlan> }) {
   const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
   const [creating, setCreating] = useState(false);
   const plan = plans.find((item) => item.id === selectedId) ?? plans[0];
@@ -838,9 +835,59 @@ function Plans({ customers, plans, onPlanCreate, onPlanUpdate }: { customers: Cu
       <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">Recurring customer work</p><h2 className="text-2xl font-bold text-ink dark:text-white">Service plans</h2></div>
       <button type="button" className="primary-button w-full gap-2 sm:w-auto" onClick={() => setCreating(true)}><Plus size={17} />Add service plan</button>
     </div>
-    {plans.length ? <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]"><Section title="Current plans" kicker="Monthly, 3-month, 4-month, 6-month, and yearly"><div className="space-y-2">{plans.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", plan?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}><div className="flex items-center justify-between gap-3"><strong className="capitalize text-ink dark:text-white">{item.type} plan</strong><Badge status={item.paymentStatus} /></div><p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - renews {item.renewalDate}</p></button>)}</div></Section>{plan && <Section title="Plan editor" kicker="Subscription status, renewal, services, pricing"><div className="settings-grid"><Field label="Customer"><select value={plan.customerId} onChange={(event) => onPlanUpdate(plan.id, { customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Plan type"><select value={String(plan.type)} onChange={(event) => onPlanUpdate(plan.id, { type: event.target.value as ServicePlan["type"] })}>{planTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field><Field label="Plan price">{moneyInput(plan.price, (value) => onPlanUpdate(plan.id, { price: value }))}</Field><Field label="Discount %">{moneyInput(plan.discountPct, (value) => onPlanUpdate(plan.id, { discountPct: value }))}</Field><Field label="Renewal date"><input type="date" value={plan.renewalDate} onChange={(event) => onPlanUpdate(plan.id, { renewalDate: event.target.value })} /></Field><Field label="Payment status"><select value={plan.paymentStatus} onChange={(event) => onPlanUpdate(plan.id, { paymentStatus: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={plan.notes} onChange={(event) => onPlanUpdate(plan.id, { notes: event.target.value })} /></label></div><div className="mt-4 flex flex-wrap gap-2">{plan.servicesIncluded.map((service) => <span key={service} className="tag">{service}</span>)}</div></Section>}</div> : <Section title="No service plans yet" kicker="Add the first recurring customer"><div className="py-8 text-center"><p className="text-sm text-slate-500 dark:text-slate-400">Use Add service plan to create one here without creating a job first.</p></div></Section>}
+    {plans.length ? <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]"><Section title="Current plans" kicker="Monthly, 3-month, 4-month, 6-month, and yearly"><div className="space-y-2">{plans.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={cx("w-full rounded-lg border p-3 text-left transition hover:border-lagoon dark:border-slate-800", plan?.id === item.id ? "border-lagoon bg-mist dark:bg-cyan-500/15" : "border-slate-200")}><div className="flex items-center justify-between gap-3"><strong className="capitalize text-ink dark:text-white">{item.type} plan</strong><Badge status={item.paymentStatus} /></div><p className="mt-1 text-sm text-slate-500">{findCustomer(customers, item.customerId).name} - renews {item.renewalDate}</p></button>)}</div></Section>{plan && <PlanEditor key={plan.id} customers={customers} plan={plan} onSave={onPlanUpdate} />}</div> : <Section title="No service plans yet" kicker="Add the first recurring customer"><div className="py-8 text-center"><p className="text-sm text-slate-500 dark:text-slate-400">Use Add service plan to create one here without creating a job first.</p></div></Section>}
     {creating && <ServicePlanCreateModal customers={customers} onCreate={async (draft) => { const saved = await onPlanCreate(draft); setSelectedId(saved.id); setCreating(false); }} onClose={() => setCreating(false)} />}
   </div>;
+}
+
+function PlanEditor({ customers, plan, onSave }: { customers: Customer[]; plan: ServicePlan; onSave: (planId: string, patch: Partial<ServicePlan>) => Promise<ServicePlan> }) {
+  const [draft, setDraft] = useState({ ...plan, servicesIncluded: [...plan.servicesIncluded] });
+  const [price, setPrice] = useState(plan.price === 0 ? "" : String(plan.price));
+  const [discount, setDiscount] = useState(plan.discountPct === 0 ? "" : String(plan.discountPct));
+  const [services, setServices] = useState(plan.servicesIncluded.join(", "));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  function reset() {
+    setDraft({ ...plan, servicesIncluded: [...plan.servicesIncluded] });
+    setPrice(plan.price === 0 ? "" : String(plan.price));
+    setDiscount(plan.discountPct === 0 ? "" : String(plan.discountPct));
+    setServices(plan.servicesIncluded.join(", "));
+    setSaved(false);
+    setError("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setSaved(false);
+    setError("");
+    const serviceList = services.split(",").map((service) => service.trim()).filter(Boolean);
+    try {
+      const updated = await onSave(plan.id, {
+        customerId: draft.customerId,
+        type: draft.type,
+        price: Number(price) || 0,
+        discountPct: Number(discount) || 0,
+        renewalDate: draft.renewalDate,
+        paymentStatus: draft.paymentStatus,
+        servicesIncluded: serviceList,
+        notes: draft.notes,
+      });
+      setDraft({ ...updated, servicesIncluded: [...updated.servicesIncluded] });
+      setPrice(updated.price === 0 ? "" : String(updated.price));
+      setDiscount(updated.discountPct === 0 ? "" : String(updated.discountPct));
+      setServices(updated.servicesIncluded.join(", "));
+      setSaved(true);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save this service plan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Section title="Plan editor" kicker="Subscription status, renewal, services, pricing"><form onSubmit={submit}><div className="settings-grid"><Field label="Customer"><select value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Plan type"><select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as ServicePlan["type"] })}>{planTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></Field><Field label="Plan price"><input type="number" min="0" step="0.01" inputMode="decimal" value={price} placeholder="0.00" onChange={(event) => setPrice(event.target.value)} /></Field><Field label="Discount %"><input type="number" min="0" max="100" step="0.01" inputMode="decimal" value={discount} placeholder="0" onChange={(event) => setDiscount(event.target.value)} /></Field><Field label="Renewal date"><input required type="date" value={draft.renewalDate} onChange={(event) => setDraft({ ...draft, renewalDate: event.target.value })} /></Field><Field label="Payment status"><select value={draft.paymentStatus} onChange={(event) => setDraft({ ...draft, paymentStatus: event.target.value as PaymentStatus })}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Services<input required value={services} placeholder="Full property, driveway" onChange={(event) => setServices(event.target.value)} /></label><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label></div>{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}{saved && <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">Service plan saved.</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="text-button" onClick={reset} disabled={saving}>Cancel changes</button><button type="submit" className="primary-button gap-2" disabled={saving}><Save size={16} />{saving ? "Saving..." : "Save changes"}</button></div></form></Section>;
 }
 
 function ServicePlanCreateModal({ customers, onCreate, onClose }: { customers: Customer[]; onCreate: (plan: ServicePlanCreateInput) => Promise<void>; onClose: () => void }) {
