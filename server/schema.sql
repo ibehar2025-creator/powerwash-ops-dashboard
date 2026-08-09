@@ -152,10 +152,86 @@ create table if not exists user_accounts (
   picture_url text not null default '',
   age integer not null check (age between 13 and 120),
   role text not null check (role in ('owner', 'employee')),
+  active boolean not null default true,
+  base_commission_pct numeric(6,4) not null default 0.20,
+  upsell_commission_pct numeric(6,4) not null default 0.30,
+  contract_bonus_pct numeric(6,4) not null default 0.10,
+  tip_share_pct numeric(6,4) not null default 1.00,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   last_login_at timestamptz not null default now()
 );
+
+alter table solicitations add column if not exists created_by uuid references user_accounts(id) on delete set null;
+
+create table if not exists job_assignments (
+  job_id text primary key references jobs(id) on delete cascade,
+  employee_id uuid not null references user_accounts(id) on delete cascade,
+  assigned_by uuid references user_accounts(id) on delete set null,
+  original_job_price numeric(12,2) not null,
+  base_commission_pct numeric(6,4) not null,
+  upsell_commission_pct numeric(6,4) not null,
+  contract_bonus_pct numeric(6,4) not null,
+  tip_share_pct numeric(6,4) not null,
+  assigned_at timestamptz not null default now()
+);
+
+create table if not exists contract_submissions (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references user_accounts(id) on delete cascade,
+  job_id text references jobs(id) on delete set null,
+  customer_name text not null,
+  frequency text not null check (frequency in ('monthly', '3-month', '4-month', '6-month', 'yearly')),
+  price numeric(12,2) not null check (price >= 0),
+  notes text not null default '',
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  owner_note text not null default '',
+  reviewed_by uuid references user_accounts(id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists earning_submissions (
+  id uuid primary key default gen_random_uuid(),
+  job_id text not null references jobs(id) on delete cascade,
+  employee_id uuid not null references user_accounts(id) on delete cascade,
+  tip_amount numeric(12,2) not null default 0 check (tip_amount >= 0),
+  upsell_amount numeric(12,2) not null default 0 check (upsell_amount >= 0),
+  contract_submission_id uuid references contract_submissions(id) on delete set null,
+  status text not null default 'pending' check (status in ('draft', 'pending', 'approved', 'rejected', 'paid')),
+  owner_note text not null default '',
+  reviewed_by uuid references user_accounts(id) on delete set null,
+  reviewed_at timestamptz,
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (job_id, employee_id)
+);
+
+create table if not exists payouts (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references user_accounts(id) on delete cascade,
+  amount numeric(12,2) not null check (amount >= 0),
+  earning_ids uuid[] not null default '{}',
+  paid_by uuid references user_accounts(id) on delete set null,
+  paid_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists activity_log (
+  id bigserial primary key,
+  actor_id uuid references user_accounts(id) on delete set null,
+  action text not null,
+  entity_type text not null,
+  entity_id text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists job_assignments_employee_idx on job_assignments(employee_id);
+create index if not exists contract_submissions_status_idx on contract_submissions(status, created_at desc);
+create index if not exists earning_submissions_employee_idx on earning_submissions(employee_id, status);
 
 create table if not exists auth_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -214,6 +290,8 @@ begin
     'solicitations',
     'calendar_events',
     'user_accounts',
+    'contract_submissions',
+    'earning_submissions',
     'business_settings'
   ]
   loop

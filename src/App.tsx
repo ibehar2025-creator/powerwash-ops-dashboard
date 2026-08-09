@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  FileSignature,
   ExternalLink,
   LayoutDashboard,
   LogOut,
@@ -25,6 +26,7 @@ import {
   Star,
   Sun,
   Trash2,
+  UserRoundCog,
   X,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
@@ -32,6 +34,8 @@ import { useAuth } from "./lib/authContext";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { InstallAppButton } from "./components/InstallAppButton";
 import { NotificationCenter } from "./components/NotificationCenter";
+import { EmployeeWorkspace } from "./components/EmployeeWorkspace";
+import { OwnerContractsView, OwnerTeamView } from "./components/OwnerOperations";
 import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
 import {
@@ -55,12 +59,13 @@ import {
   jobsForCustomer,
   recurringPlanType,
 } from "./lib/calculations";
-import { createCalendarEvent, createCustomer, createJob, createLead, createSolicitation, deleteCalendarEvent, deleteJob, deleteLead, deleteSolicitation, loadDatabaseSnapshot, saveCalendarEventPatch, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
+import { createCalendarEvent, createCustomer, createJob, createLead, createSolicitation, deleteCalendarEvent, deleteJob, deleteLead, deleteSolicitation, loadDatabaseSnapshot, loadOwnerOperations, saveCalendarEventPatch, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
+import type { OwnerOperationsSnapshot } from "./lib/api";
 import { followUpLabel, followUpTiming } from "./lib/followUps";
 import type { CalendarEvent, CalendarEventType, Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews";
+type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews" | "team" | "contracts";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
 type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
@@ -73,6 +78,8 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "map", label: "Map", icon: MapPinned },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "reviews", label: "Reviews", icon: Star },
+  { id: "team", label: "Team", icon: UserRoundCog },
+  { id: "contracts", label: "Contracts", icon: FileSignature },
 ];
 
 const planTypes = ["monthly", "3-month", "4-month", "6-month", "yearly"];
@@ -273,6 +280,15 @@ function DataTable({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  const { user } = useAuth();
+  const [employeePreview, setEmployeePreview] = useState(false);
+  if (user.role === "employee" || employeePreview) {
+    return <EmployeeWorkspace preview={employeePreview} onExitPreview={() => setEmployeePreview(false)} />;
+  }
+  return <OwnerDashboard onPreviewEmployee={() => setEmployeePreview(true)} />;
+}
+
+function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }) {
   const { user, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -284,6 +300,7 @@ export default function App() {
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
   const [solicitations, setSolicitations] = useState<Solicitation[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [ownerOperations, setOwnerOperations] = useState<OwnerOperationsSnapshot>({ employees: [], assignments: [], earnings: [], contracts: [], payouts: [] });
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -300,6 +317,11 @@ export default function App() {
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const activeLabel = useMemo(() => tabs.find((tab) => tab.id === activeTab)?.label ?? "Dashboard", [activeTab]);
   const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
+
+  const refreshOwnerOperations = useCallback(async () => {
+    const result = await loadOwnerOperations();
+    if (result) setOwnerOperations(result);
+  }, []);
 
   const syncSheets = useCallback(async ({ background = false }: SyncOptions = {}) => {
     const minimumManualSkeleton = background
@@ -346,6 +368,12 @@ export default function App() {
     const interval = window.setInterval(() => setCurrentDate(isoToday()), 60_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    void refreshOwnerOperations();
+    const interval = window.setInterval(() => void refreshOwnerOperations(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [refreshOwnerOperations]);
 
   useEffect(() => {
     let ignore = false;
@@ -570,6 +598,7 @@ export default function App() {
         <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:block">
           <div className="mb-6 rounded-lg bg-ink p-4 text-white"><p className="text-sm text-cyan-100">The</p><h1 className="text-xl font-bold">Powerwashing Pros</h1><p className="mt-2 text-xs text-slate-300">Daily control center for jobs, reviews, and growth.</p></div>
           <nav className="space-y-1">{tabs.filter((tab) => !tab.mobileOnly).map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`desktop-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}</nav>
+          <button type="button" className="nav-item mt-5 border-t border-slate-200 pt-5 dark:border-slate-700" onClick={onPreviewEmployee}><UserRoundCog size={18} /><span>Preview employee</span></button>
         </aside>
         <main className="flex min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
           <header className="app-header min-w-0 max-w-full border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
@@ -578,7 +607,7 @@ export default function App() {
                 <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="text-2xl font-bold text-ink dark:text-white">{activeLabel}</h1><p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p></div>
               </div>
-              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><InstallAppButton /><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /><button type="button" className="text-button min-w-0 gap-2 px-2" onClick={() => void signOut()} title="Sign out" aria-label={`Sign out ${user.name}`} >{user.pictureUrl ? <img className="h-6 w-6 shrink-0 rounded-full" src={user.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-mist text-xs font-bold text-lagoon">{user.name.slice(0, 1).toUpperCase()}</span>}<span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{user.role}</span></span><LogOut size={15} /></button></div>
+              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button type="button" className="text-button hidden xl:inline-flex" onClick={onPreviewEmployee}>Preview employee</button><InstallAppButton /><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /><button type="button" className="text-button min-w-0 gap-2 px-2" onClick={() => void signOut()} title="Sign out" aria-label={`Sign out ${user.name}`} >{user.pictureUrl ? <img className="h-6 w-6 shrink-0 rounded-full" src={user.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-mist text-xs font-bold text-lagoon">{user.name.slice(0, 1).toUpperCase()}</span>}<span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{user.role}</span></span><LogOut size={15} /></button></div>
             </div>
           </header>
           {activeTab === "jobs" && <GlobalSearch customers={customers} jobs={jobs} leads={leads} onCustomer={setSelectedCustomer} onJob={setSelectedJob} onLead={setSelectedLead} onNew={setCreateKind} />}
@@ -590,7 +619,7 @@ export default function App() {
                   <div><p className="text-sm text-cyan-100">The</p><h2 className="text-lg font-bold">Powerwashing Pros</h2><p className="mt-1 text-xs text-slate-300">Choose a dashboard tab.</p></div>
                   <button className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/20 text-white transition hover:bg-white/10" onClick={() => setMobileMenuOpen(false)} title="Close navigation" aria-label="Close navigation"><X size={18} /></button>
                 </div>
-                <nav className="space-y-1 overflow-y-auto">{tabs.map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`mobile-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}</nav>
+                <nav className="space-y-1 overflow-y-auto">{tabs.map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`mobile-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}<button type="button" className="nav-item mt-3 border-t border-slate-200 pt-4 dark:border-slate-700" onClick={onPreviewEmployee}><UserRoundCog size={18} /><span>Preview employee</span></button></nav>
               </aside>
             </div>
           )}
@@ -603,6 +632,8 @@ export default function App() {
             {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
+            {activeTab === "team" && <OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} />}
+            {activeTab === "contracts" && <OwnerContractsView operations={ownerOperations} onRefresh={async () => { await refreshOwnerOperations(); const snapshot = await loadDatabaseSnapshot(); if (snapshot?.servicePlans) setPlans(normalizePlans(snapshot.servicePlans)); }} />}
           </div>
         </main>
       </div>

@@ -18,6 +18,9 @@ A full-stack React, TypeScript, Tailwind CSS, Express, and PostgreSQL dashboard 
 - Light/dark mode toggle in the app header
 - Installable iPhone, Android, and desktop web app with dedicated Home Screen icons
 - Account-specific notification inbox for follow-ups, jobs, schedule conflicts, missing job details, plan renewals, and spreadsheet sync failures
+- Server-enforced owner and employee workspaces with separate data access
+- Employee Home, two-week Schedule, private canvassing Map, personal Earnings, and New Contract views
+- Owner Team and Contracts tabs for assignments, commission rates, approvals, contracts, and payouts
 
 ## Install The App
 
@@ -111,7 +114,7 @@ npm run build
 
 ## Google Sign-In
 
-Authentication uses Google Identity Services. Google verifies the person, and the server stores the app-specific age and role (`owner` or `employee`) in PostgreSQL. Both roles currently enter the same dashboard; their stored roles provide the base for separate owner and employee experiences later.
+Authentication uses Google Identity Services. Google verifies the person, and the server stores the app-specific age and role (`owner` or `employee`) in PostgreSQL. Owners receive the complete business dashboard. Employees receive a server-filtered field workspace and cannot request owner financial data or owner-only mutations.
 
 1. In Google Cloud, open **Google Auth Platform > Clients** and create an **OAuth 2.0 Client ID** with application type **Web application**.
 2. Add `https://powerwash-ops-dashboard.onrender.com` and `http://localhost:4173` as authorized JavaScript origins.
@@ -121,15 +124,18 @@ Authentication uses Google Identity Services. Google verifies the person, and th
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 ```
 
-4. To prevent unauthorized people from creating accounts, set an optional shared signup code:
+4. Set separate owner and employee access codes:
 
 ```bash
-AUTH_SIGNUP_CODE=your-private-invite-code
+AUTH_OWNER_CODE=your-private-owner-code
+AUTH_EMPLOYEE_CODE=your-private-employee-code
 ```
 
-If `AUTH_SIGNUP_CODE` is set, every first-time owner or employee must enter it. Returning users only use Google sign-in. The Google client ID is public by design; never expose `DATABASE_URL` or other server secrets in a `VITE_` variable.
+`AUTH_SIGNUP_CODE` remains a backwards-compatible fallback when a role-specific code is not configured. Returning users only use Google sign-in. The Google client ID is public by design; never expose `DATABASE_URL` or other server secrets in a `VITE_` variable.
 
-Both roles currently have the same dashboard permissions. The stored role is the base for separate owner and employee views and server permissions later.
+Commission defaults are 20% base, 30% of approved upsells, a one-time 10% contract bonus, and 100% of tips. Owners configure these rates per employee. Assignments snapshot the rates so later changes do not alter existing job compensation.
+
+Owners can enter the employee interface without changing their account by selecting **Preview employee** in the desktop sidebar or mobile menu. Preview mode is for interface testing; real employee accounts still exercise the employee-only API permissions.
 
 ## Render Deployment
 
@@ -182,6 +188,12 @@ The schema is in `server/schema.sql`. The backend exposes:
 - `PATCH /api/jobs/:id`
 - `PATCH /api/invoices/:id`
 - `PATCH /api/service-plans/:id`
+- `GET /api/employee/bootstrap`
+- `PATCH /api/employee/jobs/:id`
+- `POST /api/employee/earnings`
+- `POST /api/employee/contracts`
+- `GET /api/owner/operations`
+- Owner assignment, approval, contract review, employee settings, and payout endpoints
 
 The browser should never receive the database password. Render keeps `DATABASE_URL` server-side.
 

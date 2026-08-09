@@ -51,6 +51,80 @@ export interface Solicitation {
   outcome: SolicitationOutcome;
   followUpDate: string;
   notes: string;
+  createdBy?: string;
+}
+
+export type SubmissionStatus = "draft" | "pending" | "approved" | "rejected" | "paid";
+
+export interface EmployeeProfile {
+  id: string;
+  name: string;
+  email: string;
+  pictureUrl: string;
+  active: boolean;
+  baseCommissionPct: number;
+  upsellCommissionPct: number;
+  contractBonusPct: number;
+  tipSharePct: number;
+}
+
+export interface JobAssignment {
+  jobId: string;
+  employeeId: string;
+  employeeName: string;
+  originalJobPrice: number;
+  baseCommissionPct: number;
+  upsellCommissionPct: number;
+  contractBonusPct: number;
+  tipSharePct: number;
+  assignedAt: string;
+}
+
+export interface EarningSubmission {
+  id: string;
+  jobId: string;
+  employeeId: string;
+  employeeName: string;
+  customerName: string;
+  jobDate: string;
+  originalJobPrice: number;
+  tipAmount: number;
+  upsellAmount: number;
+  contractSold: boolean;
+  status: SubmissionStatus;
+  ownerNote: string;
+  baseEarnings: number;
+  upsellEarnings: number;
+  contractEarnings: number;
+  tipEarnings: number;
+  totalEarnings: number;
+  submittedAt: string;
+  reviewedAt?: string;
+  paidAt?: string;
+}
+
+export interface ContractSubmission {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  jobId?: string;
+  customerName: string;
+  frequency: PlanType;
+  price: number;
+  notes: string;
+  status: "pending" | "approved" | "rejected";
+  ownerNote: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
+export interface PayoutSummary {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  amount: number;
+  paidAt: string;
+  earningIds: string[];
 }
 
 export interface CalendarEvent {

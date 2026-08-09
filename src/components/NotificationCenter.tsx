@@ -6,6 +6,7 @@ import {
   Check,
   CircleDollarSign,
   ClipboardList,
+  FileSignature,
   MapPinOff,
   RefreshCw,
   X,
@@ -14,10 +15,10 @@ import { useEffect, useMemo, useState } from "react";
 import { loadReadNotificationKeys, markNotificationsRead } from "../lib/api";
 import { useAuth } from "../lib/authContext";
 import { followUpTiming } from "../lib/followUps";
-import type { Customer, Job, Lead, ServicePlan } from "../types/business";
+import type { ContractSubmission, Customer, Job, Lead, ServicePlan } from "../types/business";
 
 type NotificationTone = "urgent" | "today" | "upcoming";
-type NotificationKind = "lead" | "job" | "plan" | "sync";
+type NotificationKind = "lead" | "job" | "plan" | "contract" | "sync";
 
 type NotificationItem = {
   id: string;
@@ -25,7 +26,7 @@ type NotificationItem = {
   title: string;
   detail: string;
   kind: NotificationKind;
-  record?: Lead | Job | ServicePlan;
+  record?: Lead | Job | ServicePlan | ContractSubmission;
 };
 
 function notificationKey(item: NotificationItem) {
@@ -51,6 +52,7 @@ function notificationIcon(item: NotificationItem) {
   if (item.kind === "sync") return RefreshCw;
   if (item.kind === "lead") return CalendarClock;
   if (item.kind === "plan") return ClipboardList;
+  if (item.kind === "contract") return FileSignature;
   if (item.id.startsWith("missing-address")) return MapPinOff;
   if (item.id.startsWith("missing-price")) return CircleDollarSign;
   if (item.id.startsWith("conflict")) return AlertTriangle;
@@ -75,6 +77,8 @@ export function NotificationCenter({
   onJob,
   onPlans,
   onSync,
+  contracts = [],
+  onContracts,
 }: {
   customers: Customer[];
   leads: Lead[];
@@ -87,6 +91,8 @@ export function NotificationCenter({
   onJob: (job: Job) => void;
   onPlans: () => void;
   onSync: () => void;
+  contracts?: ContractSubmission[];
+  onContracts?: () => void;
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -209,6 +215,17 @@ export function NotificationCenter({
       });
     });
 
+    contracts.filter((contract) => contract.status === "pending").forEach((contract) => {
+      items.push({
+        id: `contract-${contract.id}`,
+        tone: "urgent",
+        title: `New contract: ${contract.customerName}`,
+        detail: `${contract.employeeName} submitted ${contract.frequency} at ${contract.price.toLocaleString("en-US", { style: "currency", currency: "USD" })}`,
+        kind: "contract",
+        record: contract,
+      });
+    });
+
     const normalizedSyncStatus = syncStatus.toLowerCase();
     if (["failed", "error", "unavailable", "could not", "not configured"].some((word) => normalizedSyncStatus.includes(word))) {
       items.push({
@@ -222,7 +239,7 @@ export function NotificationCenter({
 
     const rank = { urgent: 0, today: 1, upcoming: 2 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
-  }, [customerNames, currentDate, jobs, leads, plans, syncStatus]);
+  }, [contracts, customerNames, currentDate, jobs, leads, plans, syncStatus]);
 
   const unreadCount = readStateLoaded
     ? notifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length
@@ -249,6 +266,7 @@ export function NotificationCenter({
     if (item.kind === "lead" && item.record) onLead(item.record as Lead);
     if (item.kind === "job" && item.record) onJob(item.record as Job);
     if (item.kind === "plan") onPlans();
+    if (item.kind === "contract") onContracts?.();
     if (item.kind === "sync") onSync();
   }
 

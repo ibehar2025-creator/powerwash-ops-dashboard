@@ -1,4 +1,4 @@
-import type { CalendarEvent, Customer, Expense, Invoice, Job, Lead, Review, ServicePlan, Solicitation } from "../types/business";
+import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, Lead, PayoutSummary, Review, ServicePlan, Solicitation } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -16,6 +16,25 @@ export interface SolicitationSaveResult {
   solicitation: Solicitation;
   lead: Lead | null;
   removedLeadId?: string;
+}
+
+export interface EmployeeWorkspaceSnapshot {
+  employee: EmployeeProfile;
+  preview: boolean;
+  customers: Customer[];
+  jobs: Job[];
+  assignments: JobAssignment[];
+  earnings: EarningSubmission[];
+  solicitations: Solicitation[];
+  payouts: PayoutSummary[];
+}
+
+export interface OwnerOperationsSnapshot {
+  employees: EmployeeProfile[];
+  assignments: JobAssignment[];
+  earnings: EarningSubmission[];
+  contracts: ContractSubmission[];
+  payouts: PayoutSummary[];
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
@@ -93,10 +112,10 @@ export function saveServicePlanPatch(planId: string, patch: Partial<ServicePlan>
   });
 }
 
-export function createSolicitation(solicitation: Omit<Solicitation, "id">) {
+export function createSolicitation(solicitation: Omit<Solicitation, "id">, employeeId?: string) {
   return request<SolicitationSaveResult>("/api/solicitations", {
     method: "POST",
-    body: JSON.stringify(solicitation),
+    body: JSON.stringify({ ...solicitation, employeeId }),
   });
 }
 
@@ -132,4 +151,49 @@ export function markNotificationsRead(keys: string[]) {
     method: "POST",
     body: JSON.stringify({ keys }),
   });
+}
+
+export function loadEmployeeWorkspace(employeeId?: string) {
+  const query = employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : "";
+  return request<EmployeeWorkspaceSnapshot>(`/api/employee/bootstrap${query}`);
+}
+
+export function saveEmployeeJobPatch(jobId: string, patch: Pick<Partial<Job>, "status" | "notes">, employeeId?: string) {
+  return request<Job>(`/api/employee/jobs/${jobId}`, { method: "PATCH", body: JSON.stringify({ ...patch, employeeId }) });
+}
+
+export function submitEmployeeEarnings(input: { jobId: string; tipAmount: number; upsellAmount: number; contractSubmissionId?: string; employeeId?: string }) {
+  return request<EarningSubmission>("/api/employee/earnings", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function submitEmployeeContract(input: { customerName: string; frequency: ContractSubmission["frequency"]; price: number; notes: string; jobId?: string; employeeId?: string }) {
+  return request<ContractSubmission>("/api/employee/contracts", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function loadOwnerOperations() {
+  return request<OwnerOperationsSnapshot>("/api/owner/operations");
+}
+
+export function saveEmployeeProfile(employeeId: string, patch: Partial<Pick<EmployeeProfile, "active" | "baseCommissionPct" | "upsellCommissionPct" | "contractBonusPct" | "tipSharePct">>) {
+  return request<EmployeeProfile>(`/api/owner/employees/${employeeId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function assignEmployeeToJob(jobId: string, employeeId: string) {
+  return request<JobAssignment>("/api/owner/assignments", { method: "POST", body: JSON.stringify({ jobId, employeeId }) });
+}
+
+export function removeJobAssignment(jobId: string) {
+  return request<{ deleted: boolean }>(`/api/owner/assignments/${jobId}`, { method: "DELETE" });
+}
+
+export function reviewEarning(earningId: string, decision: "approved" | "rejected", ownerNote = "") {
+  return request<EarningSubmission>(`/api/owner/earnings/${earningId}/review`, { method: "POST", body: JSON.stringify({ decision, ownerNote }) });
+}
+
+export function reviewContract(contractId: string, decision: "approved" | "rejected", ownerNote = "") {
+  return request<ContractSubmission>(`/api/owner/contracts/${contractId}/review`, { method: "POST", body: JSON.stringify({ decision, ownerNote }) });
+}
+
+export function createPayout(earningIds: string[]) {
+  return request<PayoutSummary>("/api/owner/payouts", { method: "POST", body: JSON.stringify({ earningIds }) });
 }
