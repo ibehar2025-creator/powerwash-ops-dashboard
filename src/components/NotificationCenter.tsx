@@ -194,7 +194,7 @@ export function NotificationCenter({
       });
     });
 
-    const planCutoff = addDays(currentDate, 30);
+    const planCutoff = addDays(currentDate, 14);
     plans.filter((plan) => validIsoDate(plan.renewalDate) && plan.renewalDate <= planCutoff).forEach((plan) => {
       const overdue = plan.renewalDate < currentDate;
       items.push({
