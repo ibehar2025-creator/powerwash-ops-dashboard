@@ -29,7 +29,8 @@ type NotificationItem = {
 };
 
 function notificationKey(item: NotificationItem) {
-  return [item.id, item.tone, item.title, item.detail].join("|");
+  // Version the key so reminders auto-read by the previous inbox behavior return once.
+  return ["v2", item.id, item.tone, item.title, item.detail].join("|");
 }
 
 function addDays(isoDate: string, days: number) {
