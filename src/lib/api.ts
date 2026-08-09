@@ -1,4 +1,4 @@
-import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, Lead, PayoutSummary, Review, ServicePlan, Solicitation } from "../types/business";
+import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, JobCreateInput, Lead, PayoutSummary, Review, ServicePlan, Solicitation } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -76,8 +76,8 @@ export function deleteLead(leadId: string) {
   return request<{ deleted: boolean }>(`/api/leads/${leadId}`, { method: "DELETE" });
 }
 
-export function createJob(job: Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes">) {
-  return request<Job>("/api/jobs", { method: "POST", body: JSON.stringify(job) });
+export function createJob(job: JobCreateInput) {
+  return request<{ job: Job; servicePlan?: ServicePlan }>("/api/jobs", { method: "POST", body: JSON.stringify(job) });
 }
 
 export function deleteJob(jobId: string) {

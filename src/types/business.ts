@@ -165,6 +165,16 @@ export interface Lead {
   websiteEditedFields?: string[];
 }
 
+export interface RecurringJobDetails {
+  frequency: PlanType;
+  renewalDate: string;
+  paymentStatus: PaymentStatus;
+}
+
+export type JobCreateInput = Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes"> & {
+  recurrence?: RecurringJobDetails;
+};
+
 export interface CrewMember {
   id: string;
   name: string;

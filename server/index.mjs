@@ -977,7 +977,7 @@ async function runSheetSync() {
   const payload = await response.json();
   const customersById = new Map((payload.customers ?? []).map((customer) => [customer.id, customer]));
   for (const plan of payload.servicePlans ?? []) {
-    if (plan.customer?.id) customersById.set(plan.customer.id, plan.customer);
+    if (plan.customer?.id && !customersById.has(plan.customer.id)) customersById.set(plan.customer.id, plan.customer);
   }
   payload.customers = [...customersById.values()];
   await syncSheetsIntoDatabase(payload);
@@ -1072,17 +1072,31 @@ app.post("/api/leads", requireDatabase, requireOwner, async (req, res, next) => 
   }
 });
 
+const recurringFrequencyLabels = {
+  monthly: "Monthly",
+  "3-month": "3 months",
+  "4-month": "4 months",
+  "6-month": "6 months",
+  yearly: "Yearly",
+};
+
 app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const { date, time = "09:00", customerId, address, serviceType, status = "scheduled", price = 0, notes = "" } = req.body;
+    const { date, time = "09:00", customerId, address, serviceType, status = "scheduled", price = 0, notes = "", recurrence } = req.body;
     if (!date || !customerId || !address?.trim() || !serviceType?.trim()) {
       return res.status(400).json({ error: "Date, customer, address, and service are required." });
     }
-    const customerResult = await pool.query("select name, phone from customers where id = $1", [customerId]);
+    if (recurrence && (!recurringFrequencyLabels[recurrence.frequency] || !recurrence.renewalDate)) {
+      return res.status(400).json({ error: "Recurring jobs require a supported frequency and next service date." });
+    }
+    const customerResult = await client.query("select name, phone from customers where id = $1", [customerId]);
     if (!customerResult.rows[0]) return res.status(400).json({ error: "Customer was not found." });
     const jobId = `manual-job-${randomUUID()}`;
-    await runSheetAction("addUpcomingJob", {
+    const planId = recurrence ? `manual-plan-${randomUUID()}` : null;
+    const sheetRow = {
       jobId,
+      planId,
       customerId,
       name: customerResult.rows[0].name,
       phone: customerResult.rows[0].phone,
@@ -1093,16 +1107,42 @@ app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
       status,
       price,
       notes,
-    });
+    };
+    if (recurrence) {
+      Object.assign(sheetRow, {
+        frequency: recurringFrequencyLabels[recurrence.frequency],
+        renewalDate: recurrence.renewalDate,
+        servicesIncluded: serviceType.trim(),
+        paymentStatus: recurrence.paymentStatus || "unpaid",
+      });
+      await runSheetAction("addRecurringJob", sheetRow);
+    } else {
+      await runSheetAction("addUpcomingJob", sheetRow);
+    }
+
     const overrides = { date: true, time: true, customerId: true, address: true, serviceType: true, status: true, price: true, notes: true };
-    const result = await pool.query(
+    await client.query("begin");
+    const result = await client.query(
       `insert into jobs (id, date, time, customer_id, address, service_type, status, price, payment_status, notes, source, website_overrides)
        values ($1, $2, $3, $4, $5, $6, $7, $8, 'unpaid', $9, 'manual', $10::jsonb) returning *`,
       [jobId, date, time, customerId, address.trim(), serviceType.trim(), status, price, notes, JSON.stringify(overrides)],
     );
-    res.status(201).json(toJob(result.rows[0]));
+    let servicePlan;
+    if (recurrence) {
+      const planResult = await client.query(
+        `insert into service_plans (id, type, customer_id, discount_pct, renewal_date, services_included, price, payment_status, notes)
+         values ($1, $2, $3, 0, $4, $5, $6, $7, $8) returning *`,
+        [planId, recurrence.frequency, customerId, recurrence.renewalDate, [serviceType.trim()], price, recurrence.paymentStatus || "unpaid", `Website recurring job. Frequency: ${recurringFrequencyLabels[recurrence.frequency]}. ${notes}`.trim()],
+      );
+      servicePlan = toServicePlan(planResult.rows[0]);
+    }
+    await client.query("commit");
+    res.status(201).json({ job: toJob(result.rows[0]), ...(servicePlan ? { servicePlan } : {}) });
   } catch (error) {
+    await client.query("rollback").catch(() => undefined);
     next(error);
+  } finally {
+    client.release();
   }
 });
 

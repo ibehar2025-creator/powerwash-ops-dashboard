@@ -62,7 +62,7 @@ import {
 import { createCalendarEvent, createCustomer, createJob, createLead, createSolicitation, deleteCalendarEvent, deleteJob, deleteLead, deleteSolicitation, loadDatabaseSnapshot, loadOwnerOperations, saveCalendarEventPatch, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
 import type { OwnerOperationsSnapshot } from "./lib/api";
 import { followUpLabel, followUpTiming } from "./lib/followUps";
-import type { CalendarEvent, CalendarEventType, Customer, Invoice, Job, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
+import type { CalendarEvent, CalendarEventType, Customer, Invoice, Job, JobCreateInput, Lead, LeadStatus, PaymentStatus, ServicePlan, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
 type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews" | "team" | "contracts";
@@ -463,11 +463,12 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
     return saved;
   }
 
-  async function addJob(draft: Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes">) {
+  async function addJob(draft: JobCreateInput) {
     const saved = await createJob(draft);
     if (!saved) throw new Error("Job creation service is unavailable.");
-    setJobs((current) => [...current, { ...saved, crewIds: saved.crewIds ?? [] }].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
-    setSyncStatus("New job saved to the database.");
+    setJobs((current) => [...current, { ...saved.job, crewIds: saved.job.crewIds ?? [] }].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)));
+    if (saved.servicePlan) setPlans((current) => normalizePlans([...current.filter((plan) => plan.id !== saved.servicePlan?.id), saved.servicePlan!]));
+    setSyncStatus(saved.servicePlan ? "Recurring job saved to Google Sheets and the database." : "New job saved to Google Sheets and the database.");
   }
 
   async function removeJob(jobId: string) {
