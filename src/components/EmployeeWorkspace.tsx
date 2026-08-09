@@ -3,11 +3,12 @@ import type { FormEvent } from "react";
 import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ClipboardPlus, DollarSign, Home, LogOut, MapPinned, Menu, Moon, Navigation, Phone, Save, Sun, X } from "lucide-react";
 import { BusinessMap } from "./BusinessMap";
 import { InstallAppButton } from "./InstallAppButton";
-import { createSolicitation, deleteSolicitation, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, saveSolicitationPatch, submitEmployeeContract, submitEmployeeEarnings } from "../lib/api";
+import { EmployeeContractFlow } from "./EmployeeContractFlow";
+import { createSolicitation, deleteSolicitation, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, saveSolicitationPatch, submitEmployeeEarnings } from "../lib/api";
 import type { EmployeeWorkspaceSnapshot } from "../lib/api";
 import { useAuth } from "../lib/authContext";
 import { currency, isoToday } from "../lib/calculations";
-import type { EarningSubmission, Job, JobStatus, PlanType, Solicitation } from "../types/business";
+import type { EarningSubmission, Job, JobStatus, Solicitation } from "../types/business";
 
 type EmployeeTab = "home" | "schedule" | "map" | "earnings" | "contract";
 const tabs: Array<{ id: EmployeeTab; label: string; icon: typeof Home }> = [
@@ -18,7 +19,6 @@ const tabs: Array<{ id: EmployeeTab; label: string; icon: typeof Home }> = [
   { id: "contract", label: "New Contract", icon: ClipboardPlus },
 ];
 const statuses: JobStatus[] = ["scheduled", "in progress", "completed", "canceled", "past due"];
-const frequencies: PlanType[] = ["monthly", "3-month", "4-month", "6-month", "yearly"];
 
 function EmployeeThemeSwitch({ darkMode, onToggle }: { darkMode: boolean; onToggle: () => void }) {
   return <button type="button" className="icon-button" onClick={onToggle} aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} title={darkMode ? "Light mode" : "Dark mode"}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</button>;
@@ -104,7 +104,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
         {activeTab === "schedule" && <EmployeeSchedule data={data} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "map" && <BusinessMap customers={data.customers} jobs={data.jobs} solicitations={data.solicitations} onSaveJobCoordinates={async () => undefined} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
         {activeTab === "earnings" && <EmployeeEarnings earnings={data.earnings} payouts={data.payouts} jobs={assignedJobs} customerMap={customerMap} onSubmit={setEarningsJob} />}
-        {activeTab === "contract" && <NewContract employeeId={preview ? employee?.id : undefined} jobs={assignedJobs} customerMap={customerMap} onSubmitted={() => setActiveTab("home")} />}
+        {activeTab === "contract" && <EmployeeContractFlow employeeId={preview ? employee?.id : undefined} jobs={assignedJobs} customerMap={customerMap} onSubmitted={() => setActiveTab("home")} />}
       </> : null;
 
   return <div className={darkMode ? "dark" : ""}><div className="flex min-h-screen bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-200">
@@ -163,12 +163,6 @@ function EarningsModal({ job, employeeId, existing, onClose, onSaved }: { job: J
   const [error, setError] = useState("");
   async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); try { const saved = await submitEmployeeEarnings({ jobId: job.id, tipAmount: Number(tip) || 0, upsellAmount: Number(upsell) || 0, employeeId }); if (!saved) throw new Error("Submission service is unavailable."); onSaved(saved); } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to submit earnings."); } finally { setSaving(false); } }
   return <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/55 p-3"><form className="w-full max-w-md rounded-lg bg-white p-5 dark:bg-slate-900" onSubmit={submit}><div className="flex justify-between"><div><p className="text-xs font-semibold uppercase text-lagoon">Job compensation</p><h2 className="text-xl font-bold text-ink dark:text-white">Submit earnings details</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={17} /></button></div><p className="mt-2 text-sm text-slate-500">Base commission is calculated automatically from the assigned job price. Enter only the additional amounts.</p><div className="mt-5 space-y-4"><label className="block text-sm font-semibold">Customer tip<input type="number" min="0" step="0.01" value={tip} onChange={(event) => setTip(event.target.value)} placeholder="0.00" /></label><label className="block text-sm font-semibold">Upsell amount<input type="number" min="0" step="0.01" value={upsell} onChange={(event) => setUpsell(event.target.value)} placeholder="0.00" /></label></div>{error && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}<button className="primary-button mt-5 w-full" disabled={saving}>{saving ? "Submitting..." : "Send for owner approval"}</button></form></div>;
-}
-
-function NewContract({ employeeId, jobs, customerMap, onSubmitted }: { employeeId?: string; jobs: Job[]; customerMap: Map<string, EmployeeWorkspaceSnapshot["customers"][number]>; onSubmitted: () => void }) {
-  const [customerName, setCustomerName] = useState(""); const [frequency, setFrequency] = useState<PlanType>("6-month"); const [price, setPrice] = useState(""); const [notes, setNotes] = useState(""); const [jobId, setJobId] = useState(""); const [saving, setSaving] = useState(false); const [message, setMessage] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setMessage(""); try { const saved = await submitEmployeeContract({ customerName, frequency, price: Number(price), notes, jobId: jobId || undefined, employeeId }); if (!saved) throw new Error("Contract service is unavailable."); setMessage("Contract sent to the owners for approval."); setCustomerName(""); setPrice(""); setNotes(""); setJobId(""); window.setTimeout(onSubmitted, 1200); } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to submit contract."); } finally { setSaving(false); } }
-  return <div className="mx-auto max-w-2xl"><div><p className="text-xs font-semibold uppercase text-lagoon">Owner approval required</p><h2 className="text-2xl font-bold text-ink dark:text-white">Submit a new contract</h2><p className="mt-1 text-sm text-slate-500">You can submit a contract, but saved contracts remain private to owners.</p></div><form className="mt-5 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900" onSubmit={submit}><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold">Customer name<input required value={customerName} onChange={(event) => setCustomerName(event.target.value)} /></label><label className="text-sm font-semibold">Frequency<select value={frequency} onChange={(event) => setFrequency(event.target.value as PlanType)}>{frequencies.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="text-sm font-semibold">Recurring price<input required type="number" min="0" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="text-sm font-semibold">Related assigned job (optional)<select value={jobId} onChange={(event) => { setJobId(event.target.value); const job = jobs.find((item) => item.id === event.target.value); if (job && !customerName) setCustomerName(customerMap.get(job.customerId)?.name ?? ""); }}><option value="">No related job</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.date} · {customerMap.get(job.customerId)?.name ?? job.address}</option>)}</select></label><label className="text-sm font-semibold sm:col-span-2">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label></div>{message && <p className="mt-4 rounded-lg bg-mist p-3 text-sm font-semibold text-lagoon">{message}</p>}<button className="primary-button mt-5 w-full gap-2" disabled={saving}><ClipboardPlus size={16} />{saving ? "Sending..." : "Send contract to owners"}</button></form></div>;
 }
 
 function EmployeeNotifications({ data, assignmentMap }: { data: EmployeeWorkspaceSnapshot | null; assignmentMap: Map<string, unknown> }) {

@@ -166,7 +166,23 @@ export function submitEmployeeEarnings(input: { jobId: string; tipAmount: number
   return request<EarningSubmission>("/api/employee/earnings", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function submitEmployeeContract(input: { customerName: string; frequency: ContractSubmission["frequency"]; price: number; notes: string; jobId?: string; employeeId?: string }) {
+export function submitEmployeeContract(input: {
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+  serviceAddress: string;
+  serviceDescription: string;
+  frequency: string;
+  relatedJob: string;
+  price: number;
+  notes: string;
+  agreementText: string;
+  signerName: string;
+  signatureData: string;
+  electronicConsent: boolean;
+  jobId?: string;
+  employeeId?: string;
+}) {
   return request<ContractSubmission>("/api/employee/contracts", { method: "POST", body: JSON.stringify(input) });
 }
 

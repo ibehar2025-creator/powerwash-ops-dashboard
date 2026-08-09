@@ -135,7 +135,7 @@ async function ensureMapSchema() {
       employee_id uuid not null references user_accounts(id) on delete cascade,
       job_id text references jobs(id) on delete set null,
       customer_name text not null,
-      frequency text not null check (frequency in ('monthly', '3-month', '4-month', '6-month', 'yearly')),
+      frequency text not null,
       price numeric(12,2) not null check (price >= 0),
       notes text not null default '',
       status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
@@ -145,6 +145,18 @@ async function ensureMapSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    alter table contract_submissions drop constraint if exists contract_submissions_frequency_check;
+    alter table contract_submissions add column if not exists customer_phone text not null default '';
+    alter table contract_submissions add column if not exists customer_email text not null default '';
+    alter table contract_submissions add column if not exists service_address text not null default '';
+    alter table contract_submissions add column if not exists service_description text not null default '';
+    alter table contract_submissions add column if not exists related_job text not null default '';
+    alter table contract_submissions add column if not exists agreement_text text not null default '';
+    alter table contract_submissions add column if not exists signer_name text not null default '';
+    alter table contract_submissions add column if not exists signature_data text not null default '';
+    alter table contract_submissions add column if not exists electronic_consent boolean not null default false;
+    alter table contract_submissions add column if not exists signed_at timestamptz;
 
     create table if not exists earning_submissions (
       id uuid primary key default gen_random_uuid(),
@@ -376,9 +388,19 @@ const toContract = (row) => ({
   employeeName: row.employee_name ?? "Employee",
   jobId: row.job_id ?? undefined,
   customerName: row.customer_name,
+  customerPhone: row.customer_phone ?? "",
+  customerEmail: row.customer_email ?? "",
+  serviceAddress: row.service_address ?? "",
+  serviceDescription: row.service_description ?? "",
   frequency: row.frequency,
+  relatedJob: row.related_job ?? "",
   price: Number(row.price),
   notes: row.notes,
+  agreementText: row.agreement_text ?? "",
+  signerName: row.signer_name ?? "",
+  signatureData: row.signature_data ?? "",
+  electronicConsent: Boolean(row.electronic_consent),
+  signedAt: row.signed_at?.toISOString?.() ?? row.signed_at ?? "",
   status: row.status,
   ownerNote: row.owner_note,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
@@ -1539,20 +1561,40 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
 app.post("/api/employee/contracts", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
   try {
     const subject = await employeeSubject(req);
-    const { customerName, frequency, price, notes = "", jobId = null } = req.body;
-    const validFrequencies = ["monthly", "3-month", "4-month", "6-month", "yearly"];
+    const {
+      customerName, customerPhone = "", customerEmail = "", serviceAddress,
+      serviceDescription, frequency, relatedJob, price, notes = "", agreementText,
+      signerName, signatureData, electronicConsent, jobId = null,
+    } = req.body;
     const numericPrice = Number(price);
-    if (!customerName?.trim() || !validFrequencies.includes(frequency) || !Number.isFinite(numericPrice) || numericPrice < 0) {
-      return res.status(400).json({ error: "Customer name, frequency, and a valid price are required." });
+    const requiredText = [customerName, serviceAddress, serviceDescription, frequency, relatedJob, signerName, agreementText];
+    if (requiredText.some((value) => typeof value !== "string" || !value.trim()) || !Number.isFinite(numericPrice) || numericPrice < 0) {
+      return res.status(400).json({ error: "Complete the customer, service, frequency, related job, price, and signature details." });
+    }
+    if (customerEmail && (typeof customerEmail !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail.trim()))) {
+      return res.status(400).json({ error: "Enter a valid customer email address or leave it blank." });
+    }
+    if (agreementText.length > 12_000 || notes.length > 5_000 || signatureData?.length > 750_000) {
+      return res.status(400).json({ error: "The contract submission is too large." });
+    }
+    if (electronicConsent !== true || typeof signatureData !== "string" || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(signatureData)) {
+      return res.status(400).json({ error: "The homeowner must consent and provide an electronic signature." });
     }
     if (jobId) {
       const assignment = await pool.query("select 1 from job_assignments where job_id = $1 and employee_id = $2", [jobId, subject.id]);
       if (!assignment.rows[0] && req.authUser.role !== "owner") return res.status(403).json({ error: "The related job is not assigned to you." });
     }
     const result = await pool.query(
-      `insert into contract_submissions (employee_id, job_id, customer_name, frequency, price, notes)
-       values ($1, $2, $3, $4, $5, $6) returning *`,
-      [subject.id, jobId || null, customerName.trim(), frequency, numericPrice, notes],
+      `insert into contract_submissions (
+         employee_id, job_id, customer_name, customer_phone, customer_email, service_address,
+         service_description, frequency, related_job, price, notes, agreement_text, signer_name,
+         signature_data, electronic_consent, signed_at
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, now()) returning *`,
+      [
+        subject.id, jobId || null, customerName.trim(), String(customerPhone).trim(), String(customerEmail).trim(),
+        serviceAddress.trim(), serviceDescription.trim(), frequency.trim(), relatedJob.trim(), numericPrice,
+        String(notes).trim(), agreementText.trim(), signerName.trim(), signatureData,
+      ],
     );
     if (jobId) {
       await pool.query(
@@ -1563,7 +1605,9 @@ app.post("/api/employee/contracts", requireDatabase, allowEmployeeOrOwner, async
         [jobId, subject.id, result.rows[0].id],
       );
     }
-    await audit(req.authUser.id, "submit_contract", "contract", result.rows[0].id, { customerName: customerName.trim(), frequency, price: numericPrice });
+    await audit(req.authUser.id, "submit_signed_contract", "contract", result.rows[0].id, {
+      customerName: customerName.trim(), frequency: frequency.trim(), relatedJob: relatedJob.trim(), price: numericPrice,
+    });
     res.status(201).json(toContract({ ...result.rows[0], employee_name: subject.name }));
   } catch (error) {
     next(error);
@@ -1681,6 +1725,16 @@ app.post("/api/owner/earnings/:id/review", requireDatabase, requireOwner, async 
   }
 });
 
+function servicePlanFromContractFrequency(value) {
+  const text = String(value || "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (/\b(monthly|every month|one month|1 month)\b/.test(text)) return { type: "monthly", months: 1 };
+  if (/\b(quarterly|seasonal|seasonally|three months?|3 months?)\b/.test(text)) return { type: "3-month", months: 3 };
+  if (/\b(four months?|4 months?)\b/.test(text)) return { type: "4-month", months: 4 };
+  if (/\b(biannual|bi annual|semiannual|semi annual|six months?|6 months?)\b/.test(text)) return { type: "6-month", months: 6 };
+  if (/\b(yearly|annual|annually|one year|1 year|twelve months?|12 months?)\b/.test(text)) return { type: "yearly", months: 12 };
+  return null;
+}
+
 app.post("/api/owner/contracts/:id/review", requireDatabase, requireOwner, async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -1695,17 +1749,19 @@ app.post("/api/owner/contracts/:id/review", requireDatabase, requireOwner, async
         const customerId = `contract-customer-${randomUUID()}`;
         customer = await client.query("insert into customers (id, name) values ($1, $2) returning *", [customerId, current.rows[0].customer_name]);
       }
-      const months = { monthly: 1, "3-month": 3, "4-month": 4, "6-month": 6, yearly: 12 }[current.rows[0].frequency];
-      const renewal = new Date();
-      renewal.setMonth(renewal.getMonth() + months);
-      const planId = `employee-contract-${current.rows[0].id}`;
-      await client.query(
-        `insert into service_plans (id, type, customer_id, renewal_date, price, payment_status, notes)
-         values ($1, $2, $3, $4, $5, 'unpaid', $6)
-         on conflict (id) do update set type = excluded.type, customer_id = excluded.customer_id,
-           renewal_date = excluded.renewal_date, price = excluded.price, notes = excluded.notes, updated_at = now()`,
-        [planId, current.rows[0].frequency, customer.rows[0].id, renewal.toISOString().slice(0, 10), current.rows[0].price, current.rows[0].notes],
-      );
+      const planFrequency = servicePlanFromContractFrequency(current.rows[0].frequency);
+      if (planFrequency) {
+        const renewal = new Date();
+        renewal.setMonth(renewal.getMonth() + planFrequency.months);
+        const planId = `employee-contract-${current.rows[0].id}`;
+        await client.query(
+          `insert into service_plans (id, type, customer_id, renewal_date, price, payment_status, notes)
+           values ($1, $2, $3, $4, $5, 'unpaid', $6)
+           on conflict (id) do update set type = excluded.type, customer_id = excluded.customer_id,
+             renewal_date = excluded.renewal_date, price = excluded.price, notes = excluded.notes, updated_at = now()`,
+          [planId, planFrequency.type, customer.rows[0].id, renewal.toISOString().slice(0, 10), current.rows[0].price, current.rows[0].notes],
+        );
+      }
     }
     const updated = await client.query(
       `update contract_submissions set status = $2, owner_note = $3, reviewed_by = $4,
