@@ -34,6 +34,10 @@ function notificationKey(item: NotificationItem) {
   return ["v2", item.id, item.tone, item.title, item.detail].join("|");
 }
 
+function notificationSeenKey(item: NotificationItem) {
+  return `inbox-seen|${notificationKey(item)}`;
+}
+
 function addDays(isoDate: string, days: number) {
   const date = new Date(`${isoDate}T12:00:00`);
   date.setDate(date.getDate() + days);
@@ -241,8 +245,8 @@ export function NotificationCenter({
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
   }, [contracts, customerNames, currentDate, jobs, leads, plans, syncStatus]);
 
-  const unreadCount = readStateLoaded
-    ? notifications.filter((item) => !readNotificationKeys.has(notificationKey(item))).length
+  const attentionCount = readStateLoaded
+    ? notifications.filter((item) => !readNotificationKeys.has(notificationSeenKey(item))).length
     : 0;
 
   const visibleNotifications = readStateLoaded
@@ -250,7 +254,16 @@ export function NotificationCenter({
     : notifications;
 
   function toggleNotifications() {
-    setOpen((current) => !current);
+    if (!open) {
+      const seenKeys = notifications.map(notificationSeenKey).filter((key) => !readNotificationKeys.has(key));
+      if (seenKeys.length) {
+        setReadNotificationKeys((keys) => new Set([...keys, ...seenKeys]));
+        void markNotificationsRead(seenKeys).catch(() => {
+          // Keep the badge dismissed for this session if persistence is temporarily unavailable.
+        });
+      }
+    }
+    setOpen(!open);
   }
 
   function markItemRead(item: NotificationItem) {
@@ -274,7 +287,7 @@ export function NotificationCenter({
     <div className="relative z-50">
       <button type="button" className="icon-button relative" aria-label="Open notifications" aria-expanded={open} title="Notifications" onClick={toggleNotifications}>
         <Bell size={17} />
-        {unreadCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+        {attentionCount > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{attentionCount > 99 ? "99+" : attentionCount}</span>}
       </button>
       {open && <>
         <button type="button" className="fixed inset-0 z-40 bg-ink/35 sm:bg-transparent" aria-label="Close notifications" onClick={() => setOpen(false)} />

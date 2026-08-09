@@ -177,8 +177,19 @@ function EmployeeNotifications({ data, assignmentMap }: { data: EmployeeWorkspac
     return reminders;
   }, [assignmentMap, data, today]);
   const visible = items.filter((item) => !read.has(item.key));
+  const attentionCount = items.filter((item) => !read.has(`inbox-seen|${item.key}`)).length;
   function mark(key: string) { setRead((current) => new Set([...current, key])); void markNotificationsRead([key]); }
-  return <div className="relative z-50"><button className="icon-button relative" onClick={() => setOpen((value) => !value)} aria-label="Notifications"><Bell size={17} />{visible.length > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{visible.length}</span>}</button>{open && <><button className="fixed inset-0 z-40 bg-ink/30" onClick={() => setOpen(false)} aria-label="Close notifications" /><div className="fixed inset-x-3 top-20 z-50 max-h-[70dvh] overflow-auto rounded-lg bg-white p-3 shadow-soft dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-96"><h3 className="px-2 py-2 font-semibold text-ink dark:text-white">Your notifications</h3>{visible.map((item) => <div key={item.key} className="flex items-start gap-3 rounded-lg p-3 hover:bg-slate-50 dark:hover:bg-slate-800"><div className="min-w-0 flex-1"><strong className="text-sm text-ink dark:text-white">{item.title}</strong><p className="mt-1 text-xs text-slate-500">{item.detail}</p></div><button className="icon-button h-8 w-8" title="Mark as read" onClick={() => mark(item.key)}><Check size={15} /></button></div>)}{!visible.length && <p className="p-5 text-center text-sm text-slate-500">No unread notifications.</p>}</div></>}</div>;
+  function toggle() {
+    if (!open) {
+      const seenKeys = items.map((item) => `inbox-seen|${item.key}`).filter((key) => !read.has(key));
+      if (seenKeys.length) {
+        setRead((current) => new Set([...current, ...seenKeys]));
+        void markNotificationsRead(seenKeys);
+      }
+    }
+    setOpen(!open);
+  }
+  return <div className="relative z-50"><button className="icon-button relative" onClick={toggle} aria-label="Notifications"><Bell size={17} />{attentionCount > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{attentionCount}</span>}</button>{open && <><button className="fixed inset-0 z-40 bg-ink/30" onClick={() => setOpen(false)} aria-label="Close notifications" /><div className="fixed inset-x-3 top-20 z-50 max-h-[70dvh] overflow-auto rounded-lg bg-white p-3 shadow-soft dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-96"><h3 className="px-2 py-2 font-semibold text-ink dark:text-white">Your notifications</h3>{visible.map((item) => <div key={item.key} className="flex items-start gap-3 rounded-lg p-3 hover:bg-slate-50 dark:hover:bg-slate-800"><div className="min-w-0 flex-1"><strong className="text-sm text-ink dark:text-white">{item.title}</strong><p className="mt-1 text-xs text-slate-500">{item.detail}</p></div><button className="icon-button h-8 w-8" title="Mark as read" onClick={() => mark(item.key)}><Check size={15} /></button></div>)}{!visible.length && <p className="p-5 text-center text-sm text-slate-500">No unread notifications.</p>}</div></>}</div>;
 }
 
 function addDay(date: string, days: number) { const value = new Date(`${date}T12:00:00`); value.setDate(value.getDate() + days); return value.toISOString().slice(0, 10); }
