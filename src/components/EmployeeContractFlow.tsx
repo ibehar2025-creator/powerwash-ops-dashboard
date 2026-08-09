@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, CheckCircle2, FileSignature, PenLine, RotateCcw, Send } from "lucide-react";
+import { ArrowLeft, FileSignature, PenLine, RotateCcw, Send } from "lucide-react";
 import { submitEmployeeContract } from "../lib/api";
 import { currency } from "../lib/calculations";
-import type { Customer, Job } from "../types/business";
 
 interface ContractDraft {
   customerName: string;
@@ -12,7 +11,6 @@ interface ContractDraft {
   serviceAddress: string;
   serviceDescription: string;
   frequency: string;
-  relatedJob: string;
   price: string;
   notes: string;
 }
@@ -24,14 +22,9 @@ const emptyDraft: ContractDraft = {
   serviceAddress: "",
   serviceDescription: "",
   frequency: "",
-  relatedJob: "",
   price: "",
   notes: "",
 };
-
-function normalize(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
 
 function agreementText(draft: ContractDraft) {
   const price = currency.format(Number(draft.price));
@@ -44,7 +37,6 @@ function agreementText(draft: ContractDraft) {
     `Services: ${draft.serviceDescription.trim()}`,
     `Service frequency: ${draft.frequency.trim()}`,
     `Price per service: ${price}`,
-    `Related completed job: ${draft.relatedJob.trim()}`,
     `Additional notes: ${notes}`,
     "",
     "The customer authorizes The Powerwashing Pros to provide the services listed above at the stated frequency and price. Service dates will be coordinated with the customer and may change because of weather, property access, or mutual scheduling needs. Work outside the listed service scope requires customer approval and may have an additional charge. Either party may request a change to or cancellation of future service by contacting the other party before the next scheduled visit.",
@@ -55,13 +47,9 @@ function agreementText(draft: ContractDraft) {
 
 export function EmployeeContractFlow({
   employeeId,
-  jobs,
-  customerMap,
   onSubmitted,
 }: {
   employeeId?: string;
-  jobs: Job[];
-  customerMap: Map<string, Customer>;
   onSubmitted: () => void;
 }) {
   const [draft, setDraft] = useState<ContractDraft>(emptyDraft);
@@ -71,17 +59,6 @@ export function EmployeeContractFlow({
   const [consent, setConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-
-  const matchedJob = useMemo(() => {
-    const query = normalize(draft.relatedJob);
-    if (!query) return undefined;
-    const matches = jobs.filter((job) => {
-      const customer = customerMap.get(job.customerId);
-      const searchable = normalize([customer?.name, job.date, job.address, job.serviceType].filter(Boolean).join(" "));
-      return searchable.includes(query) || query.includes(searchable);
-    });
-    return matches.length === 1 ? matches[0] : undefined;
-  }, [customerMap, draft.relatedJob, jobs]);
 
   const agreement = useMemo(() => agreementText(draft), [draft]);
 
@@ -117,7 +94,6 @@ export function EmployeeContractFlow({
         signerName,
         signatureData,
         electronicConsent: consent,
-        jobId: matchedJob?.id,
         employeeId,
       });
       if (!saved) throw new Error("Contract service is unavailable.");
@@ -139,7 +115,7 @@ export function EmployeeContractFlow({
       <form onSubmit={signAndSend} className="space-y-5">
         <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-7">
           <div className="border-b border-slate-200 pb-5 dark:border-slate-700"><p className="text-sm font-semibold text-lagoon">The Powerwashing Pros</p><h3 className="mt-1 text-xl font-bold text-ink dark:text-white">Recurring Power Washing Service Agreement</h3><p className="mt-1 text-xs text-slate-500">Prepared {new Date().toLocaleDateString()}</p></div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2"><AgreementField label="Customer" value={draft.customerName} /><AgreementField label="Phone" value={draft.customerPhone || "Not provided"} /><AgreementField label="Email" value={draft.customerEmail || "Not provided"} /><AgreementField label="Service address" value={draft.serviceAddress} /><AgreementField label="Services" value={draft.serviceDescription} /><AgreementField label="Frequency" value={draft.frequency} /><AgreementField label="Price per service" value={currency.format(Number(draft.price))} /><AgreementField label="Related completed job" value={draft.relatedJob} /></div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2"><AgreementField label="Customer" value={draft.customerName} /><AgreementField label="Phone" value={draft.customerPhone || "Not provided"} /><AgreementField label="Email" value={draft.customerEmail || "Not provided"} /><AgreementField label="Service address" value={draft.serviceAddress} /><AgreementField label="Services" value={draft.serviceDescription} /><AgreementField label="Frequency" value={draft.frequency} /><AgreementField label="Price per service" value={currency.format(Number(draft.price))} /></div>
           {draft.notes && <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-800"><p className="text-xs font-semibold uppercase text-slate-500">Additional notes</p><p className="mt-1 whitespace-pre-wrap text-sm">{draft.notes}</p></div>}
           <div className="mt-6 space-y-3 text-sm leading-6 text-slate-600 dark:text-slate-300"><p>The customer authorizes The Powerwashing Pros to provide the services listed above at the stated frequency and price. Service dates will be coordinated with the customer and may change because of weather, property access, or mutual scheduling needs.</p><p>Work outside the listed service scope requires customer approval and may have an additional charge. Either party may request a change to or cancellation of future service by contacting the other party before the next scheduled visit.</p><p>By signing below, the customer confirms that the information above is accurate and asks The Powerwashing Pros to accept this recurring-service agreement. The signed agreement is submitted to the business owner for confirmation.</p></div>
         </article>
@@ -165,11 +141,9 @@ export function EmployeeContractFlow({
         <label className="text-sm font-semibold">Price per service<input required inputMode="decimal" type="number" min="0" step="0.01" value={draft.price} onChange={(event) => update("price", event.target.value)} placeholder="175.00" /></label>
         <label className="text-sm font-semibold sm:col-span-2">Service address<input required autoComplete="street-address" value={draft.serviceAddress} onChange={(event) => update("serviceAddress", event.target.value)} /></label>
         <label className="text-sm font-semibold sm:col-span-2">Services included<input required value={draft.serviceDescription} onChange={(event) => update("serviceDescription", event.target.value)} placeholder="Driveway, front walkway, and sidewalk" /></label>
-        <label className="text-sm font-semibold">Frequency<input required value={draft.frequency} onChange={(event) => update("frequency", event.target.value)} placeholder="Every 6 months" /><span className="mt-1 block text-xs font-normal text-slate-500">Type the frequency exactly as agreed.</span></label>
-        <label className="text-sm font-semibold">Related assignment job<input required value={draft.relatedJob} onChange={(event) => update("relatedJob", event.target.value)} placeholder="Smith - driveway job on Aug 9" /><span className="mt-1 block text-xs font-normal text-slate-500">Type the customer, address, or completed job.</span></label>
+        <label className="text-sm font-semibold sm:col-span-2">Frequency<input required value={draft.frequency} onChange={(event) => update("frequency", event.target.value)} placeholder="Every 6 months" /><span className="mt-1 block text-xs font-normal text-slate-500">Type the frequency exactly as agreed.</span></label>
         <label className="text-sm font-semibold sm:col-span-2">Additional notes<textarea value={draft.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Access details or terms discussed with the homeowner" /></label>
       </div>
-      {matchedJob && <p className="mt-4 flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-700"><CheckCircle2 size={16} />Matched to assigned job: {matchedJob.date} - {customerMap.get(matchedJob.customerId)?.name ?? matchedJob.address}</p>}
       <button className="primary-button mt-5 w-full gap-2"><FileSignature size={16} />Generate contract for homeowner</button>
     </form>
   </div>;

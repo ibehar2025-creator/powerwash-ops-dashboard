@@ -173,14 +173,12 @@ export function submitEmployeeContract(input: {
   serviceAddress: string;
   serviceDescription: string;
   frequency: string;
-  relatedJob: string;
   price: number;
   notes: string;
   agreementText: string;
   signerName: string;
   signatureData: string;
   electronicConsent: boolean;
-  jobId?: string;
   employeeId?: string;
 }) {
   return request<ContractSubmission>("/api/employee/contracts", { method: "POST", body: JSON.stringify(input) });

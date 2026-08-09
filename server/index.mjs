@@ -1563,13 +1563,13 @@ app.post("/api/employee/contracts", requireDatabase, allowEmployeeOrOwner, async
     const subject = await employeeSubject(req);
     const {
       customerName, customerPhone = "", customerEmail = "", serviceAddress,
-      serviceDescription, frequency, relatedJob, price, notes = "", agreementText,
+      serviceDescription, frequency, relatedJob = "", price, notes = "", agreementText,
       signerName, signatureData, electronicConsent, jobId = null,
     } = req.body;
     const numericPrice = Number(price);
-    const requiredText = [customerName, serviceAddress, serviceDescription, frequency, relatedJob, signerName, agreementText];
+    const requiredText = [customerName, serviceAddress, serviceDescription, frequency, signerName, agreementText];
     if (requiredText.some((value) => typeof value !== "string" || !value.trim()) || !Number.isFinite(numericPrice) || numericPrice < 0) {
-      return res.status(400).json({ error: "Complete the customer, service, frequency, related job, price, and signature details." });
+      return res.status(400).json({ error: "Complete the customer, service, frequency, price, and signature details." });
     }
     if (customerEmail && (typeof customerEmail !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail.trim()))) {
       return res.status(400).json({ error: "Enter a valid customer email address or leave it blank." });

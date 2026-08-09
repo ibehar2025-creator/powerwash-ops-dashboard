@@ -104,7 +104,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
         {activeTab === "schedule" && <EmployeeSchedule data={data} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "map" && <BusinessMap customers={data.customers} jobs={data.jobs} solicitations={data.solicitations} onSaveJobCoordinates={async () => undefined} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
         {activeTab === "earnings" && <EmployeeEarnings earnings={data.earnings} payouts={data.payouts} jobs={assignedJobs} customerMap={customerMap} onSubmit={setEarningsJob} />}
-        {activeTab === "contract" && <EmployeeContractFlow employeeId={preview ? employee?.id : undefined} jobs={assignedJobs} customerMap={customerMap} onSubmitted={() => setActiveTab("home")} />}
+        {activeTab === "contract" && <EmployeeContractFlow employeeId={preview ? employee?.id : undefined} onSubmitted={() => setActiveTab("home")} />}
       </> : null;
 
   return <div className={darkMode ? "dark" : ""}><div className="flex min-h-screen bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-200">
