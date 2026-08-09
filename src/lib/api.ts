@@ -1,4 +1,4 @@
-import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, JobCreateInput, Lead, PayoutSummary, Review, ServicePlan, Solicitation } from "../types/business";
+import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, JobCreateInput, Lead, PayoutSummary, Review, ServicePlan, ServicePlanCreateInput, Solicitation } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -128,6 +128,13 @@ export function saveSolicitationPatch(solicitationId: string, patch: Partial<Sol
 
 export function deleteSolicitation(solicitationId: string) {
   return request<{ deleted: boolean; removedLeadId: string }>(`/api/solicitations/${solicitationId}`, { method: "DELETE" });
+}
+
+export function createServicePlan(plan: ServicePlanCreateInput) {
+  return request<ServicePlan>("/api/service-plans", {
+    method: "POST",
+    body: JSON.stringify(plan),
+  });
 }
 
 export function createCalendarEvent(event: Omit<CalendarEvent, "id">) {

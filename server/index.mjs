@@ -1449,6 +1449,43 @@ app.patch("/api/invoices/:id", requireDatabase, requireOwner, async (req, res, n
   }
 });
 
+app.post("/api/service-plans", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const { type, customerId, renewalDate, servicesIncluded = [], price = 0, paymentStatus = "unpaid", notes = "" } = req.body;
+    if (!recurringFrequencyLabels[type] || !customerId || !renewalDate) {
+      return res.status(400).json({ error: "Customer, frequency, and renewal date are required." });
+    }
+    const customerResult = await pool.query("select name, phone from customers where id = $1", [customerId]);
+    if (!customerResult.rows[0]) return res.status(400).json({ error: "Customer was not found." });
+    const cleanServices = Array.isArray(servicesIncluded)
+      ? servicesIncluded.map((service) => String(service).trim()).filter(Boolean)
+      : [String(servicesIncluded).trim()].filter(Boolean);
+    if (!cleanServices.length) return res.status(400).json({ error: "At least one service is required." });
+
+    const planId = `manual-plan-${randomUUID()}`;
+    await runSheetAction("addServicePlan", {
+      planId,
+      customerId,
+      name: customerResult.rows[0].name,
+      phone: customerResult.rows[0].phone,
+      frequency: recurringFrequencyLabels[type],
+      renewalDate,
+      servicesIncluded: cleanServices.join(", "),
+      price: Number(price) || 0,
+      paymentStatus,
+      notes,
+    });
+    const result = await pool.query(
+      `insert into service_plans (id, type, customer_id, discount_pct, renewal_date, services_included, price, payment_status, notes)
+       values ($1, $2, $3, 0, $4, $5, $6, $7, $8) returning *`,
+      [planId, type, customerId, renewalDate, cleanServices, Number(price) || 0, paymentStatus, notes],
+    );
+    res.status(201).json(toServicePlan(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch("/api/service-plans/:id", requireDatabase, requireOwner, async (req, res, next) => {
   try {
     const { type, customerId, discountPct, renewalDate, servicesIncluded, price, paymentStatus, notes } = req.body;

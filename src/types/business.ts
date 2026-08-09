@@ -221,6 +221,8 @@ export interface ServicePlan {
   notes: string;
 }
 
+export type ServicePlanCreateInput = Pick<ServicePlan, "type" | "customerId" | "renewalDate" | "servicesIncluded" | "price" | "paymentStatus" | "notes">;
+
 export interface Expense {
   id: string;
   date: string;
