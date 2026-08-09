@@ -404,7 +404,7 @@ export default function App() {
     if (lead?.source === "Map solicitation" && lead.id.startsWith("solicitation-")) {
       const solicitationId = lead.id.slice("solicitation-".length);
       setSolicitations((current) => current.map((item) => item.id === solicitationId
-        ? { ...item, outcome: "visited", followUpDate: "" }
+        ? { ...item, outcome: "no answer", followUpDate: "" }
         : item));
     }
     setSelectedLead(null);

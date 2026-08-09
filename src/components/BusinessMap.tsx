@@ -41,7 +41,7 @@ type Props = {
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 const defaultCenter = { lat: 29.7174, lng: -95.4307 };
 const jobCoordinateCacheKey = "powerwashing-pros-job-coordinate-cache-v1";
-const outcomes: SolicitationOutcome[] = ["no answer", "visited", "interested", "follow up", "not interested"];
+const outcomes: SolicitationOutcome[] = ["no answer", "interested", "follow up", "not interested"];
 const outcomeColors: Record<SolicitationOutcome, string> = {
   visited: "#64748b",
   "no answer": "#f59e0b",
@@ -281,7 +281,7 @@ function SolicitationMarkers({
     const layer = new google.maps.Data({ map });
     const locationsById = new globalThis.Map(locations.map((location) => [location.id, location]));
     const icons = Object.fromEntries(
-      outcomes.map((outcome) => [outcome, markerIcon(outcomeColors[outcome])]),
+      Object.entries(outcomeColors).map(([outcome, color]) => [outcome, markerIcon(color)]),
     ) as Record<SolicitationOutcome, google.maps.Symbol>;
 
     locations.forEach((location) => {
@@ -657,7 +657,7 @@ function GoogleBusinessMap({
     setEditing(item);
     setEditAddress(item.address);
     setEditDate(item.solicitedDate);
-    setEditOutcome(item.outcome);
+    setEditOutcome(item.outcome === "visited" ? "no answer" : item.outcome);
     setEditFollowUpDate(item.followUpDate || "");
     setEditNotes(item.notes);
     setEditStatus("");
@@ -852,7 +852,7 @@ function GoogleBusinessMap({
                     <div className="flex items-start gap-2"><span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: outcomeColors[item.outcome] }} /><div className="min-w-0"><p className="truncate text-sm font-semibold text-ink dark:text-white">{item.address}</p><p className="text-xs text-slate-500">{item.solicitedDate}</p></div></div>
                   </button>
                   <div className="mt-2 flex items-center gap-2">
-                    <select value={item.outcome} onChange={(event) => { const nextOutcome = event.target.value as SolicitationOutcome; if (nextOutcome === "follow up") { beginEditing({ ...item, outcome: nextOutcome }); } else { void onUpdateSolicitation(item.id, { outcome: nextOutcome, followUpDate: "" }); } }} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{outcomes.map((result) => <option key={result} value={result}>{result}</option>)}</select>
+                    <select value={item.outcome === "visited" ? "no answer" : item.outcome} onChange={(event) => { const nextOutcome = event.target.value as SolicitationOutcome; if (nextOutcome === "follow up") { beginEditing({ ...item, outcome: nextOutcome }); } else { void onUpdateSolicitation(item.id, { outcome: nextOutcome, followUpDate: "" }); } }} className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{outcomes.map((result) => <option key={result} value={result}>{result}</option>)}</select>
                     <button type="button" className="icon-button h-8 w-8 shrink-0" title="Edit solicitation" aria-label={`Edit solicitation at ${item.address}`} onClick={() => beginEditing(item)}><Pencil size={15} /></button>
                     <button type="button" className="icon-button h-8 w-8 shrink-0" title="Delete solicitation" aria-label={`Delete solicitation at ${item.address}`} onClick={() => void onDeleteSolicitation(item.id)}><Trash2 size={15} /></button>
                   </div>

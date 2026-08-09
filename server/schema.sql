@@ -124,7 +124,7 @@ create table if not exists solicitations (
   latitude double precision not null,
   longitude double precision not null,
   solicited_date date not null default current_date,
-  outcome text not null default 'visited' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
+  outcome text not null default 'no answer' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
   follow_up_date date,
   notes text not null default '',
   created_at timestamptz not null default now(),

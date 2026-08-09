@@ -56,7 +56,7 @@ async function ensureMapSchema() {
       latitude double precision not null,
       longitude double precision not null,
       solicited_date date not null default current_date,
-      outcome text not null default 'visited' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
+      outcome text not null default 'no answer' check (outcome in ('visited', 'no answer', 'interested', 'follow up', 'not interested')),
       follow_up_date date,
       notes text not null default '',
       created_at timestamptz not null default now(),
@@ -64,6 +64,7 @@ async function ensureMapSchema() {
     );
 
     alter table solicitations add column if not exists follow_up_date date;
+    alter table solicitations alter column outcome set default 'no answer';
 
     create table if not exists calendar_events (
       id uuid primary key default gen_random_uuid(),
@@ -945,7 +946,7 @@ app.delete("/api/leads/:id", requireDatabase, async (req, res, next) => {
     if (lead.source === "Map solicitation" && lead.id.startsWith("solicitation-")) {
       const solicitationId = lead.id.slice("solicitation-".length);
       await client.query(
-        `update solicitations set outcome = 'visited', follow_up_date = null, updated_at = now() where id = $1`,
+        `update solicitations set outcome = 'no answer', follow_up_date = null, updated_at = now() where id = $1`,
         [solicitationId],
       );
     }
