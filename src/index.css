@@ -73,6 +73,12 @@ select {
   }
 }
 
+@media (display-mode: standalone) and (max-width: 1023px) {
+  .employee-preview-banner {
+    padding-top: calc(0.5rem + env(safe-area-inset-top));
+  }
+}
+
 .nav-item {
   @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-ink dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white;
 }
