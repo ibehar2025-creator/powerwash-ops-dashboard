@@ -162,8 +162,12 @@ export function saveEmployeeJobPatch(jobId: string, patch: Pick<Partial<Job>, "s
   return request<Job>(`/api/employee/jobs/${jobId}`, { method: "PATCH", body: JSON.stringify({ ...patch, employeeId }) });
 }
 
-export function submitEmployeeEarnings(input: { jobId: string; tipAmount: number; upsellAmount: number; contractSubmissionId?: string; employeeId?: string }) {
+export function submitEmployeeEarnings(input: { jobId: string; tipAmount: number; upsellAmount?: number; contractSubmissionId?: string; employeeId?: string }) {
   return request<EarningSubmission>("/api/employee/earnings", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function submitEmployeeUpsell(input: { jobId: string; description: string; outcome: "accepted" | "declined" | "follow-up"; quotedAmount: number; notes: string; employeeId?: string }) {
+  return request<EarningSubmission>("/api/employee/upsells", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function submitEmployeeContract(input: {

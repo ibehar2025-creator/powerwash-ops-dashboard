@@ -90,6 +90,10 @@ export interface EarningSubmission {
   originalJobPrice: number;
   tipAmount: number;
   upsellAmount: number;
+  upsellDescription: string;
+  upsellOutcome: "" | "accepted" | "declined" | "follow-up";
+  upsellQuotedAmount: number;
+  upsellNotes: string;
   contractSold: boolean;
   status: SubmissionStatus;
   ownerNote: string;

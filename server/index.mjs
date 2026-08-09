@@ -175,6 +175,14 @@ async function ensureMapSchema() {
       unique (job_id, employee_id)
     );
 
+    alter table earning_submissions add column if not exists upsell_description text not null default '';
+    alter table earning_submissions add column if not exists upsell_outcome text not null default '';
+    alter table earning_submissions add column if not exists upsell_quoted_amount numeric(12,2) not null default 0;
+    alter table earning_submissions add column if not exists upsell_notes text not null default '';
+    alter table earning_submissions drop constraint if exists earning_submissions_upsell_outcome_check;
+    alter table earning_submissions add constraint earning_submissions_upsell_outcome_check
+      check (upsell_outcome in ('', 'accepted', 'declined', 'follow-up'));
+
     create table if not exists payouts (
       id uuid primary key default gen_random_uuid(),
       employee_id uuid not null references user_accounts(id) on delete cascade,
@@ -373,6 +381,10 @@ const toEarning = (row) => ({
   originalJobPrice: Number(row.original_job_price || 0),
   tipAmount: Number(row.tip_amount),
   upsellAmount: Number(row.upsell_amount),
+  upsellDescription: row.upsell_description ?? "",
+  upsellOutcome: row.upsell_outcome ?? "",
+  upsellQuotedAmount: Number(row.upsell_quoted_amount || 0),
+  upsellNotes: row.upsell_notes ?? "",
   contractSold: Boolean(row.contract_submission_id),
   status: row.status,
   ownerNote: row.owner_note,
@@ -1531,7 +1543,9 @@ app.patch("/api/employee/jobs/:id", requireDatabase, allowEmployeeOrOwner, async
 app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
   try {
     const subject = await employeeSubject(req);
-    const { jobId, tipAmount = 0, upsellAmount = 0, contractSubmissionId = null } = req.body;
+    const { jobId, tipAmount = 0, contractSubmissionId = null } = req.body;
+    const upsellProvided = Object.hasOwn(req.body, "upsellAmount");
+    const upsellAmount = upsellProvided ? req.body.upsellAmount : 0;
     const tip = Number(tipAmount);
     const upsell = Number(upsellAmount);
     if (!jobId || !Number.isFinite(tip) || tip < 0 || !Number.isFinite(upsell) || upsell < 0) return res.status(400).json({ error: "Enter valid tip and upsell amounts." });
@@ -1545,13 +1559,50 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
       `insert into earning_submissions (job_id, employee_id, tip_amount, upsell_amount, contract_submission_id, status, owner_note)
        values ($1, $2, $3, $4, $5, 'pending', '')
        on conflict (job_id, employee_id) do update set tip_amount = excluded.tip_amount,
-         upsell_amount = excluded.upsell_amount, contract_submission_id = excluded.contract_submission_id,
+         upsell_amount = case when $6 then excluded.upsell_amount else earning_submissions.upsell_amount end,
+         contract_submission_id = excluded.contract_submission_id,
          status = 'pending', owner_note = '', reviewed_by = null, reviewed_at = null, updated_at = now()
        returning id`,
-      [jobId, subject.id, tip, upsell, contractSubmissionId],
+      [jobId, subject.id, tip, upsell, contractSubmissionId, upsellProvided],
     );
     const full = await pool.query(`${earningSelect} where es.id = $1`, [result.rows[0].id]);
     await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, upsell });
+    res.status(201).json(toEarning(full.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/employee/upsells", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
+  try {
+    const subject = await employeeSubject(req);
+    const { jobId, description, outcome, quotedAmount, notes = "" } = req.body;
+    const quote = Number(quotedAmount);
+    const validOutcomes = ["accepted", "declined", "follow-up"];
+    if (!jobId || typeof description !== "string" || !description.trim() || !validOutcomes.includes(outcome) || !Number.isFinite(quote) || quote < 0) {
+      return res.status(400).json({ error: "Enter the service offered, customer result, and a valid quoted amount." });
+    }
+    if (outcome === "accepted" && quote <= 0) return res.status(400).json({ error: "An accepted upsell must have a price greater than zero." });
+    if (description.length > 500 || String(notes).length > 2000) return res.status(400).json({ error: "The upsell details are too long." });
+    const assignment = await pool.query("select 1 from job_assignments where job_id = $1 and employee_id = $2", [jobId, subject.id]);
+    if (!assignment.rows[0]) return res.status(403).json({ error: "This job is not assigned to this employee." });
+    const existing = await pool.query("select status from earning_submissions where job_id = $1 and employee_id = $2", [jobId, subject.id]);
+    if (["approved", "paid"].includes(existing.rows[0]?.status)) return res.status(409).json({ error: "A finalized earnings record cannot be changed." });
+    const result = await pool.query(
+      `insert into earning_submissions (
+         job_id, employee_id, upsell_amount, upsell_description, upsell_outcome,
+         upsell_quoted_amount, upsell_notes, status, owner_note
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, '')
+       on conflict (job_id, employee_id) do update set
+         upsell_amount = excluded.upsell_amount, upsell_description = excluded.upsell_description,
+         upsell_outcome = excluded.upsell_outcome, upsell_quoted_amount = excluded.upsell_quoted_amount,
+         upsell_notes = excluded.upsell_notes, status = excluded.status, owner_note = '',
+         reviewed_by = null, reviewed_at = null, updated_at = now()
+       returning id`,
+      [jobId, subject.id, outcome === "accepted" ? quote : 0, description.trim(), outcome, quote, String(notes).trim(), outcome === "accepted" ? "pending" : "draft"],
+    );
+    const full = await pool.query(`${earningSelect} where es.id = $1`, [result.rows[0].id]);
+    await audit(req.authUser.id, "record_upsell", "earning", result.rows[0].id, { jobId, description: description.trim(), outcome, quotedAmount: quote });
     res.status(201).json(toEarning(full.rows[0]));
   } catch (error) {
     next(error);
