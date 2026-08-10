@@ -141,6 +141,68 @@ export interface PayoutSummary {
   earningIds: string[];
 }
 
+export type PayrollStatus = "draft" | "finalized" | "paid";
+export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip";
+
+export interface PayrollLine {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  jobId?: string;
+  lineType: PayrollLineType;
+  description: string;
+  customerName: string;
+  workDate: string;
+  amount: number;
+}
+
+export interface PayrollAdjustment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  adjustmentType: "addition" | "deduction";
+  category: "bonus" | "reimbursement" | "deduction" | "correction" | "other";
+  description: string;
+  amount: number;
+  createdAt: string;
+}
+
+export interface PayrollPayment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  amount: number;
+  paymentMethod: "bank" | "check";
+  reference: string;
+  note: string;
+  paidAt: string;
+}
+
+export interface PayrollRun {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  payday: string;
+  status: PayrollStatus;
+  lines: PayrollLine[];
+  adjustments: PayrollAdjustment[];
+  payments: PayrollPayment[];
+  grossEarnings: number;
+  totalAdditions: number;
+  totalDeductions: number;
+  netPay: number;
+  finalizedAt?: string;
+  createdAt: string;
+}
+
+export interface PayrollPreview {
+  periodStart: string;
+  periodEnd: string;
+  payday: string;
+  eligibleLines: PayrollLine[];
+  missingApprovals: number;
+}
+
 export interface CalendarEvent {
   id: string;
   title: string;

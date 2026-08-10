@@ -4,11 +4,12 @@ import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, Clipboar
 import { BusinessMap } from "./BusinessMap";
 import { InstallAppButton } from "./InstallAppButton";
 import { EmployeeContractFlow } from "./EmployeeContractFlow";
-import { createSolicitation, deleteSolicitation, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, saveSolicitationPatch, submitEmployeeEarnings, submitEmployeeUpsell } from "../lib/api";
+import { EmployeePayrollStatements } from "./EmployeePayrollStatements";
+import { createSolicitation, deleteSolicitation, loadEmployeePayroll, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, saveSolicitationPatch, submitEmployeeEarnings, submitEmployeeUpsell } from "../lib/api";
 import type { EmployeeWorkspaceSnapshot } from "../lib/api";
 import { useAuth } from "../lib/authContext";
 import { currency, isoToday } from "../lib/calculations";
-import type { EarningSubmission, Job, JobStatus, Solicitation } from "../types/business";
+import type { EarningSubmission, Job, JobStatus, PayrollRun, Solicitation } from "../types/business";
 
 type EmployeeTab = "home" | "schedule" | "map" | "earnings" | "contract";
 const tabs: Array<{ id: EmployeeTab; label: string; icon: typeof Home }> = [
@@ -45,14 +46,16 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [earningsJob, setEarningsJob] = useState<Job | null>(null);
   const [upsellJob, setUpsellJob] = useState<Job | null>(null);
+  const [statements, setStatements] = useState<PayrollRun[]>([]);
 
   const reload = useCallback(async (background = false) => {
     if (!background) setLoading(true);
     if (!background) setError("");
     try {
-      const snapshot = await loadEmployeeWorkspace();
+      const [snapshot, payroll] = await Promise.all([loadEmployeeWorkspace(), loadEmployeePayroll()]);
       if (!snapshot) throw new Error("The employee workspace is unavailable.");
       setData(snapshot);
+      setStatements(payroll?.statements ?? []);
     } catch (nextError) {
       if (!background) setError(nextError instanceof Error ? nextError.message : "Unable to load employee workspace.");
     } finally {
@@ -104,7 +107,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
         {activeTab === "home" && <EmployeeHome data={data} jobsToday={jobsToday} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "schedule" && <EmployeeSchedule data={data} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "map" && <BusinessMap customers={data.customers} jobs={data.jobs} solicitations={data.solicitations} onSaveJobCoordinates={async () => undefined} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
-        {activeTab === "earnings" && <EmployeeEarnings earnings={data.earnings} payouts={data.payouts} jobs={assignedJobs} customerMap={customerMap} onSubmit={setEarningsJob} />}
+        {activeTab === "earnings" && <><EmployeePayrollStatements statements={statements} /><div className="mt-5"><EmployeeEarnings earnings={data.earnings} payouts={data.payouts} jobs={assignedJobs} customerMap={customerMap} onSubmit={setEarningsJob} /></div></>}
         {activeTab === "contract" && <EmployeeContractFlow employeeId={preview ? employee?.id : undefined} onSubmitted={() => setActiveTab("home")} />}
       </> : null;
 
@@ -115,7 +118,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
     </aside>
     <main className="min-w-0 flex-1 overflow-x-hidden">
       {preview && <div className="employee-preview-banner flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900"><span>Owner preview: employee workspace</span><button className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1" onClick={onExitPreview}>Return to owner</button></div>}
-      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2"><InstallAppButton /><EmployeeNotifications data={data} assignmentMap={assignmentMap} /><EmployeeThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode((value) => !value)} />{!preview && <button className="icon-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={17} /></button>}</div></div></header>
+      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2"><InstallAppButton /><EmployeeNotifications data={data} statements={statements} assignmentMap={assignmentMap} /><EmployeeThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode((value) => !value)} />{!preview && <button className="icon-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={17} /></button>}</div></div></header>
       <div className="p-4 sm:p-6">{content}</div>
     </main>
     {menuOpen && <div className="fixed inset-0 z-[70] lg:hidden"><button className="absolute inset-0 bg-ink/45" onClick={() => setMenuOpen(false)} aria-label="Close navigation" /><aside className="absolute bottom-0 left-0 top-0 w-[min(82vw,320px)] bg-white p-4 shadow-soft dark:bg-slate-900"><div className="mb-5 flex items-center justify-between"><strong className="text-ink dark:text-white">Employee menu</strong><button className="icon-button" onClick={() => setMenuOpen(false)}><X size={17} /></button></div><EmployeeNav active={activeTab} onChoose={(tab) => { setActiveTab(tab); setMenuOpen(false); }} /></aside></div>}
@@ -185,7 +188,7 @@ function UpsellModal({ job, employeeId, existing, onClose, onSaved }: { job: Job
   return <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/55 p-3"><form className="max-h-[94dvh] w-full max-w-md overflow-auto rounded-lg bg-white p-5 dark:bg-slate-900" onSubmit={submit}><div className="flex justify-between gap-3"><div><p className="text-xs font-semibold uppercase text-lagoon">Sales opportunity</p><h2 className="text-xl font-bold text-ink dark:text-white">Record customer upsell</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={17} /></button></div><p className="mt-2 text-sm text-slate-500">Record exactly what was offered and how the customer responded.</p><div className="mt-5 space-y-4"><label className="block text-sm font-semibold">Service offered<input required value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Back patio cleaning" /></label><label className="block text-sm font-semibold">Quoted price<input required type="number" min="0" step="0.01" inputMode="decimal" value={quotedAmount} onChange={(event) => setQuotedAmount(event.target.value)} placeholder="125.00" /></label><label className="block text-sm font-semibold">Customer result<select value={outcome} onChange={(event) => setOutcome(event.target.value as typeof outcome)}><option value="accepted">Accepted</option><option value="declined">Declined</option><option value="follow-up">Follow up later</option></select></label><label className="block text-sm font-semibold">Conversation notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="What the customer said, timing, or follow-up details" /></label></div><div className={`mt-4 rounded-lg p-3 text-sm ${outcome === "accepted" ? "bg-emerald-50 text-emerald-800" : outcome === "follow-up" ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-600"}`}>{outcome === "accepted" ? "This will be sent to the owner for approval and included in commission calculations." : outcome === "follow-up" ? "This will be saved as a follow-up opportunity without changing job revenue." : "This will be saved as sales history without changing job revenue."}</div>{error && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}<button className="primary-button mt-5 w-full gap-2" disabled={saving}><Sparkles size={16} />{saving ? "Saving upsell..." : "Save upsell result"}</button></form></div>;
 }
 
-function EmployeeNotifications({ data, assignmentMap }: { data: EmployeeWorkspaceSnapshot | null; assignmentMap: Map<string, unknown> }) {
+function EmployeeNotifications({ data, statements, assignmentMap }: { data: EmployeeWorkspaceSnapshot | null; statements: PayrollRun[]; assignmentMap: Map<string, unknown> }) {
   const [open, setOpen] = useState(false); const [read, setRead] = useState<Set<string>>(new Set());
   useEffect(() => { void loadReadNotificationKeys().then((result) => setRead(new Set(result?.readKeys ?? []))); }, []);
   const today = isoToday();
@@ -193,9 +196,10 @@ function EmployeeNotifications({ data, assignmentMap }: { data: EmployeeWorkspac
     if (!data) return [];
     const reminders = data.jobs.filter((job) => assignmentMap.has(job.id) && job.date >= today && job.date <= addDay(today, 1)).map((job) => ({ key: `employee-job-v1|${job.id}|${job.date}|${job.status}`, title: job.date === today ? "Assigned job today" : "Assigned job tomorrow", detail: `${job.time} · ${job.address}` }));
     data.earnings.filter((item) => item.status === "approved" || item.status === "rejected").forEach((item) => reminders.push({ key: `employee-earning-v1|${item.id}|${item.status}|${item.reviewedAt}`, title: `Earnings ${item.status}`, detail: `${item.customerName} · ${currency.format(item.totalEarnings)}` }));
+    statements.forEach((statement) => reminders.push({ key: `employee-payroll-v1|${statement.id}|${statement.status}`, title: statement.status === "paid" ? "Payroll payment recorded" : "Earnings statement ready", detail: `${statement.periodStart} - ${statement.periodEnd} · ${currency.format(statement.netPay)}` }));
     data.solicitations.filter((item) => item.outcome === "follow up" && item.followUpDate && item.followUpDate <= addDay(today, 7)).forEach((item) => reminders.push({ key: `employee-followup-v1|${item.id}|${item.followUpDate}`, title: "Solicitation follow-up", detail: `${item.followUpDate} · ${item.address}` }));
     return reminders;
-  }, [assignmentMap, data, today]);
+  }, [assignmentMap, data, statements, today]);
   const visible = items.filter((item) => !read.has(item.key));
   const attentionCount = items.filter((item) => !read.has(`inbox-seen|${item.key}`)).length;
   function mark(key: string) { setRead((current) => new Set([...current, key])); void markNotificationsRead([key]); }

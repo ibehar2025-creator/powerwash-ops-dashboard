@@ -193,6 +193,45 @@ async function ensureMapSchema() {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists payroll_runs (
+      id uuid primary key default gen_random_uuid(), period_start date not null, period_end date not null, payday date not null,
+      status text not null default 'draft' check (status in ('draft', 'finalized', 'paid')),
+      created_by uuid references user_accounts(id) on delete set null, finalized_by uuid references user_accounts(id) on delete set null,
+      finalized_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+      unique (period_start, period_end)
+    );
+    create table if not exists payroll_run_lines (
+      id uuid primary key default gen_random_uuid(), payroll_run_id uuid not null references payroll_runs(id) on delete cascade,
+      employee_id uuid not null references user_accounts(id) on delete restrict, job_id text references jobs(id) on delete restrict,
+      earning_submission_id uuid references earning_submissions(id) on delete set null, source_key text not null unique,
+      line_type text not null check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip')),
+      description text not null, customer_name text not null default '', work_date date not null,
+      amount numeric(12,2) not null check (amount >= 0), created_at timestamptz not null default now()
+    );
+    create table if not exists payroll_adjustments (
+      id uuid primary key default gen_random_uuid(), payroll_run_id uuid not null references payroll_runs(id) on delete cascade,
+      employee_id uuid not null references user_accounts(id) on delete restrict,
+      adjustment_type text not null check (adjustment_type in ('addition', 'deduction')),
+      category text not null check (category in ('bonus', 'reimbursement', 'deduction', 'correction', 'other')),
+      description text not null, amount numeric(12,2) not null check (amount > 0),
+      created_by uuid references user_accounts(id) on delete set null, created_at timestamptz not null default now()
+    );
+    create table if not exists payroll_payments (
+      id uuid primary key default gen_random_uuid(), payroll_run_id uuid not null references payroll_runs(id) on delete restrict,
+      employee_id uuid not null references user_accounts(id) on delete restrict, amount numeric(12,2) not null check (amount >= 0),
+      payment_method text not null check (payment_method in ('bank', 'check')), reference text not null default '', note text not null default '',
+      paid_at timestamptz not null, recorded_by uuid references user_accounts(id) on delete set null,
+      created_at timestamptz not null default now(), unique (payroll_run_id, employee_id)
+    );
+    create index if not exists payroll_runs_status_idx on payroll_runs(status, period_start desc);
+    create index if not exists payroll_lines_run_employee_idx on payroll_run_lines(payroll_run_id, employee_id);
+    create index if not exists payroll_adjustments_run_employee_idx on payroll_adjustments(payroll_run_id, employee_id);
+    create index if not exists payroll_payments_run_employee_idx on payroll_payments(payroll_run_id, employee_id);
+    alter table payroll_runs enable row level security;
+    alter table payroll_run_lines enable row level security;
+    alter table payroll_adjustments enable row level security;
+    alter table payroll_payments enable row level security;
+
     create table if not exists activity_log (
       id bigserial primary key,
       actor_id uuid references user_accounts(id) on delete set null,
@@ -418,6 +457,86 @@ const toContract = (row) => ({
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   reviewedAt: row.reviewed_at?.toISOString?.() ?? row.reviewed_at ?? undefined,
 });
+
+const isoDateValue = (value) => value?.toISOString?.().slice(0, 10) ?? value;
+const payrollEmployeeName = (row) => row.employee_name ?? "Employee";
+
+function payrollTotals(lines, adjustments) {
+  const grossEarnings = lines.reduce((sum, line) => sum + Number(line.amount), 0);
+  const totalAdditions = adjustments.filter((item) => item.adjustmentType === "addition").reduce((sum, item) => sum + item.amount, 0);
+  const totalDeductions = adjustments.filter((item) => item.adjustmentType === "deduction").reduce((sum, item) => sum + item.amount, 0);
+  return { grossEarnings, totalAdditions, totalDeductions, netPay: grossEarnings + totalAdditions - totalDeductions };
+}
+
+async function loadPayrollRuns(db, employeeId = null) {
+  const params = employeeId ? [employeeId] : [];
+  const employeeFilter = employeeId ? " and employee_id = $1" : "";
+  const [runsResult, linesResult, adjustmentsResult, paymentsResult] = await Promise.all([
+    db.query(`select * from payroll_runs ${employeeId ? "where status in ('finalized', 'paid') and exists (select 1 from payroll_run_lines where payroll_run_id = payroll_runs.id and employee_id = $1 union select 1 from payroll_adjustments where payroll_run_id = payroll_runs.id and employee_id = $1)" : ""} order by period_start desc`, params),
+    db.query(`select prl.*, ua.name as employee_name from payroll_run_lines prl join user_accounts ua on ua.id = prl.employee_id where true${employeeFilter} order by work_date, created_at`, params),
+    db.query(`select pa.*, ua.name as employee_name from payroll_adjustments pa join user_accounts ua on ua.id = pa.employee_id where true${employeeFilter} order by created_at`, params),
+    db.query(`select pp.*, ua.name as employee_name from payroll_payments pp join user_accounts ua on ua.id = pp.employee_id where true${employeeFilter} order by paid_at`, params),
+  ]);
+  return runsResult.rows.map((run) => {
+    const lines = linesResult.rows.filter((row) => row.payroll_run_id === run.id).map((row) => ({
+      id: row.id, employeeId: row.employee_id, employeeName: payrollEmployeeName(row), jobId: row.job_id ?? undefined,
+      lineType: row.line_type, description: row.description, customerName: row.customer_name,
+      workDate: isoDateValue(row.work_date), amount: Number(row.amount),
+    }));
+    const adjustments = adjustmentsResult.rows.filter((row) => row.payroll_run_id === run.id).map((row) => ({
+      id: row.id, employeeId: row.employee_id, employeeName: payrollEmployeeName(row), adjustmentType: row.adjustment_type,
+      category: row.category, description: row.description, amount: Number(row.amount), createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+    }));
+    const payments = paymentsResult.rows.filter((row) => row.payroll_run_id === run.id).map((row) => ({
+      id: row.id, employeeId: row.employee_id, employeeName: payrollEmployeeName(row), amount: Number(row.amount),
+      paymentMethod: row.payment_method, reference: row.reference, note: row.note, paidAt: row.paid_at?.toISOString?.() ?? row.paid_at,
+    }));
+    return {
+      id: run.id, periodStart: isoDateValue(run.period_start), periodEnd: isoDateValue(run.period_end), payday: isoDateValue(run.payday),
+      status: run.status, lines, adjustments, payments, ...payrollTotals(lines, adjustments),
+      finalizedAt: run.finalized_at?.toISOString?.() ?? run.finalized_at ?? undefined, createdAt: run.created_at?.toISOString?.() ?? run.created_at,
+    };
+  });
+}
+
+async function eligiblePayrollLines(db, periodEnd) {
+  const result = await db.query(
+    `select j.id as job_id, j.date as work_date, j.status as job_status, c.name as customer_name,
+      ja.employee_id, ua.name as employee_name, ja.original_job_price, ja.base_commission_pct,
+      ja.upsell_commission_pct, ja.contract_bonus_pct, ja.tip_share_pct,
+      es.id as earning_id, es.status as earning_status, es.tip_amount, es.upsell_amount, es.contract_submission_id,
+      cs.status as contract_status
+     from job_assignments ja
+     join jobs j on j.id = ja.job_id
+     join customers c on c.id = j.customer_id
+     join user_accounts ua on ua.id = ja.employee_id
+     left join earning_submissions es on es.job_id = j.id and es.employee_id = ja.employee_id
+     left join contract_submissions cs on cs.id = es.contract_submission_id
+     where j.status = 'completed' and j.date <= $1 and coalesce(es.status, '') <> 'paid'
+     order by j.date, ua.name, c.name`,
+    [periodEnd],
+  );
+  const lines = [];
+  let missingApprovals = 0;
+  for (const row of result.rows) {
+    const candidates = [{ key: `${row.job_id}:commission`, type: "commission", description: "Job commission", amount: Number(row.original_job_price) * Number(row.base_commission_pct) }];
+    if (row.earning_id && row.earning_status === "approved") {
+      if (Number(row.upsell_amount) > 0) candidates.push({ key: `${row.job_id}:upsell`, type: "upsell", description: "Approved upsell commission", amount: Number(row.upsell_amount) * Number(row.upsell_commission_pct) });
+      if (row.contract_submission_id && row.contract_status === "approved") candidates.push({ key: `${row.job_id}:contract_bonus`, type: "contract_bonus", description: "Approved service contract bonus", amount: Number(row.original_job_price) * Number(row.contract_bonus_pct) });
+      if (Number(row.tip_amount) > 0) candidates.push({ key: `${row.job_id}:tip`, type: "tip", description: "Tip share", amount: Number(row.tip_amount) * Number(row.tip_share_pct) });
+    } else if (row.earning_id && ["pending", "draft"].includes(row.earning_status)) missingApprovals += 1;
+    for (const item of candidates.filter((item) => item.amount > 0)) {
+      const used = await db.query("select 1 from payroll_run_lines where source_key = $1", [item.key]);
+      if (used.rows[0]) continue;
+      lines.push({
+        id: item.key, sourceKey: item.key, employeeId: row.employee_id, employeeName: row.employee_name, jobId: row.job_id,
+        earningSubmissionId: row.earning_id ?? null, lineType: item.type, description: item.description,
+        customerName: row.customer_name, workDate: isoDateValue(row.work_date), amount: Math.round(item.amount * 100) / 100,
+      });
+    }
+  }
+  return { lines, missingApprovals };
+}
 
 const toCalendarEvent = (row) => ({
   id: row.id,
@@ -1913,6 +2032,8 @@ app.post("/api/owner/payouts", requireDatabase, requireOwner, async (req, res, n
   try {
     const earningIds = [...new Set(Array.isArray(req.body.earningIds) ? req.body.earningIds : [])];
     if (!earningIds.length) return res.status(400).json({ error: "Select approved earnings to pay." });
+    const payrollLinked = await client.query("select 1 from payroll_run_lines where earning_submission_id = any($1::uuid[]) limit 1", [earningIds]);
+    if (payrollLinked.rows[0]) return res.status(409).json({ error: "These earnings are already included in weekly payroll. Record payment from the Payroll tab." });
     const rows = await client.query(`${earningSelect} where es.id = any($1::uuid[]) and es.status = 'approved'`, [earningIds]);
     if (rows.rows.length !== earningIds.length) return res.status(400).json({ error: "Every selected earning must be approved and unpaid." });
     const employeeIds = new Set(rows.rows.map((row) => row.employee_id));
@@ -1933,6 +2054,152 @@ app.post("/api/owner/payouts", requireDatabase, requireOwner, async (req, res, n
   } finally {
     client.release();
   }
+});
+
+function validatePayrollDates(periodStart, periodEnd, payday) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart || "") || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd || "") || !/^\d{4}-\d{2}-\d{2}$/.test(payday || "")) return "Valid payroll dates are required.";
+  const start = new Date(`${periodStart}T12:00:00Z`);
+  const end = new Date(`${periodEnd}T12:00:00Z`);
+  if (start.getUTCDay() !== 1 || end.getUTCDay() !== 0 || Math.round((end - start) / 86400000) !== 6) return "Payroll periods must run Monday through Sunday.";
+  if (payday <= periodEnd) return "Payday must be after the pay period.";
+  return "";
+}
+
+app.get("/api/owner/payroll", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const requestedStart = String(req.query.periodStart || "");
+    const businessDateParts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const businessDate = Object.fromEntries(businessDateParts.map((part) => [part.type, part.value]));
+    const todayIso = `${businessDate.year}-${businessDate.month}-${businessDate.day}`;
+    const today = new Date(`${/^\d{4}-\d{2}-\d{2}$/.test(requestedStart) ? requestedStart : todayIso}T12:00:00Z`);
+    const day = today.getUTCDay();
+    const start = new Date(today); start.setUTCDate(today.getUTCDate() - ((day + 6) % 7));
+    const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
+    const payday = new Date(end); payday.setUTCDate(end.getUTCDate() + 5);
+    const periodStart = start.toISOString().slice(0, 10), periodEnd = end.toISOString().slice(0, 10);
+    const [runs, eligible] = await Promise.all([loadPayrollRuns(pool), eligiblePayrollLines(pool, periodEnd)]);
+    res.json({ runs, preview: { periodStart, periodEnd, payday: payday.toISOString().slice(0, 10), eligibleLines: eligible.lines, missingApprovals: eligible.missingApprovals } });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/owner/payroll", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { periodStart, periodEnd, payday } = req.body;
+    const dateError = validatePayrollDates(periodStart, periodEnd, payday);
+    if (dateError) return res.status(400).json({ error: dateError });
+    await client.query("begin");
+    const existing = await client.query("select id from payroll_runs where period_start = $1 and period_end = $2", [periodStart, periodEnd]);
+    if (existing.rows[0]) { await client.query("rollback"); return res.status(409).json({ error: "A payroll run already exists for this period." }); }
+    const eligible = await eligiblePayrollLines(client, periodEnd);
+    if (!eligible.lines.length) { await client.query("rollback"); return res.status(400).json({ error: "No unpaid completed-job earnings are available for this period." }); }
+    const run = await client.query("insert into payroll_runs (period_start, period_end, payday, created_by) values ($1, $2, $3, $4) returning id", [periodStart, periodEnd, payday, req.authUser.id]);
+    for (const line of eligible.lines) {
+      await client.query(
+        `insert into payroll_run_lines (payroll_run_id, employee_id, job_id, earning_submission_id, source_key, line_type, description, customer_name, work_date, amount)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [run.rows[0].id, line.employeeId, line.jobId, line.earningSubmissionId, line.sourceKey, line.lineType, line.description, line.customerName, line.workDate, line.amount],
+      );
+    }
+    await client.query("commit");
+    await audit(req.authUser.id, "create_payroll", "payroll", run.rows[0].id, { periodStart, periodEnd, payday, lineCount: eligible.lines.length });
+    const runs = await loadPayrollRuns(pool);
+    res.status(201).json(runs.find((item) => item.id === run.rows[0].id));
+  } catch (error) { await client.query("rollback").catch(() => undefined); next(error); } finally { client.release(); }
+});
+
+app.post("/api/owner/payroll/:id/adjustments", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const { employeeId, adjustmentType, category, description, amount } = req.body;
+    const value = Number(amount);
+    if (!employeeId || !["addition", "deduction"].includes(adjustmentType) || !["bonus", "reimbursement", "deduction", "correction", "other"].includes(category) || !description?.trim() || !Number.isFinite(value) || value <= 0) return res.status(400).json({ error: "Employee, adjustment details, and a positive amount are required." });
+    const run = await pool.query("select status from payroll_runs where id = $1", [req.params.id]);
+    if (!run.rows[0]) return res.status(404).json({ error: "Payroll run not found." });
+    if (run.rows[0].status !== "draft") return res.status(409).json({ error: "Finalized payroll runs are locked." });
+    const employee = await pool.query("select 1 from user_accounts where id = $1 and role = 'employee'", [employeeId]);
+    if (!employee.rows[0]) return res.status(400).json({ error: "Employee not found." });
+    const result = await pool.query(
+      "insert into payroll_adjustments (payroll_run_id, employee_id, adjustment_type, category, description, amount, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id",
+      [req.params.id, employeeId, adjustmentType, category, description.trim(), value, req.authUser.id],
+    );
+    await audit(req.authUser.id, "add_payroll_adjustment", "payroll", req.params.id, { adjustmentId: result.rows[0].id, employeeId, adjustmentType, category, amount: value });
+    const runs = await loadPayrollRuns(pool); res.status(201).json(runs.find((item) => item.id === req.params.id));
+  } catch (error) { next(error); }
+});
+
+app.delete("/api/owner/payroll/:runId/adjustments/:adjustmentId", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const run = await pool.query("select status from payroll_runs where id = $1", [req.params.runId]);
+    if (!run.rows[0]) return res.status(404).json({ error: "Payroll run not found." });
+    if (run.rows[0].status !== "draft") return res.status(409).json({ error: "Finalized payroll runs are locked." });
+    const result = await pool.query("delete from payroll_adjustments where id = $1 and payroll_run_id = $2 returning id", [req.params.adjustmentId, req.params.runId]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Adjustment not found." });
+    await audit(req.authUser.id, "delete_payroll_adjustment", "payroll", req.params.runId, { adjustmentId: req.params.adjustmentId });
+    const runs = await loadPayrollRuns(pool); res.json(runs.find((item) => item.id === req.params.runId));
+  } catch (error) { next(error); }
+});
+
+app.post("/api/owner/payroll/:id/finalize", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const runs = await loadPayrollRuns(pool); const run = runs.find((item) => item.id === req.params.id);
+    if (!run) return res.status(404).json({ error: "Payroll run not found." });
+    if (run.status !== "draft") return res.status(409).json({ error: "Only draft payroll can be finalized." });
+    const employeeIds = new Set([...run.lines.map((line) => line.employeeId), ...run.adjustments.map((item) => item.employeeId)]);
+    if (!employeeIds.size) return res.status(400).json({ error: "Payroll has no employee earnings." });
+    for (const employeeId of employeeIds) {
+      const totals = payrollTotals(run.lines.filter((line) => line.employeeId === employeeId), run.adjustments.filter((item) => item.employeeId === employeeId));
+      if (totals.netPay < 0) return res.status(400).json({ error: "Deductions cannot make an employee payment negative." });
+    }
+    await pool.query("update payroll_runs set status = 'finalized', finalized_by = $2, finalized_at = now(), updated_at = now() where id = $1", [req.params.id, req.authUser.id]);
+    await audit(req.authUser.id, "finalize_payroll", "payroll", req.params.id, { netPay: run.netPay });
+    const updated = await loadPayrollRuns(pool); res.json(updated.find((item) => item.id === req.params.id));
+  } catch (error) { next(error); }
+});
+
+app.post("/api/owner/payroll/:id/payments", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { employeeId, paymentMethod, reference = "", note = "", paidAt } = req.body;
+    if (!employeeId || !["bank", "check"].includes(paymentMethod) || !paidAt) return res.status(400).json({ error: "Employee, payment method, and paid date are required." });
+    const runs = await loadPayrollRuns(client); const run = runs.find((item) => item.id === req.params.id);
+    if (!run) return res.status(404).json({ error: "Payroll run not found." });
+    if (run.status !== "finalized") return res.status(409).json({ error: "Payroll must be finalized before recording payments." });
+    if (run.payments.some((payment) => payment.employeeId === employeeId)) return res.status(409).json({ error: "Payment is already recorded for this employee." });
+    const totals = payrollTotals(run.lines.filter((line) => line.employeeId === employeeId), run.adjustments.filter((item) => item.employeeId === employeeId));
+    if (totals.netPay < 0 || (!run.lines.some((line) => line.employeeId === employeeId) && !run.adjustments.some((item) => item.employeeId === employeeId))) return res.status(400).json({ error: "Employee is not included in this payroll." });
+    await client.query("begin");
+    await client.query("insert into payroll_payments (payroll_run_id, employee_id, amount, payment_method, reference, note, paid_at, recorded_by) values ($1,$2,$3,$4,$5,$6,$7,$8)", [req.params.id, employeeId, totals.netPay, paymentMethod, String(reference).trim(), String(note).trim(), paidAt, req.authUser.id]);
+    const earningIds = run.lines.filter((line) => line.employeeId === employeeId).map((line) => line.jobId).filter(Boolean);
+    if (earningIds.length) await client.query("update earning_submissions set status = 'paid', paid_at = $2, updated_at = now() where employee_id = $1 and job_id = any($3::text[]) and status = 'approved'", [employeeId, paidAt, earningIds]);
+    const people = new Set([...run.lines.map((line) => line.employeeId), ...run.adjustments.map((item) => item.employeeId)]);
+    const paymentCount = await client.query("select count(distinct employee_id)::int as count from payroll_payments where payroll_run_id = $1", [req.params.id]);
+    if (paymentCount.rows[0].count >= people.size) await client.query("update payroll_runs set status = 'paid', updated_at = now() where id = $1", [req.params.id]);
+    await client.query("commit");
+    await audit(req.authUser.id, "record_payroll_payment", "payroll", req.params.id, { employeeId, amount: totals.netPay, paymentMethod });
+    const updated = await loadPayrollRuns(pool); res.status(201).json(updated.find((item) => item.id === req.params.id));
+  } catch (error) { await client.query("rollback").catch(() => undefined); next(error); } finally { client.release(); }
+});
+
+function csvCell(value) { return `"${String(value ?? "").replaceAll('"', '""')}"`; }
+app.get("/api/owner/payroll/:id/export.csv", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const runs = await loadPayrollRuns(pool); const run = runs.find((item) => item.id === req.params.id);
+    if (!run) return res.status(404).json({ error: "Payroll run not found." });
+    const rows = [["Employee", "Work date", "Type", "Description", "Customer", "Gross addition", "Deduction"]];
+    run.lines.forEach((line) => rows.push([line.employeeName, line.workDate, line.lineType, line.description, line.customerName, line.amount.toFixed(2), ""]));
+    run.adjustments.forEach((item) => rows.push([item.employeeName, "", item.category, item.description, "", item.adjustmentType === "addition" ? item.amount.toFixed(2) : "", item.adjustmentType === "deduction" ? item.amount.toFixed(2) : ""]));
+    rows.push(["TOTAL", "", "", "", "", (run.grossEarnings + run.totalAdditions).toFixed(2), run.totalDeductions.toFixed(2)]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", `attachment; filename="payroll-${run.periodStart}.csv"`);
+    res.send(rows.map((row) => row.map(csvCell).join(",")).join("\n"));
+  } catch (error) { next(error); }
+});
+
+app.get("/api/employee/payroll", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
+  try {
+    const subject = await employeeSubject(req, res);
+    if (!subject) return;
+    res.json({ statements: await loadPayrollRuns(pool, subject.id) });
+  } catch (error) { next(error); }
 });
 
 app.use(express.static(distPath));

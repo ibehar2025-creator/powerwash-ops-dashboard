@@ -1,4 +1,4 @@
-import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, JobCreateInput, Lead, PayoutSummary, Review, ServicePlan, ServicePlanCreateInput, Solicitation } from "../types/business";
+import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, JobCreateInput, Lead, PayrollPreview, PayrollRun, PayoutSummary, Review, ServicePlan, ServicePlanCreateInput, Solicitation } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -35,6 +35,11 @@ export interface OwnerOperationsSnapshot {
   earnings: EarningSubmission[];
   contracts: ContractSubmission[];
   payouts: PayoutSummary[];
+}
+
+export interface OwnerPayrollSnapshot {
+  runs: PayrollRun[];
+  preview: PayrollPreview;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
@@ -221,4 +226,32 @@ export function reviewContract(contractId: string, decision: "approved" | "rejec
 
 export function createPayout(earningIds: string[]) {
   return request<PayoutSummary>("/api/owner/payouts", { method: "POST", body: JSON.stringify({ earningIds }) });
+}
+
+export function loadOwnerPayroll(periodStart?: string) {
+  return request<OwnerPayrollSnapshot>(`/api/owner/payroll${periodStart ? `?periodStart=${encodeURIComponent(periodStart)}` : ""}`);
+}
+
+export function createPayrollRun(input: { periodStart: string; periodEnd: string; payday: string }) {
+  return request<PayrollRun>("/api/owner/payroll", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function addPayrollAdjustment(runId: string, input: { employeeId: string; adjustmentType: "addition" | "deduction"; category: "bonus" | "reimbursement" | "deduction" | "correction" | "other"; description: string; amount: number }) {
+  return request<PayrollRun>(`/api/owner/payroll/${runId}/adjustments`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function deletePayrollAdjustment(runId: string, adjustmentId: string) {
+  return request<PayrollRun>(`/api/owner/payroll/${runId}/adjustments/${adjustmentId}`, { method: "DELETE" });
+}
+
+export function finalizePayrollRun(runId: string) {
+  return request<PayrollRun>(`/api/owner/payroll/${runId}/finalize`, { method: "POST" });
+}
+
+export function recordPayrollPayment(runId: string, input: { employeeId: string; paymentMethod: "bank" | "check"; reference: string; note: string; paidAt: string }) {
+  return request<PayrollRun>(`/api/owner/payroll/${runId}/payments`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function loadEmployeePayroll(employeeId?: string) {
+  return request<{ statements: PayrollRun[] }>(`/api/employee/payroll${employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : ""}`);
 }

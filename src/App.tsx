@@ -28,6 +28,7 @@ import {
   Trash2,
   UserRoundCog,
   X,
+  WalletCards,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
 import { useAuth } from "./lib/authContext";
@@ -36,6 +37,7 @@ import { InstallAppButton } from "./components/InstallAppButton";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { EmployeeWorkspace } from "./components/EmployeeWorkspace";
 import { OwnerContractsView, OwnerTeamView } from "./components/OwnerOperations";
+import { PayrollCenter } from "./components/PayrollCenter";
 import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
 import {
@@ -65,7 +67,7 @@ import { followUpLabel, followUpTiming } from "./lib/followUps";
 import type { CalendarEvent, CalendarEventType, Customer, Invoice, Job, JobCreateInput, Lead, LeadStatus, PaymentStatus, ServicePlan, ServicePlanCreateInput, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews" | "team" | "contracts";
+type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews" | "team" | "payroll" | "contracts";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
 type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
@@ -79,6 +81,7 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "reviews", label: "Reviews", icon: Star },
   { id: "team", label: "Team", icon: UserRoundCog },
+  { id: "payroll", label: "Payroll", icon: WalletCards },
   { id: "contracts", label: "Contracts", icon: FileSignature },
 ];
 
@@ -639,6 +642,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanCreate={addPlan} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
             {activeTab === "team" && <OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} />}
+            {activeTab === "payroll" && <PayrollCenter employees={ownerOperations.employees} />}
             {activeTab === "contracts" && <OwnerContractsView operations={ownerOperations} onRefresh={async () => { await refreshOwnerOperations(); const snapshot = await loadDatabaseSnapshot(); if (snapshot?.servicePlans) setPlans(normalizePlans(snapshot.servicePlans)); }} />}
           </div>
         </main>

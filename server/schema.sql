@@ -233,6 +233,71 @@ create table if not exists payouts (
   created_at timestamptz not null default now()
 );
 
+create table if not exists payroll_runs (
+  id uuid primary key default gen_random_uuid(),
+  period_start date not null,
+  period_end date not null,
+  payday date not null,
+  status text not null default 'draft' check (status in ('draft', 'finalized', 'paid')),
+  created_by uuid references user_accounts(id) on delete set null,
+  finalized_by uuid references user_accounts(id) on delete set null,
+  finalized_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (period_start, period_end)
+);
+
+create table if not exists payroll_run_lines (
+  id uuid primary key default gen_random_uuid(),
+  payroll_run_id uuid not null references payroll_runs(id) on delete cascade,
+  employee_id uuid not null references user_accounts(id) on delete restrict,
+  job_id text references jobs(id) on delete restrict,
+  earning_submission_id uuid references earning_submissions(id) on delete set null,
+  source_key text not null unique,
+  line_type text not null check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip')),
+  description text not null,
+  customer_name text not null default '',
+  work_date date not null,
+  amount numeric(12,2) not null check (amount >= 0),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists payroll_adjustments (
+  id uuid primary key default gen_random_uuid(),
+  payroll_run_id uuid not null references payroll_runs(id) on delete cascade,
+  employee_id uuid not null references user_accounts(id) on delete restrict,
+  adjustment_type text not null check (adjustment_type in ('addition', 'deduction')),
+  category text not null check (category in ('bonus', 'reimbursement', 'deduction', 'correction', 'other')),
+  description text not null,
+  amount numeric(12,2) not null check (amount > 0),
+  created_by uuid references user_accounts(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists payroll_payments (
+  id uuid primary key default gen_random_uuid(),
+  payroll_run_id uuid not null references payroll_runs(id) on delete restrict,
+  employee_id uuid not null references user_accounts(id) on delete restrict,
+  amount numeric(12,2) not null check (amount >= 0),
+  payment_method text not null check (payment_method in ('bank', 'check')),
+  reference text not null default '',
+  note text not null default '',
+  paid_at timestamptz not null,
+  recorded_by uuid references user_accounts(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (payroll_run_id, employee_id)
+);
+
+create index if not exists payroll_runs_status_idx on payroll_runs(status, period_start desc);
+create index if not exists payroll_lines_run_employee_idx on payroll_run_lines(payroll_run_id, employee_id);
+create index if not exists payroll_adjustments_run_employee_idx on payroll_adjustments(payroll_run_id, employee_id);
+create index if not exists payroll_payments_run_employee_idx on payroll_payments(payroll_run_id, employee_id);
+
+alter table payroll_runs enable row level security;
+alter table payroll_run_lines enable row level security;
+alter table payroll_adjustments enable row level security;
+alter table payroll_payments enable row level security;
+
 create table if not exists activity_log (
   id bigserial primary key,
   actor_id uuid references user_accounts(id) on delete set null,
@@ -306,6 +371,7 @@ begin
     'user_accounts',
     'contract_submissions',
     'earning_submissions',
+    'payroll_runs',
     'business_settings'
   ]
   loop
