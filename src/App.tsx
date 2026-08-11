@@ -686,7 +686,7 @@ function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { job
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
-        <DashboardMetric className="xl:col-span-3" label="Projected revenue" value={currency.format(metrics.projectedRevenue)} detail="Today and future jobs not yet completed" icon={BadgeDollarSign} featured />
+        <DashboardMetric className="xl:col-span-3" label="Projected revenue" value={currency.format(metrics.projectedRevenue)} detail="All past and future non-canceled jobs" icon={BadgeDollarSign} featured />
         <DashboardMetric className="xl:col-span-3" label="Completed revenue" value={currency.format(metrics.completedRevenue)} detail={`${metrics.completedJobs} completed jobs`} icon={CheckCircle2} featured />
         <DashboardMetric className="xl:col-span-3" label="Monthly revenue" value={currency.format(metrics.monthlyRevenue)} detail="Scheduled and completed this month" icon={BarChart3} />
         <DashboardMetric className="xl:col-span-3" label="Annual recurring revenue" value={currency.format(recurringRevenue)} detail={`${pricedPlans} priced plans annualized`} icon={RefreshCw} />

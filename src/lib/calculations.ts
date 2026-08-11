@@ -81,9 +81,7 @@ export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[],
   const todayJobs = revenueJobs.filter((job) => job.date === targetDate);
   const monthJobs = revenueJobs.filter((job) => job.date.startsWith(targetDate.slice(0, 7)));
   const totalRevenue = revenueJobs.reduce((sum, job) => sum + job.price, 0);
-  const projectedRevenue = revenueJobs
-    .filter((job) => job.status !== "completed" && job.date >= targetDate)
-    .reduce((sum, job) => sum + job.price, 0);
+  const projectedRevenue = totalRevenue;
   const completedRevenue = revenueJobs
     .filter((job) => job.status === "completed")
     .reduce((sum, job) => sum + job.price, 0);
