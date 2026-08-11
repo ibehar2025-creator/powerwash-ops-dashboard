@@ -50,8 +50,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T | null
 
   if (response.status === 503 || response.status === 404) return null;
   if (!response.ok) {
-    const detail = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(detail?.error ?? `API request failed: ${response.status}`);
+    const detail = await response.json().catch(() => null) as { error?: string; detail?: string } | null;
+    const message = detail?.error === "Server error" ? detail.detail : detail?.error;
+    throw new Error(message ?? `API request failed: ${response.status}`);
   }
 
   return response.json() as Promise<T>;
