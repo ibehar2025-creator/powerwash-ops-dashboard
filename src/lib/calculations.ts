@@ -81,6 +81,12 @@ export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[],
   const todayJobs = revenueJobs.filter((job) => job.date === targetDate);
   const monthJobs = revenueJobs.filter((job) => job.date.startsWith(targetDate.slice(0, 7)));
   const totalRevenue = revenueJobs.reduce((sum, job) => sum + job.price, 0);
+  const projectedRevenue = revenueJobs
+    .filter((job) => job.status !== "completed" && job.date >= targetDate)
+    .reduce((sum, job) => sum + job.price, 0);
+  const completedRevenue = revenueJobs
+    .filter((job) => job.status === "completed")
+    .reduce((sum, job) => sum + job.price, 0);
   const dailyRevenue = todayJobs.reduce((sum, job) => sum + job.price, 0);
   const monthlyRevenue = monthJobs.reduce((sum, job) => sum + job.price, 0);
   const totalTips = jobs.reduce((sum, job) => sum + job.tipAmount, 0);
@@ -93,6 +99,8 @@ export function businessMetrics(jobs: Job[], invoices: Invoice[], leads: Lead[],
   return {
     dailyRevenue,
     totalRevenue,
+    projectedRevenue,
+    completedRevenue,
     dailyPay: crew.reduce((sum, member) => sum + crewPay(member, jobs, targetDate).dailyPay, 0),
     jobsToday: todayJobs.length,
     pastDueJobs: jobs.filter((job) => jobDisplayStatus(job, targetDate) === "past due").length,
