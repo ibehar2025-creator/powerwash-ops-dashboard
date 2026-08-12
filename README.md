@@ -58,7 +58,7 @@ The app also includes the real Google Drive spreadsheet named **Powerwashing rev
 
 ## Google Sheets Sync
 
-The deployed app includes a **Sync sheets** button and a 60-second auto-sync loop. For security, the browser app does not store private Google Drive credentials directly. To make live sync work on Render, add a backend/API or Google Apps Script endpoint that returns JSON in this shape:
+The deployed app syncs Google Sheets only when an owner presses the **Sync sheets** button. It does not poll or sync in the background. For security, the browser app does not store private Google Drive credentials directly. To make live sync work on Render, add a backend/API or Google Apps Script endpoint that returns JSON in this shape:
 
 ```json
 {

@@ -48,25 +48,23 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   const [upsellJob, setUpsellJob] = useState<Job | null>(null);
   const [statements, setStatements] = useState<PayrollRun[]>([]);
 
-  const reload = useCallback(async (background = false) => {
-    if (!background) setLoading(true);
-    if (!background) setError("");
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
       const [snapshot, payroll] = await Promise.all([loadEmployeeWorkspace(), loadEmployeePayroll()]);
       if (!snapshot) throw new Error("The employee workspace is unavailable.");
       setData(snapshot);
       setStatements(payroll?.statements ?? []);
     } catch (nextError) {
-      if (!background) setError(nextError instanceof Error ? nextError.message : "Unable to load employee workspace.");
+      setError(nextError instanceof Error ? nextError.message : "Unable to load employee workspace.");
     } finally {
-      if (!background) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void reload();
-    const interval = window.setInterval(() => void reload(true), 30_000);
-    return () => window.clearInterval(interval);
   }, [reload]);
 
   const employee = data?.employee;

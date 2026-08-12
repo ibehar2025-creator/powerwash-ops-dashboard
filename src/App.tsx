@@ -69,7 +69,6 @@ import type { CalendarEvent, CalendarEventType, Customer, Invoice, Job, JobCreat
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
 type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews" | "team" | "payroll" | "contracts";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
-type SyncOptions = { background?: boolean };
 type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean }[] = [
@@ -322,19 +321,15 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
     if (result) setOwnerOperations(result);
   }, []);
 
-  const syncSheets = useCallback(async ({ background = false }: SyncOptions = {}) => {
-    const minimumManualSkeleton = background
-      ? null
-      : new Promise<void>((resolve) => window.setTimeout(resolve, calendarSkeletonDurationMs));
-    if (!background) {
-      setSyncing(true);
-      setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
-      if (calendarSkeletonTimer.current !== null) {
-        window.clearTimeout(calendarSkeletonTimer.current);
-        calendarSkeletonTimer.current = null;
-      }
-      setShowCalendarSkeleton(true);
+  const syncSheets = useCallback(async () => {
+    const minimumManualSkeleton = new Promise<void>((resolve) => window.setTimeout(resolve, calendarSkeletonDurationMs));
+    setSyncing(true);
+    setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
+    if (calendarSkeletonTimer.current !== null) {
+      window.clearTimeout(calendarSkeletonTimer.current);
+      calendarSkeletonTimer.current = null;
     }
+    setShowCalendarSkeleton(true);
     try {
       let payload = await syncSheetsToDatabase() as SyncPayload | null;
       if (!payload && syncEndpoint) {
@@ -355,11 +350,9 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : "Google Sheets sync failed.");
     } finally {
-      if (!background) {
-        await minimumManualSkeleton;
-        setSyncing(false);
-        setShowCalendarSkeleton(false);
-      }
+      await minimumManualSkeleton;
+      setSyncing(false);
+      setShowCalendarSkeleton(false);
     }
   }, [syncEndpoint]);
 
@@ -370,8 +363,6 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
 
   useEffect(() => {
     void refreshOwnerOperations();
-    const interval = window.setInterval(() => void refreshOwnerOperations(), 30_000);
-    return () => window.clearInterval(interval);
   }, [refreshOwnerOperations]);
 
   useEffect(() => {
@@ -396,13 +387,6 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
       ignore = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!syncEndpoint) return;
-    void syncSheets({ background: true });
-    const interval = window.setInterval(() => void syncSheets({ background: true }), 60_000);
-    return () => window.clearInterval(interval);
-  }, [syncEndpoint, syncSheets]);
 
   useEffect(() => () => {
     if (calendarSkeletonTimer.current !== null) window.clearTimeout(calendarSkeletonTimer.current);
