@@ -194,6 +194,20 @@ if (!response.ok) {
 }
 
 const payload = await response.json();
+
+for (const collection of ["customers", "jobs", "leads", "invoices", "servicePlans", "reviews"]) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const record of payload[collection] ?? []) {
+    if (!record?.id) continue;
+    if (seen.has(record.id)) duplicates.add(record.id);
+    seen.add(record.id);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(`Google Sheets contains duplicate ${collection} IDs: ${[...duplicates].join(", ")}`);
+  }
+}
+
 const client = await pool.connect();
 
 try {

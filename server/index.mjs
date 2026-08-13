@@ -936,7 +936,27 @@ async function upsertServicePlans(client, plans = []) {
   );
 }
 
+function assertUniqueSyncIds(payload) {
+  const collections = ["customers", "jobs", "leads", "invoices", "servicePlans", "reviews"];
+
+  for (const collection of collections) {
+    const seen = new Set();
+    const duplicates = new Set();
+
+    for (const record of payload[collection] ?? []) {
+      if (!record?.id) continue;
+      if (seen.has(record.id)) duplicates.add(record.id);
+      seen.add(record.id);
+    }
+
+    if (duplicates.size > 0) {
+      throw new Error(`Google Sheets contains duplicate ${collection} IDs: ${[...duplicates].join(", ")}`);
+    }
+  }
+}
+
 async function syncSheetsIntoDatabase(payload) {
+  assertUniqueSyncIds(payload);
   const client = await pool.connect();
   const customerIds = (payload.customers ?? []).map((customer) => customer.id);
   const jobIds = (payload.jobs ?? []).map((job) => job.id);
