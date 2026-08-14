@@ -49,6 +49,12 @@ async function ensureMapSchema() {
     set latitude = null, longitude = null
     where geocoded_address is null and (latitude is not null or longitude is not null);
 
+    update jobs
+    set amount_paid = case when status = 'completed' then price else 0 end,
+        payment_status = case when status = 'completed' then 'paid' else 'unpaid' end
+    where amount_paid is distinct from case when status = 'completed' then price else 0 end
+       or payment_status is distinct from case when status = 'completed' then 'paid' else 'unpaid' end;
+
     create table if not exists solicitations (
       id uuid primary key default gen_random_uuid(),
       address text not null,
@@ -310,7 +316,9 @@ const toLead = (row) => ({
   websiteEditedFields: Object.keys(row.website_overrides ?? {}),
 });
 
-const toJob = (row) => ({
+const toJob = (row) => {
+  const completed = row.status === "completed";
+  return ({
   id: row.id,
   date: row.date?.toISOString?.().slice(0, 10) ?? row.date,
   time: row.time,
@@ -320,9 +328,9 @@ const toJob = (row) => ({
   status: row.status,
   crewIds: row.crew_ids ?? [],
   price: Number(row.price),
-  amountPaid: Number(row.amount_paid),
+  amountPaid: completed ? Number(row.price) : 0,
   tipAmount: Number(row.tip_amount),
-  paymentStatus: row.payment_status,
+  paymentStatus: completed ? "paid" : "unpaid",
   paymentMethod: row.payment_method ?? undefined,
   notes: row.notes,
   beforePhoto: row.before_photo ?? undefined,
@@ -331,7 +339,8 @@ const toJob = (row) => ({
   latitude: row.latitude == null ? undefined : Number(row.latitude),
   longitude: row.longitude == null ? undefined : Number(row.longitude),
   websiteEditedFields: Object.keys(row.website_overrides ?? {}),
-});
+  });
+};
 
 const toInvoice = (row) => ({
   id: row.id,
@@ -769,7 +778,9 @@ async function upsertLeads(client, leads = []) {
 
 async function upsertJobs(client, jobs = []) {
   if (jobs.length === 0) return;
-  const rows = jobs.map((job) => ({
+  const rows = jobs.map((job) => {
+    const completed = job.status === "completed";
+    return ({
     id: job.id,
     date: job.date,
     time: job.time,
@@ -779,15 +790,16 @@ async function upsertJobs(client, jobs = []) {
     status: job.status ?? "scheduled",
     crew_ids: job.crewIds ?? [],
     price: job.price ?? 0,
-    amount_paid: job.amountPaid ?? 0,
+    amount_paid: completed ? (job.price ?? 0) : 0,
     tip_amount: job.tipAmount ?? 0,
-    payment_status: job.paymentStatus ?? "unpaid",
+    payment_status: completed ? "paid" : "unpaid",
     payment_method: job.paymentMethod ?? null,
     notes: job.notes ?? "",
     before_photo: job.beforePhoto ?? null,
     after_photo: job.afterPhoto ?? null,
     source: job.source ?? "spreadsheet-import",
-  }));
+    });
+  });
   await client.query(
       `insert into jobs (
          id, date, time, customer_id, address, service_type, status, crew_ids,
@@ -1251,6 +1263,8 @@ app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
       serviceType: serviceType.trim(),
       status,
       price,
+      amountPaid: status === "completed" ? Number(price) || 0 : 0,
+      paymentStatus: status === "completed" ? "paid" : "unpaid",
       notes,
     };
     if (recurrence) {
@@ -1268,9 +1282,9 @@ app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
     const overrides = { date: true, time: true, customerId: true, address: true, serviceType: true, status: true, price: true, notes: true };
     await client.query("begin");
     const result = await client.query(
-      `insert into jobs (id, date, time, customer_id, address, service_type, status, price, payment_status, notes, source, website_overrides)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, 'unpaid', $9, 'manual', $10::jsonb) returning *`,
-      [jobId, date, time, customerId, address.trim(), serviceType.trim(), status, price, notes, JSON.stringify(overrides)],
+      `insert into jobs (id, date, time, customer_id, address, service_type, status, price, amount_paid, payment_status, notes, source, website_overrides)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'manual', $12::jsonb) returning *`,
+      [jobId, date, time, customerId, address.trim(), serviceType.trim(), status, price, status === "completed" ? Number(price) || 0 : 0, status === "completed" ? "paid" : "unpaid", notes, JSON.stringify(overrides)],
     );
     let servicePlan;
     if (recurrence) {
@@ -1372,8 +1386,8 @@ app.patch("/api/leads/:id", requireDatabase, requireOwner, async (req, res, next
 
 app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next) => {
   try {
-    const { date, time, customerId, address, serviceType, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
-    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "paymentStatus", "amountPaid", "tipAmount", "price", "paymentMethod", "notes"];
+    const { date, time, customerId, address, serviceType, status, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
+    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes"];
     const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
     const existingResult = await pool.query(
       `select jobs.*, customers.name as customer_name, customers.phone as customer_phone
@@ -1387,6 +1401,11 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
       res.status(404).json({ error: "Job not found." });
       return;
     }
+
+    const completed = (status ?? existing.status) === "completed";
+    const effectivePrice = Number(price ?? existing.price);
+    const effectivePaymentStatus = completed ? "paid" : "unpaid";
+    const effectiveAmountPaid = completed ? effectivePrice : 0;
 
     if (Object.keys(overrides).length > 0) {
       let customerName = existing.customer_name ?? "Customer";
@@ -1406,9 +1425,10 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
       if (Object.hasOwn(req.body, "date") || Object.hasOwn(req.body, "time")) {
         Object.assign(sheetRow, { date: date ?? databaseDate(existing.date), time: time ?? existing.time });
       }
-      for (const field of ["address", "serviceType", "status", "paymentStatus", "amountPaid", "tipAmount", "price", "paymentMethod", "notes"]) {
+      for (const field of ["address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes"]) {
         if (Object.hasOwn(req.body, field)) sheetRow[field] = req.body[field];
       }
+      Object.assign(sheetRow, { paymentStatus: effectivePaymentStatus, amountPaid: effectiveAmountPaid });
       await runSheetAction("updateJob", sheetRow);
     }
 
@@ -1437,7 +1457,7 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
            updated_at = now()
        where id = $1
        returning *`,
-      [req.params.id, date, time, customerId, address, serviceType, status, paymentStatus, amountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides)],
+      [req.params.id, date, time, customerId, address, serviceType, status, effectivePaymentStatus, effectiveAmountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides)],
     );
     res.json(toJob(result.rows[0]));
   } catch (error) {
@@ -1722,7 +1742,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       notes: row.notes, insights: [],
     }));
     const jobs = jobsResult.rows.map((row) => ({
-      ...toJob(row), amountPaid: 0, tipAmount: 0, paymentStatus: "unpaid", paymentMethod: undefined,
+      ...toJob(row), tipAmount: 0, paymentMethod: undefined,
     }));
     res.json({
       employee: toEmployeeProfile(subject),
@@ -1764,19 +1784,24 @@ app.patch("/api/employee/jobs/:id", requireDatabase, allowEmployeeOrOwner, async
     const notes = Object.hasOwn(req.body, "notes") ? String(req.body.notes ?? "") : undefined;
     if (status !== undefined && !allowedStatuses.includes(status)) return res.status(400).json({ error: "Job status is invalid." });
     if (status === undefined && notes === undefined) return res.status(400).json({ error: "Status or notes are required." });
+    const jobPriceResult = status === "completed" ? await pool.query("select price from jobs where id = $1", [req.params.id]) : null;
+    const completedPrice = Number(jobPriceResult?.rows[0]?.price ?? 0);
     const sheetRow = { jobId: req.params.id };
     if (status !== undefined) sheetRow.status = status;
     if (notes !== undefined) sheetRow.notes = notes;
+    if (status === "completed") Object.assign(sheetRow, { paymentStatus: "paid", amountPaid: completedPrice });
     await runSheetAction("updateJob", sheetRow);
     const result = await pool.query(
       `update jobs set status = coalesce($2, status), notes = coalesce($3, notes),
+       payment_status = case when coalesce($2, status) = 'completed' then 'paid' else 'unpaid' end,
+       amount_paid = case when coalesce($2, status) = 'completed' then price else 0 end,
        website_overrides = website_overrides || $4::jsonb, updated_at = now()
        where id = $1 and date between current_date - 7 and current_date + 7 returning *`,
       [req.params.id, status, notes, JSON.stringify({ ...(status !== undefined ? { status: true } : {}), ...(notes !== undefined ? { notes: true } : {}) })],
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Job is outside the employee schedule window." });
     await audit(req.authUser.id, "employee_job_update", "job", req.params.id, { status, notesChanged: notes !== undefined });
-    res.json({ ...toJob(result.rows[0]), amountPaid: 0, tipAmount: 0, paymentStatus: "unpaid", paymentMethod: undefined });
+    res.json({ ...toJob(result.rows[0]), tipAmount: 0, paymentMethod: undefined });
   } catch (error) {
     next(error);
   }
