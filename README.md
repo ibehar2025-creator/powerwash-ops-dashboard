@@ -21,6 +21,7 @@ A full-stack React, TypeScript, Tailwind CSS, Express, and PostgreSQL dashboard 
 - Server-enforced owner and employee workspaces with separate data access
 - Employee Home, two-week Schedule, private canvassing Map, personal Earnings, and New Contract views
 - Owner Team and Contracts tabs for assignments, commission rates, approvals, contracts, and payouts
+- Owner Analytics tab with date filters, period comparisons, revenue and expense metrics, service/customer/lead breakdowns, payment exposure, and filtered CSV export
 
 ## Install The App
 

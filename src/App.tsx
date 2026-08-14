@@ -31,6 +31,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { BusinessMap } from "./components/BusinessMap";
+import { Analytics } from "./components/Analytics";
 import { useAuth } from "./lib/authContext";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { InstallAppButton } from "./components/InstallAppButton";
@@ -64,11 +65,11 @@ import {
 import { createCalendarEvent, createCustomer, createJob, createLead, createServicePlan, createSolicitation, deleteCalendarEvent, deleteJob, deleteLead, deleteSolicitation, loadDatabaseSnapshot, loadOwnerOperations, saveCalendarEventPatch, saveCustomerPatch, saveJobPatch, saveLeadPatch, saveServicePlanPatch, saveSolicitationPatch, syncSheetsToDatabase } from "./lib/api";
 import type { OwnerOperationsSnapshot } from "./lib/api";
 import { followUpLabel, followUpTiming } from "./lib/followUps";
-import type { CalendarEvent, CalendarEventType, Customer, Invoice, Job, JobCreateInput, Lead, LeadStatus, PaymentStatus, ServicePlan, ServicePlanCreateInput, Solicitation } from "./types/business";
+import type { CalendarEvent, CalendarEventType, Customer, Expense, Invoice, Job, JobCreateInput, Lead, LeadStatus, PaymentStatus, ServicePlan, ServicePlanCreateInput, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "plans" | "reviews" | "team" | "payroll" | "contracts";
-type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
+type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "analytics" | "plans" | "reviews" | "team" | "payroll" | "contracts";
+type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; expenses: Expense[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
 type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean }[] = [
@@ -77,6 +78,7 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "map", label: "Map", icon: MapPinned },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "reviews", label: "Reviews", icon: Star },
   { id: "team", label: "Team", icon: UserRoundCog },
@@ -294,6 +296,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const [jobs, setJobs] = useState<Job[]>(importedJobs.map((job) => ({ ...job, crewIds: [] })));
   const [leads, setLeads] = useState<Lead[]>(importedLeads);
   const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
+  const [savedExpenses, setSavedExpenses] = useState<Expense[]>(expenses);
   const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans));
   const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
   const [solicitations, setSolicitations] = useState<Solicitation[]>([]);
@@ -342,6 +345,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
       if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
       if (payload.leads) setLeads(payload.leads);
       if (payload.invoices) setInvoices(payload.invoices);
+      if (payload.expenses) setSavedExpenses(payload.expenses);
       if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
       if (payload.reviews) setReviews(payload.reviews);
       if (payload.solicitations) setSolicitations(payload.solicitations);
@@ -374,6 +378,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
         if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
         if (payload.leads) setLeads(payload.leads);
         if (payload.invoices) setInvoices(payload.invoices);
+        if (payload.expenses) setSavedExpenses(payload.expenses);
         if (payload.servicePlans) setPlans(normalizePlans(payload.servicePlans));
         if (payload.reviews) setReviews(payload.reviews);
         if (payload.solicitations) setSolicitations(payload.solicitations);
@@ -623,6 +628,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
             {activeTab === "jobs" && <JobsSpreadsheet customers={customers} jobs={jobs} onAddJob={() => setCreateKind("job")} onEditJob={setSelectedJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} events={calendarEvents} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} onCreateEvent={addCalendarEvent} onUpdateEvent={updateCalendarEvent} onDeleteEvent={removeCalendarEvent} />}
             {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
+            {activeTab === "analytics" && <Analytics customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} expenses={savedExpenses} currentDate={currentDate} />}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanCreate={addPlan} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
             {activeTab === "team" && <OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} />}
