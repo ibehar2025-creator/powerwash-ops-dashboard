@@ -86,8 +86,10 @@ export function Analytics({ customers, jobs, leads, invoices, plans, expenses, c
 
     const customerJobCounts = new Map<string, number>();
     filteredJobs.forEach((job) => customerJobCounts.set(job.customerId, (customerJobCounts.get(job.customerId) ?? 0) + 1));
-    const activeCustomers = [...customerJobCounts.values()];
-    const repeatRate = activeCustomers.length ? activeCustomers.filter((count) => count > 1).length / activeCustomers.length * 100 : 0;
+    const recurringCustomerIds = new Set(plans.map((plan) => plan.customerId));
+    const activeCustomerIds = new Set([...customerJobCounts.keys(), ...recurringCustomerIds]);
+    const repeatCustomers = [...activeCustomerIds].filter((customerId) => (customerJobCounts.get(customerId) ?? 0) > 1 || recurringCustomerIds.has(customerId));
+    const repeatRate = activeCustomerIds.size ? repeatCustomers.length / activeCustomerIds.size * 100 : 0;
 
     const serviceMap = new Map<string, { service: string; revenue: number; completed: number; jobs: number }>();
     filteredJobs.forEach((job) => {
@@ -138,7 +140,7 @@ export function Analytics({ customers, jobs, leads, invoices, plans, expenses, c
     const conversionRate = decidedLeads.length ? decidedLeads.filter((lead) => lead.status === "won").length / decidedLeads.length * 100 : 0;
 
     return { filteredJobs, bookedRevenue, completedRevenue, expenseTotal, paid, outstanding, completedJobs: completed.length, averageJob: completed.length ? completedRevenue / completed.length : 0, repeatRate, previousBooked, previousCompleted, services, topCustomers, trend, leadSources, conversionRate };
-  }, [customers, expenses, jobs, leads, range.end, range.start]);
+  }, [customers, expenses, jobs, leads, plans, range.end, range.start]);
 
   const pricedPlans = plans.filter((plan) => plan.price > 0);
   const annualRecurring = pricedPlans.reduce((sum, plan) => sum + plan.price * ({ monthly: 12, "3-month": 4, "4-month": 3, "6-month": 2, yearly: 1 }[plan.type] ?? 0), 0);
@@ -175,7 +177,7 @@ export function Analytics({ customers, jobs, leads, invoices, plans, expenses, c
       <AnalyticsMetric label="Recorded expenses" value={currency.format(report.expenseTotal)} detail="Expenses dated in this range" icon={ReceiptText} />
       <AnalyticsMetric label="Margin before payroll & tax" value={currency.format(report.completedRevenue - report.expenseTotal)} detail="Completed revenue minus recorded expenses" icon={Target} />
       <AnalyticsMetric label="Average completed job" value={currency.format(report.averageJob)} detail="Completed jobs in this range" icon={BriefcaseBusiness} />
-      <AnalyticsMetric label="Repeat customer rate" value={`${report.repeatRate.toFixed(1)}%`} detail="Customers with 2+ jobs in this range" icon={Users} />
+      <AnalyticsMetric label="Repeat customer rate" value={`${report.repeatRate.toFixed(1)}%`} detail="Customers with 2+ jobs or a recurring plan" icon={Users} />
     </div>
 
     <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">

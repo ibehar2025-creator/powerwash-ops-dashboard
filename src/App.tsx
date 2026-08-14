@@ -204,7 +204,11 @@ function mergeRecurringCustomers(customers: Customer[], plans: ServicePlan[]) {
   return customers
     .map((customer) => {
       const linkedPlan = plans.find((plan) => plan.customerId === customer.id);
-      return linkedPlan ? { ...customer, subscribedPlanId: linkedPlan.id } : customer;
+      if (!linkedPlan) return customer;
+      const insights = customer.insights.includes("repeat customer")
+        ? customer.insights
+        : [...customer.insights, "repeat customer" as const];
+      return { ...customer, subscribedPlanId: linkedPlan.id, insights };
     })
     .concat(recurringCustomers);
 }
