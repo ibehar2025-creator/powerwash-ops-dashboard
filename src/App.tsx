@@ -19,7 +19,6 @@ import {
   Moon,
   Pencil,
   Plus,
-  ReceiptText,
   RefreshCw,
   Save,
   Sparkles,
@@ -66,7 +65,7 @@ import { followUpLabel, followUpTiming } from "./lib/followUps";
 import type { CalendarEvent, CalendarEventType, Customer, Expense, Invoice, Job, JobCreateInput, Lead, LeadStatus, PaymentStatus, ServicePlan, ServicePlanCreateInput, Solicitation } from "./types/business";
 
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
-type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "analytics" | "plans" | "reviews" | "team" | "payroll" | "contracts";
+type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "analytics" | "plans" | "team" | "payroll" | "contracts";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; expenses: Expense[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
 type CalendarDay = { label: string; date: string };
 
@@ -78,7 +77,6 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "map", label: "Map", icon: MapPinned },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
-  { id: "reviews", label: "Reviews", icon: Star },
   { id: "team", label: "Team", icon: UserRoundCog },
   { id: "payroll", label: "Payroll", icon: WalletCards },
   { id: "contracts", label: "Contracts", icon: FileSignature },
@@ -244,18 +242,6 @@ function Section({ title, kicker, action, children }: { title: string; kicker?: 
         {action}
       </div>
       {children}
-    </Card>
-  );
-}
-
-function Stat({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: ElementType }) {
-  return (
-    <Card className="min-h-[122px]">
-      <div className="flex items-start justify-between gap-3">
-        <div><p className="text-sm text-slate-500 dark:text-slate-400">{label}</p><p className="mt-2 text-2xl font-bold text-ink dark:text-white">{value}</p></div>
-        <div className="grid h-10 w-10 place-items-center rounded-lg bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"><Icon size={20} /></div>
-      </div>
-      <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{detail}</p>
     </Card>
   );
 }
@@ -602,7 +588,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
     <div className={cx("min-h-screen w-full max-w-full overflow-x-hidden", darkMode && "dark")}>
       <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-200">
         <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:block">
-          <div className="mb-6 rounded-lg bg-ink p-4 text-white"><p className="text-sm text-cyan-100">The</p><h1 className="text-xl font-bold">Powerwashing Pros</h1><p className="mt-2 text-xs text-slate-300">Daily control center for jobs, reviews, and growth.</p></div>
+          <div className="mb-6 rounded-lg bg-ink p-4 text-white"><p className="text-sm text-cyan-100">The</p><h1 className="text-xl font-bold">Powerwashing Pros</h1><p className="mt-2 text-xs text-slate-300">Daily control center for jobs, scheduling, and growth.</p></div>
           <nav className="space-y-1">{tabs.filter((tab) => !tab.mobileOnly).map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`desktop-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}</nav>
           <button type="button" className="nav-item mt-5 border-t border-slate-200 pt-5 dark:border-slate-700" onClick={onPreviewEmployee}><UserRoundCog size={18} /><span>Preview employee</span></button>
         </aside>
@@ -638,7 +624,6 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
             {activeTab === "map" && <Suspense fallback={<TabLoader label="map" />}><BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} /></Suspense>}
             {activeTab === "analytics" && <Suspense fallback={<TabLoader label="analytics" />}><Analytics customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} expenses={savedExpenses} currentDate={currentDate} /></Suspense>}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanCreate={addPlan} onPlanUpdate={updatePlan} />}
-            {activeTab === "reviews" && <Reviews reviews={reviews} />}
             {activeTab === "team" && <OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} />}
             {activeTab === "payroll" && <PayrollCenter employees={ownerOperations.employees} />}
             {activeTab === "contracts" && <OwnerContractsView operations={ownerOperations} onRefresh={async () => { await refreshOwnerOperations(); const snapshot = await loadDatabaseSnapshot(); if (snapshot?.servicePlans) setPlans(normalizePlans(snapshot.servicePlans)); }} />}
@@ -917,11 +902,6 @@ function ServicePlanCreateModal({ customers, onCreate, onClose }: { customers: C
   }
 
   return <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-3 sm:p-4"><form onSubmit={submit} className="max-h-[94vh] w-full max-w-xl overflow-auto rounded-lg bg-white p-5 shadow-soft dark:bg-slate-900"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">New recurring customer</p><h3 className="text-xl font-bold text-ink dark:text-white">Add service plan</h3><p className="mt-1 text-xs text-slate-500">Saves to Supabase and the Recurring Jobs spreadsheet.</p></div><button type="button" className="icon-button shrink-0" onClick={onClose} title="Close" aria-label="Close service plan form"><X size={17} /></button></div><div className="settings-grid mt-5"><Field label="Customer"><select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="" disabled>Select customer</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field><Field label="Frequency"><select value={type} onChange={(event) => setType(event.target.value as ServicePlan["type"])}>{planTypes.map((planType) => <option key={planType} value={planType}>{planType}</option>)}</select></Field><Field label="Next service date"><input required type="date" value={renewalDate} onChange={(event) => setRenewalDate(event.target.value)} /></Field><Field label="Plan price"><input required type="number" min="0" step="0.01" inputMode="decimal" value={price} placeholder="0.00" onChange={(event) => setPrice(event.target.value)} /></Field><Field label="Service"><input required value={service} placeholder="Full property" onChange={(event) => setService(event.target.value)} /></Field><Field label="Payment status"><select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>{(["paid", "unpaid", "partially paid", "past due"] as PaymentStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}</select></Field><label className="sm:col-span-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} placeholder="Plan details or customer preferences" onChange={(event) => setNotes(event.target.value)} /></label></div>{!customers.length && <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">Create a customer from Jobs first, then return here to add their plan.</p>}{error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}<div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="text-button" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="primary-button gap-2" disabled={saving || !customers.length}><Save size={16} />{saving ? "Saving..." : "Add service plan"}</button></div></form></div>;
-}
-
-function Reviews({ reviews }: { reviews: ReviewRow[] }) {
-  const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
-  return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-3"><Stat label="Average rating" value={`${average.toFixed(1)} / 5`} detail="Powerwashing reviews sheet" icon={Star} /><Stat label="Reviews imported" value={`${reviews.length}`} detail="Synced review rows" icon={ReceiptText} /><Stat label="Five-star reviews" value={`${reviews.filter((review) => review.rating === 5).length}`} detail="Ready for follow-up" icon={CheckCircle2} /></div><Section title="Power Washing Reviews" kicker="Imported from Google Drive spreadsheet"><div className="grid gap-3 lg:grid-cols-2">{reviews.map((review) => <article key={review.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-800"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-ink dark:text-white">{review.name}</h3><p className="text-xs text-slate-500">{new Date(review.submittedAt).toLocaleDateString()}</p></div><span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{review.rating} stars</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{review.review}</p></article>)}</div></Section></div>;
 }
 
 function sourceSpreadsheetRowUrl(job: Job) {
