@@ -311,6 +311,14 @@ create table if not exists activity_log (
 create index if not exists job_assignments_employee_idx on job_assignments(employee_id);
 create index if not exists contract_submissions_status_idx on contract_submissions(status, created_at desc);
 create index if not exists earning_submissions_employee_idx on earning_submissions(employee_id, status);
+create index if not exists jobs_customer_idx on jobs(customer_id);
+create index if not exists invoices_customer_idx on invoices(customer_id);
+create index if not exists invoices_job_idx on invoices(job_id);
+create index if not exists service_plans_customer_idx on service_plans(customer_id);
+create index if not exists activity_log_actor_idx on activity_log(actor_id);
+create index if not exists contract_submissions_employee_idx on contract_submissions(employee_id);
+create index if not exists contract_submissions_job_idx on contract_submissions(job_id);
+create index if not exists solicitations_created_by_idx on solicitations(created_by);
 
 create table if not exists auth_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -321,6 +329,7 @@ create table if not exists auth_sessions (
 );
 
 create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
+create index if not exists auth_sessions_user_idx on auth_sessions(user_id);
 
 create table if not exists notification_reads (
   user_id uuid not null references user_accounts(id) on delete cascade,
@@ -351,7 +360,7 @@ begin
   new.updated_at = now();
   return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql set search_path = public;
 
 do $$
 declare

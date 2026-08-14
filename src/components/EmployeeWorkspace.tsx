@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ClipboardPlus, DollarSign, Home, LogOut, MapPinned, Menu, Moon, Navigation, Phone, Save, Sparkles, Sun, X } from "lucide-react";
-import { BusinessMap } from "./BusinessMap";
 import { InstallAppButton } from "./InstallAppButton";
 import { EmployeeContractFlow } from "./EmployeeContractFlow";
 import { EmployeePayrollStatements } from "./EmployeePayrollStatements";
@@ -20,6 +19,7 @@ const tabs: Array<{ id: EmployeeTab; label: string; icon: typeof Home }> = [
   { id: "contract", label: "New Contract", icon: ClipboardPlus },
 ];
 const statuses: JobStatus[] = ["scheduled", "in progress", "completed", "canceled", "past due"];
+const BusinessMap = lazy(() => import("./BusinessMap").then((module) => ({ default: module.BusinessMap })));
 
 function EmployeeThemeSwitch({ darkMode, onToggle }: { darkMode: boolean; onToggle: () => void }) {
   return <button type="button" className="icon-button" onClick={onToggle} aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} title={darkMode ? "Light mode" : "Dark mode"}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</button>;
@@ -104,7 +104,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
       : data ? <>
         {activeTab === "home" && <EmployeeHome data={data} jobsToday={jobsToday} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "schedule" && <EmployeeSchedule data={data} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
-        {activeTab === "map" && <BusinessMap customers={data.customers} jobs={data.jobs} solicitations={data.solicitations} onSaveJobCoordinates={async () => undefined} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
+        {activeTab === "map" && <Suspense fallback={<div className="grid min-h-80 place-items-center rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-900">Loading map...</div>}><BusinessMap customers={data.customers} jobs={data.jobs} solicitations={data.solicitations} onSaveJobCoordinates={async () => undefined} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} /></Suspense>}
         {activeTab === "earnings" && <><EmployeePayrollStatements statements={statements} /><div className="mt-5"><EmployeeEarnings earnings={data.earnings} payouts={data.payouts} jobs={assignedJobs} customerMap={customerMap} onSubmit={setEarningsJob} /></div></>}
         {activeTab === "contract" && <EmployeeContractFlow employeeId={preview ? employee?.id : undefined} onSubmitted={() => setActiveTab("home")} />}
       </> : null;

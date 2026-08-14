@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, FormEvent, ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
@@ -30,8 +30,6 @@ import {
   X,
   WalletCards,
 } from "lucide-react";
-import { BusinessMap } from "./components/BusinessMap";
-import { Analytics } from "./components/Analytics";
 import { useAuth } from "./lib/authContext";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { InstallAppButton } from "./components/InstallAppButton";
@@ -95,6 +93,12 @@ const dayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
 const fullDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 const calendarSkeletonDurationMs = 1_500;
+const BusinessMap = lazy(() => import("./components/BusinessMap").then((module) => ({ default: module.BusinessMap })));
+const Analytics = lazy(() => import("./components/Analytics").then((module) => ({ default: module.Analytics })));
+
+function TabLoader({ label }: { label: string }) {
+  return <div className="grid min-h-80 place-items-center rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"><div className="text-center"><RefreshCw className="mx-auto animate-spin text-lagoon" size={24} /><p className="mt-3 text-sm font-medium text-slate-500">Loading {label}...</p></div></div>;
+}
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -627,8 +631,8 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
             {activeTab === "leads" && <Leads leads={leads} currentDate={currentDate} onLeadClick={setSelectedLead} />}
             {activeTab === "jobs" && <JobsSpreadsheet customers={customers} jobs={jobs} onAddJob={() => setCreateKind("job")} onEditJob={setSelectedJob} />}
             {activeTab === "calendar" && <Calendar customers={customers} jobs={jobs} events={calendarEvents} currentDate={currentDate} loading={showCalendarSkeleton} onJobClick={setSelectedJob} onCreateEvent={addCalendarEvent} onUpdateEvent={updateCalendarEvent} onDeleteEvent={removeCalendarEvent} />}
-            {activeTab === "map" && <BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} />}
-            {activeTab === "analytics" && <Analytics customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} expenses={savedExpenses} currentDate={currentDate} />}
+            {activeTab === "map" && <Suspense fallback={<TabLoader label="map" />}><BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} /></Suspense>}
+            {activeTab === "analytics" && <Suspense fallback={<TabLoader label="analytics" />}><Analytics customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} expenses={savedExpenses} currentDate={currentDate} /></Suspense>}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanCreate={addPlan} onPlanUpdate={updatePlan} />}
             {activeTab === "reviews" && <Reviews reviews={reviews} />}
             {activeTab === "team" && <OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} />}

@@ -49,9 +49,6 @@ async function ensureMapSchema() {
     set latitude = null, longitude = null
     where geocoded_address is null and (latitude is not null or longitude is not null);
 
-    delete from jobs where id = 'manual-job-919ceff4-f534-422a-9d7b-d2eadcbeb2b5';
-    delete from customers where id = 'manual-customer-eed7d291-ad25-4d10-a330-a918df033120';
-
     create table if not exists solicitations (
       id uuid primary key default gen_random_uuid(),
       address text not null,
@@ -245,6 +242,15 @@ async function ensureMapSchema() {
     create index if not exists job_assignments_employee_idx on job_assignments(employee_id);
     create index if not exists contract_submissions_status_idx on contract_submissions(status, created_at desc);
     create index if not exists earning_submissions_employee_idx on earning_submissions(employee_id, status);
+    create index if not exists jobs_customer_idx on jobs(customer_id);
+    create index if not exists invoices_customer_idx on invoices(customer_id);
+    create index if not exists invoices_job_idx on invoices(job_id);
+    create index if not exists service_plans_customer_idx on service_plans(customer_id);
+    create index if not exists auth_sessions_user_idx on auth_sessions(user_id);
+    create index if not exists activity_log_actor_idx on activity_log(actor_id);
+    create index if not exists contract_submissions_employee_idx on contract_submissions(employee_id);
+    create index if not exists contract_submissions_job_idx on contract_submissions(job_id);
+    create index if not exists solicitations_created_by_idx on solicitations(created_by);
 
     insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
     select
@@ -1507,14 +1513,18 @@ app.delete("/api/solicitations/:id", requireDatabase, allowEmployeeOrOwner, asyn
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const removedLeadId = solicitationLeadId(req.params.id);
-    await client.query("delete from leads where id = $1 and source = 'Map solicitation'", [removedLeadId]);
     const result = await client.query(
       "delete from solicitations where id = $1 and ($2::boolean or created_by = $3) returning id",
       [req.params.id, req.authUser.role === "owner", req.authUser.id],
     );
+    if (!result.rows[0]) {
+      await client.query("rollback");
+      return res.status(404).json({ error: "Solicitation not found." });
+    }
+    const removedLeadId = solicitationLeadId(req.params.id);
+    await client.query("delete from leads where id = $1 and source = 'Map solicitation'", [removedLeadId]);
     await client.query("commit");
-    res.json({ deleted: Boolean(result.rows[0]), removedLeadId });
+    res.json({ deleted: true, removedLeadId });
   } catch (error) {
     await client.query("rollback");
     next(error);
@@ -1582,6 +1592,7 @@ app.patch("/api/invoices/:id", requireDatabase, requireOwner, async (req, res, n
        returning *`,
       [req.params.id, status, amountPaid, paymentMethod, price, discount, tip, serviceDescription],
     );
+    if (!result.rows[0]) return res.status(404).json({ error: "Invoice not found." });
     res.json(toInvoice(result.rows[0]));
   } catch (error) {
     next(error);
@@ -1642,6 +1653,7 @@ app.patch("/api/service-plans/:id", requireDatabase, requireOwner, async (req, r
        returning *`,
       [req.params.id, type, customerId, discountPct, renewalDate, servicesIncluded, price, paymentStatus, notes],
     );
+    if (!result.rows[0]) return res.status(404).json({ error: "Service plan not found." });
     res.json(toServicePlan(result.rows[0]));
   } catch (error) {
     next(error);
@@ -1683,8 +1695,11 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
     const subject = await employeeSubject(req);
     const jobsResult = await pool.query(
       `select jobs.* from jobs
-       where jobs.date between current_date - 7 and current_date + 7
+       join job_assignments on job_assignments.job_id = jobs.id
+       where job_assignments.employee_id = $1
+         and jobs.date between current_date - 7 and current_date + 7
        order by jobs.date asc, jobs.time asc`,
+      [subject.id],
     );
     const customerIds = [...new Set(jobsResult.rows.map((row) => row.customer_id))];
     const [customersResult, assignmentsResult, earningsResult, solicitationsResult, payoutsResult] = await Promise.all([
@@ -1731,7 +1746,18 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
 app.patch("/api/employee/jobs/:id", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
   try {
     const subject = await employeeSubject(req);
-    const assignment = await pool.query("select 1 from job_assignments where job_id = $1 and employee_id = $2", [req.params.id, subject.id]);
+    const scheduledJob = await pool.query(
+      "select 1 from jobs where id = $1 and date between current_date - 7 and current_date + 7",
+      [req.params.id],
+    );
+    if (!scheduledJob.rows[0]) return res.status(404).json({ error: "Job is outside the employee schedule window." });
+    const assignment = await pool.query(
+      `select 1 from job_assignments
+       join jobs on jobs.id = job_assignments.job_id
+       where job_assignments.job_id = $1 and job_assignments.employee_id = $2
+         and jobs.date between current_date - 7 and current_date + 7`,
+      [req.params.id, subject.id],
+    );
     if (!assignment.rows[0] && req.authUser.role !== "owner") return res.status(403).json({ error: "This job is not assigned to you." });
     const allowedStatuses = ["scheduled", "in progress", "completed", "canceled", "past due"];
     const status = Object.hasOwn(req.body, "status") ? req.body.status : undefined;
