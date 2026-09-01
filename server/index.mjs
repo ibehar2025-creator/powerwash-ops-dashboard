@@ -1465,7 +1465,7 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
   }
 });
 
-app.post("/api/solicitations", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
+app.post("/api/solicitations", requireDatabase, requireOwner, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { address, latitude, longitude, solicitedDate, outcome, followUpDate, notes } = req.body;
@@ -1493,7 +1493,7 @@ app.post("/api/solicitations", requireDatabase, allowEmployeeOrOwner, async (req
   }
 });
 
-app.patch("/api/solicitations/:id", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
+app.patch("/api/solicitations/:id", requireDatabase, requireOwner, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { address, latitude, longitude, solicitedDate, outcome, followUpDate, notes } = req.body;
@@ -1529,7 +1529,7 @@ app.patch("/api/solicitations/:id", requireDatabase, allowEmployeeOrOwner, async
   }
 });
 
-app.delete("/api/solicitations/:id", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
+app.delete("/api/solicitations/:id", requireDatabase, requireOwner, async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -1722,7 +1722,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       [subject.id],
     );
     const customerIds = [...new Set(jobsResult.rows.map((row) => row.customer_id))];
-    const [customersResult, assignmentsResult, earningsResult, solicitationsResult, payoutsResult] = await Promise.all([
+    const [customersResult, assignmentsResult, earningsResult, payoutsResult] = await Promise.all([
       customerIds.length
         ? pool.query("select id, name, phone, address, notes from customers where id = any($1::text[]) order by name", [customerIds])
         : Promise.resolve({ rows: [] }),
@@ -1734,7 +1734,6 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
         [subject.id],
       ),
       pool.query(`${earningSelect} where es.employee_id = $1 order by jobs.date desc`, [subject.id]),
-      pool.query("select * from solicitations where created_by = $1 order by solicited_date desc, created_at desc", [subject.id]),
       pool.query("select payouts.*, ua.name as employee_name from payouts join user_accounts ua on ua.id = payouts.employee_id where payouts.employee_id = $1 order by paid_at desc", [subject.id]),
     ]);
     const customers = customersResult.rows.map((row) => ({
@@ -1751,7 +1750,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       jobs,
       assignments: assignmentsResult.rows.map(toAssignment),
       earnings: earningsResult.rows.map(toEarning),
-      solicitations: solicitationsResult.rows.map(toSolicitation),
+      solicitations: [],
       payouts: payoutsResult.rows.map((row) => ({
         id: row.id, employeeId: row.employee_id, employeeName: row.employee_name,
         amount: Number(row.amount), paidAt: row.paid_at?.toISOString?.() ?? row.paid_at,
