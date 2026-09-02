@@ -149,7 +149,7 @@ function EmployeeSchedule({ jobs, customerMap, onJob }: { jobs: Job[]; customerM
         const isToday = date === isoToday();
         return <article key={date} className={`min-h-72 rounded-xl border bg-slate-50/70 p-4 dark:bg-slate-950/40 ${isToday ? "border-lagoon ring-2 ring-lagoon/10" : "border-slate-200 dark:border-slate-700"}`}>
           <div className="flex items-baseline justify-between gap-2">
-            <h4 className="text-lg font-bold text-ink dark:text-white">{formatScheduleDate(date, { weekday: "short", day: "numeric" })}</h4>
+            <h4 className="text-lg font-bold text-ink dark:text-white">{formatScheduleDate(date, { weekday: "short" })} {Number(date.slice(8))}</h4>
             <span className="text-sm text-slate-500">{date.slice(5)}</span>
           </div>
           <div className="mt-4 space-y-3">
