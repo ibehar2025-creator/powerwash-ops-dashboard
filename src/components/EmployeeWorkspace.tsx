@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, DollarSign, Home, LogOut, MapPinned, Menu, Moon, Navigation, Phone, Save, Sparkles, Sun, X } from "lucide-react";
+import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, DollarSign, Home, LogOut, MapPinned, Menu, Moon, Navigation, Phone, Save, Sparkles, Sun, X } from "lucide-react";
 import { InstallAppButton } from "./InstallAppButton";
 import { EmployeePayrollStatements } from "./EmployeePayrollStatements";
 import { loadEmployeePayroll, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, submitEmployeeEarnings, submitEmployeeUpsell } from "../lib/api";
@@ -120,9 +120,55 @@ function MiniMetric({ label, value, detail, icon: Icon }: { label: string; value
 }
 
 function EmployeeSchedule({ jobs, customerMap, onJob }: { jobs: Job[]; customerMap: Map<string, EmployeeWorkspaceSnapshot["customers"][number]>; onJob: (job: Job) => void }) {
+  const [weekOffset, setWeekOffset] = useState(0);
   const jobsByDate = useMemo(() => { const result = new Map<string, Job[]>(); jobs.forEach((job) => result.set(job.date, [...(result.get(job.date) ?? []), job].sort((a, b) => a.time.localeCompare(b.time)))); return result; }, [jobs]);
-  const dates = useMemo(() => Array.from({ length: 15 }, (_, index) => addDay(isoToday(), index - 7)), []);
-  return <div className="space-y-4"><h2 className="text-2xl font-bold text-ink dark:text-white">Your schedule</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">{dates.map((date) => { const dayJobs = jobsByDate.get(date) ?? []; const isToday = date === isoToday(); return <section key={date} className={`min-h-44 rounded-lg border bg-white p-3 dark:bg-slate-900 ${isToday ? "border-lagoon ring-2 ring-lagoon/15" : "border-slate-200 dark:border-slate-800"}`}><div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800"><div><p className="text-xs font-semibold uppercase text-slate-400">{new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" })}</p><h3 className="font-semibold text-ink dark:text-white">{new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</h3></div>{isToday && <span className="rounded-md bg-mist px-2 py-1 text-[10px] font-semibold text-lagoon">Today</span>}</div><div className="mt-3 space-y-2">{dayJobs.map((job) => { const customer = customerMap.get(job.customerId); return <button key={job.id} className="w-full rounded-lg border border-slate-200 p-2 text-left hover:border-lagoon dark:border-slate-700" onClick={() => onJob(job)}><strong className="block text-sm text-ink dark:text-white">{job.time} · {customer?.name ?? "Customer"}</strong><p className="mt-1 truncate text-xs text-slate-500">{job.address}</p><span className={`mt-2 inline-block rounded-md px-2 py-1 text-[10px] font-semibold ${statusStyle(job.status)}`}>{job.status}</span></button>; })}{!dayJobs.length && <p className="py-5 text-center text-xs text-slate-400">No assigned jobs</p>}</div></section>; })}</div></div>;
+  const currentWeekStart = useMemo(() => startOfWeek(isoToday()), []);
+  const weekStart = addDay(currentWeekStart, weekOffset * 7);
+  const dates = useMemo(() => Array.from({ length: 7 }, (_, index) => addDay(weekStart, index)), [weekStart]);
+  const weekEnd = dates[6];
+  const weekJobs = dates.reduce((total, date) => total + (jobsByDate.get(date)?.length ?? 0), 0);
+  const rangeLabel = `${formatScheduleDate(weekStart, { month: "short", day: "numeric", year: "numeric" })} - ${formatScheduleDate(weekEnd, { month: "short", day: "numeric", year: "numeric" })}`;
+
+  return <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon">Assigned work</p><h2 className="text-2xl font-bold text-ink dark:text-white">Your schedule</h2></div>
+      <div className="flex items-center gap-2 self-start lg:self-auto">
+        <button type="button" className="icon-button h-12 w-12" onClick={() => setWeekOffset((value) => value - 1)} title="Previous week" aria-label="Previous week"><ChevronLeft size={20} /></button>
+        <button type="button" className="text-button min-h-12 px-5" onClick={() => setWeekOffset(0)}>Today</button>
+        <button type="button" className="icon-button h-12 w-12" onClick={() => setWeekOffset((value) => value + 1)} title="Next week" aria-label="Next week"><ChevronRight size={20} /></button>
+        <span className="hidden min-h-12 items-center rounded-lg bg-lagoon px-5 text-sm font-semibold text-white sm:inline-flex">Week</span>
+      </div>
+    </div>
+    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <h3 className="text-xl font-bold text-ink dark:text-white">{rangeLabel}</h3>
+      <p className="text-sm text-slate-500">{weekJobs} assigned {weekJobs === 1 ? "job" : "jobs"}</p>
+    </div>
+    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      {dates.map((date) => {
+        const dayJobs = jobsByDate.get(date) ?? [];
+        const isToday = date === isoToday();
+        return <article key={date} className={`min-h-72 rounded-xl border bg-slate-50/70 p-4 dark:bg-slate-950/40 ${isToday ? "border-lagoon ring-2 ring-lagoon/10" : "border-slate-200 dark:border-slate-700"}`}>
+          <div className="flex items-baseline justify-between gap-2">
+            <h4 className="text-lg font-bold text-ink dark:text-white">{formatScheduleDate(date, { weekday: "short", day: "numeric" })}</h4>
+            <span className="text-sm text-slate-500">{date.slice(5)}</span>
+          </div>
+          <div className="mt-4 space-y-3">
+            {dayJobs.map((job) => {
+              const customer = customerMap.get(job.customerId);
+              return <button key={job.id} className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-lagoon hover:shadow-sm dark:border-slate-700 dark:bg-slate-900" onClick={() => onJob(job)}>
+                <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{job.time}</span>
+                <strong className="mt-1 block text-base text-ink dark:text-white">{customer?.name ?? "Customer"}</strong>
+                <span className="mt-1 block text-sm text-slate-600 dark:text-slate-400">{job.address}</span>
+                <span className="mt-1 block text-sm text-slate-600 dark:text-slate-400">{job.serviceType}</span>
+                <span className={`mt-2 inline-block rounded-md px-2 py-1 text-xs font-semibold capitalize ${statusStyle(job.status)}`}>{job.status}</span>
+              </button>;
+            })}
+            {!dayJobs.length && <div className="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-base text-slate-500 dark:border-slate-700 dark:text-slate-400">Nothing<br />scheduled</div>}
+          </div>
+        </article>;
+      })}
+    </div>
+  </section>;
 }
 
 function EmployeeEarnings({ earnings, payouts, jobs, customerMap, onSubmit }: { earnings: EarningSubmission[]; payouts: EmployeeWorkspaceSnapshot["payouts"]; jobs: Job[]; customerMap: Map<string, EmployeeWorkspaceSnapshot["customers"][number]>; onSubmit: (job: Job) => void }) {
@@ -194,3 +240,5 @@ function EmployeeNotifications({ data, statements, assignmentMap }: { data: Empl
 }
 
 function addDay(date: string, days: number) { const value = new Date(`${date}T12:00:00`); value.setDate(value.getDate() + days); return value.toISOString().slice(0, 10); }
+function startOfWeek(date: string) { const value = new Date(`${date}T12:00:00`); const daysFromMonday = (value.getDay() + 6) % 7; value.setDate(value.getDate() - daysFromMonday); return value.toISOString().slice(0, 10); }
+function formatScheduleDate(date: string, options: Intl.DateTimeFormatOptions) { return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, options); }
