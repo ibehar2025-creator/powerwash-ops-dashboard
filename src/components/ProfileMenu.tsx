@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BadgePercent, Building2, ChevronDown, CircleHelp, LogOut, Monitor, Moon, Save, Send, Sun, UserRound, X } from "lucide-react";
+import { BadgePercent, Building2, ChevronDown, CircleHelp, Clipboard, LogOut, Monitor, Moon, Save, Send, Sun, UserRound, X } from "lucide-react";
 import { useAuth } from "../lib/authContext";
 import { submitManagerIssue } from "../lib/api";
 import type { ThemePreference } from "../lib/themePreference";
