@@ -1,6 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, DollarSign, Home, MapPinned, Menu, Navigation, Phone, Save, Sparkles, X } from "lucide-react";
+import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, DollarSign, Home, MapPinned, Menu, Navigation, Phone, RefreshCw, Save, Sparkles, X } from "lucide-react";
 import { ProfileMenu } from "./ProfileMenu";
 import { EmployeePayrollStatements } from "./EmployeePayrollStatements";
 import { loadEmployeePayroll, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, submitEmployeeEarnings } from "../lib/api";
@@ -20,6 +20,7 @@ const tabs: Array<{ id: EmployeeTab; label: string; icon: typeof Home }> = [
 const statuses: JobStatus[] = ["scheduled", "in progress", "completed", "canceled", "past due"];
 const employeeInputClass = "mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-3 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white";
 const employeeTextareaClass = `${employeeInputClass} min-h-28 resize-y`;
+const employeeRefreshCooldownMs = 60_000;
 const BusinessMap = lazy(() => import("./BusinessMap").then((module) => ({ default: module.BusinessMap })));
 
 function moneyTotal(items: EarningSubmission[], statusesToInclude: EarningSubmission["status"][]) {
@@ -39,30 +40,53 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   const [menuOpen, setMenuOpen] = useState(false);
   const [themePreference, setThemePreference] = useState(() => loadThemePreference(user.id));
   const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference(user.id)));
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [initialError, setInitialError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [earningsJob, setEarningsJob] = useState<Job | null>(null);
   const [statements, setStatements] = useState<PayrollRun[]>([]);
+  const activeRefresh = useRef<Promise<void> | null>(null);
+  const lastRefreshAttemptAt = useRef(0);
+  const hasWorkspaceData = useRef(false);
+  const mounted = useRef(true);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [snapshot, payroll] = await Promise.all([loadEmployeeWorkspace(), loadEmployeePayroll()]);
+  const refreshWorkspace = useCallback((options: { initial?: boolean; force?: boolean } = {}) => {
+    if (activeRefresh.current) return activeRefresh.current;
+    const now = Date.now();
+    if (!options.initial && !options.force && now - lastRefreshAttemptAt.current < employeeRefreshCooldownMs) return Promise.resolve();
+    lastRefreshAttemptAt.current = now;
+    if (options.initial) setInitialLoading(true);
+    else setRefreshing(true);
+    setRefreshError("");
+    if (options.initial) setInitialError("");
+    const request = Promise.all([loadEmployeeWorkspace(), loadEmployeePayroll()]).then(([snapshot, payroll]) => {
       if (!snapshot) throw new Error("The employee workspace is unavailable.");
+      if (!mounted.current) return;
       setData(snapshot);
       setStatements(payroll?.statements ?? []);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Unable to load employee workspace.");
-    } finally {
-      setLoading(false);
-    }
+      hasWorkspaceData.current = true;
+    }).catch((nextError) => {
+      if (!mounted.current) return;
+      const message = nextError instanceof Error ? nextError.message : "Unable to refresh employee workspace.";
+      if (hasWorkspaceData.current) setRefreshError(message);
+      else setInitialError(message);
+    }).finally(() => {
+      activeRefresh.current = null;
+      if (!mounted.current) return;
+      setInitialLoading(false);
+      setRefreshing(false);
+    });
+    activeRefresh.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    mounted.current = true;
+    void refreshWorkspace({ initial: true, force: true });
+    return () => { mounted.current = false; };
+  }, [refreshWorkspace]);
 
   useEffect(() => {
     saveThemePreference(user.id, themePreference);
@@ -74,7 +98,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   }, [themePreference, user.id]);
 
   useEffect(() => {
-    const refresh = () => void reload();
+    const refresh = () => void refreshWorkspace();
     const interval = window.setInterval(refresh, 30 * 60_000);
     const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("focus", refresh);
@@ -84,7 +108,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [reload]);
+  }, [refreshWorkspace]);
 
   const employee = data?.employee;
   const assignmentMap = useMemo(() => new Map((data?.assignments ?? []).map((assignment) => [assignment.jobId, assignment])), [data?.assignments]);
@@ -100,8 +124,8 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
     setSelectedJob(null);
   }
 
-  const content = loading ? <div className="grid min-h-[420px] place-items-center"><p className="text-sm font-semibold text-slate-500">Loading your workspace...</p></div>
-    : error ? <div className="rounded-lg border border-rose-200 bg-rose-50 p-5 text-rose-700"><p className="font-semibold">Employee workspace could not load</p><p className="mt-1 text-sm">{error}</p><button className="text-button mt-4" onClick={() => void reload()}>Try again</button></div>
+  const content = initialLoading ? <div className="grid min-h-[420px] place-items-center"><p className="text-sm font-semibold text-slate-500">Loading your workspace...</p></div>
+    : initialError ? <div className="rounded-lg border border-rose-200 bg-rose-50 p-5 text-rose-700"><p className="font-semibold">Employee workspace could not load</p><p className="mt-1 text-sm">{initialError}</p><button className="text-button mt-4" onClick={() => void refreshWorkspace({ initial: true, force: true })}>Try again</button></div>
       : data ? <>
         {activeTab === "home" && <EmployeeHome data={data} jobsToday={jobsToday} assignmentMap={assignmentMap} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "schedule" && <EmployeeSchedule jobs={assignedJobs} customerMap={customerMap} onJob={setSelectedJob} />}
@@ -116,8 +140,8 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
     </aside>
     <main className="min-w-0 flex-1 overflow-x-hidden">
       {preview && <div className="employee-preview-banner flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900"><span>Owner preview: employee workspace</span><button className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1" onClick={onExitPreview}>Return to owner</button></div>}
-      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2"><EmployeeNotifications data={data} statements={statements} assignmentMap={assignmentMap} /><ProfileMenu theme={themePreference} onTheme={setThemePreference} employee={employee} preview={preview} /></div></div></header>
-      <div className="p-4 sm:p-6">{content}</div>
+      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2">{refreshing && <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2 py-2 text-[11px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300"><RefreshCw className="animate-spin" size={13} />Updating...</span>}<EmployeeNotifications data={data} statements={statements} assignmentMap={assignmentMap} /><ProfileMenu theme={themePreference} onTheme={setThemePreference} employee={employee} preview={preview} /></div></div></header>
+      <div className="p-4 sm:p-6">{refreshError && data && <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between"><span>Couldn’t update: {refreshError} Your existing information is still shown.</span><button className="shrink-0 font-semibold underline" disabled={refreshing} onClick={() => void refreshWorkspace({ force: true })}>{refreshing ? "Retrying..." : "Try again"}</button></div>}{content}</div>
     </main>
     {menuOpen && <div className="fixed inset-0 z-[70] lg:hidden"><button className="absolute inset-0 bg-ink/45" onClick={() => setMenuOpen(false)} aria-label="Close navigation" /><aside className="absolute bottom-0 left-0 top-0 w-[min(82vw,320px)] bg-white p-4 shadow-soft dark:bg-slate-900"><div className="mb-5 flex items-center justify-between"><strong className="text-ink dark:text-white">Employee menu</strong><button className="icon-button" onClick={() => setMenuOpen(false)}><X size={17} /></button></div><EmployeeNav active={activeTab} onChoose={(tab) => { setActiveTab(tab); setMenuOpen(false); }} /></aside></div>}
     {selectedJob && <EmployeeJobModal job={selectedJob} customer={customerMap.get(selectedJob.customerId)} assigned={assignmentMap.has(selectedJob.id)} onClose={() => setSelectedJob(null)} onSave={updateJob} onEarnings={() => { setSelectedJob(null); setEarningsJob(selectedJob); }} />}
