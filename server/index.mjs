@@ -23,6 +23,7 @@ const ownerAccessCode = process.env.AUTH_OWNER_CODE || signupAccessCode;
 const sessionCookieName = "powerwash_session";
 const authStateCookieName = "powerwash_auth_state";
 const sessionDurationMs = 30 * 24 * 60 * 60 * 1000;
+const standardUpsellCommissionPct = 0.30;
 let activeSheetSync = null;
 let googleCertCache = { expiresAt: 0, keys: [] };
 
@@ -236,6 +237,10 @@ async function ensureMapSchema() {
     create index if not exists payroll_lines_run_employee_idx on payroll_run_lines(payroll_run_id, employee_id);
     create index if not exists payroll_adjustments_run_employee_idx on payroll_adjustments(payroll_run_id, employee_id);
     create index if not exists payroll_payments_run_employee_idx on payroll_payments(payroll_run_id, employee_id);
+    update user_accounts set upsell_commission_pct = 0.30 where role = 'employee' and upsell_commission_pct is distinct from 0.30;
+    update job_assignments ja set upsell_commission_pct = 0.30
+    where ja.upsell_commission_pct is distinct from 0.30
+      and not exists (select 1 from payroll_run_lines prl where prl.source_key = ja.job_id || ':upsell');
     alter table payroll_runs enable row level security;
     alter table payroll_run_lines enable row level security;
     alter table payroll_adjustments enable row level security;
@@ -2014,7 +2019,7 @@ app.get("/api/owner/operations", requireDatabase, requireOwner, async (_req, res
 
 app.patch("/api/owner/employees/:id", requireDatabase, requireOwner, async (req, res, next) => {
   try {
-    const fields = ["active", "baseCommissionPct", "upsellCommissionPct", "contractBonusPct", "tipSharePct"];
+    const fields = ["active", "baseCommissionPct", "contractBonusPct", "tipSharePct"];
     if (!fields.some((field) => Object.hasOwn(req.body, field))) return res.status(400).json({ error: "No employee settings were provided." });
     for (const field of fields.slice(1)) {
       if (Object.hasOwn(req.body, field) && (!Number.isFinite(Number(req.body[field])) || Number(req.body[field]) < 0 || Number(req.body[field]) > 1)) {
@@ -2026,7 +2031,7 @@ app.patch("/api/owner/employees/:id", requireDatabase, requireOwner, async (req,
        upsell_commission_pct = coalesce($4, upsell_commission_pct), contract_bonus_pct = coalesce($5, contract_bonus_pct),
        tip_share_pct = coalesce($6, tip_share_pct), updated_at = now()
        where id = $1 and role = 'employee' returning *`,
-      [req.params.id, req.body.active, req.body.baseCommissionPct, req.body.upsellCommissionPct, req.body.contractBonusPct, req.body.tipSharePct],
+      [req.params.id, req.body.active, req.body.baseCommissionPct, standardUpsellCommissionPct, req.body.contractBonusPct, req.body.tipSharePct],
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Employee was not found." });
     if (req.body.active === false) await pool.query("delete from auth_sessions where user_id = $1", [req.params.id]);
@@ -2051,7 +2056,7 @@ app.post("/api/owner/assignments", requireDatabase, requireOwner, async (req, re
          original_job_price = excluded.original_job_price, base_commission_pct = excluded.base_commission_pct,
          upsell_commission_pct = excluded.upsell_commission_pct, contract_bonus_pct = excluded.contract_bonus_pct,
          tip_share_pct = excluded.tip_share_pct, assigned_at = now() returning *`,
-      [jobId, employeeId, req.authUser.id, job.rows[0].price, profile.base_commission_pct, profile.upsell_commission_pct, profile.contract_bonus_pct, profile.tip_share_pct],
+      [jobId, employeeId, req.authUser.id, job.rows[0].price, profile.base_commission_pct, standardUpsellCommissionPct, profile.contract_bonus_pct, profile.tip_share_pct],
     );
     await audit(req.authUser.id, "assign_job", "job", jobId, { employeeId });
     res.status(201).json(toAssignment({ ...result.rows[0], employee_name: profile.name }));

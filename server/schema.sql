@@ -176,6 +176,7 @@ create table if not exists job_assignments (
   assigned_at timestamptz not null default now()
 );
 
+
 create table if not exists contract_submissions (
   id uuid primary key default gen_random_uuid(),
   employee_id uuid not null references user_accounts(id) on delete cascade,
@@ -292,6 +293,13 @@ create index if not exists payroll_runs_status_idx on payroll_runs(status, perio
 create index if not exists payroll_lines_run_employee_idx on payroll_run_lines(payroll_run_id, employee_id);
 create index if not exists payroll_adjustments_run_employee_idx on payroll_adjustments(payroll_run_id, employee_id);
 create index if not exists payroll_payments_run_employee_idx on payroll_payments(payroll_run_id, employee_id);
+
+update user_accounts set upsell_commission_pct = 0.30
+where role = 'employee' and upsell_commission_pct is distinct from 0.30;
+
+update job_assignments ja set upsell_commission_pct = 0.30
+where ja.upsell_commission_pct is distinct from 0.30
+  and not exists (select 1 from payroll_run_lines prl where prl.source_key = ja.job_id || ':upsell');
 
 alter table payroll_runs enable row level security;
 alter table payroll_run_lines enable row level security;
