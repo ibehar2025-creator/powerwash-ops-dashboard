@@ -95,6 +95,7 @@ export interface EarningSubmission {
   upsellQuotedAmount: number;
   upsellNotes: string;
   contractSold: boolean;
+  contractSubmissionId?: string;
   status: SubmissionStatus;
   ownerNote: string;
   baseEarnings: number;

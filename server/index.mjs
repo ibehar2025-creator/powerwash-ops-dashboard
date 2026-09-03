@@ -461,6 +461,7 @@ const toEarning = (row) => ({
   upsellQuotedAmount: Number(row.upsell_quoted_amount || 0),
   upsellNotes: row.upsell_notes ?? "",
   contractSold: Boolean(row.contract_submission_id),
+  contractSubmissionId: row.contract_submission_id ?? undefined,
   status: row.status,
   ownerNote: row.owner_note,
   ...earningAmounts(row),
@@ -1808,7 +1809,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       [subject.id],
     );
     const customerIds = [...new Set(jobsResult.rows.map((row) => row.customer_id))];
-    const [customersResult, assignmentsResult, earningsResult, payoutsResult] = await Promise.all([
+    const [customersResult, assignmentsResult, earningsResult, contractsResult, payoutsResult] = await Promise.all([
       customerIds.length
         ? pool.query("select id, name, phone, address, notes from customers where id = any($1::text[]) order by name", [customerIds])
         : Promise.resolve({ rows: [] }),
@@ -1820,6 +1821,12 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
         [subject.id],
       ),
       pool.query(`${earningSelect} where es.employee_id = $1 order by jobs.date desc`, [subject.id]),
+      pool.query(
+        `select cs.*, ua.name as employee_name from contract_submissions cs
+         join user_accounts ua on ua.id = cs.employee_id
+         where cs.employee_id = $1 order by cs.created_at desc`,
+        [subject.id],
+      ),
       pool.query("select payouts.*, ua.name as employee_name from payouts join user_accounts ua on ua.id = payouts.employee_id where payouts.employee_id = $1 order by paid_at desc", [subject.id]),
     ]);
     const customers = customersResult.rows.map((row) => ({
@@ -1836,6 +1843,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       jobs,
       assignments: assignmentsResult.rows.map(toAssignment),
       earnings: earningsResult.rows.map(toEarning),
+      contracts: contractsResult.rows.map(toContract),
       solicitations: [],
       payouts: payoutsResult.rows.map((row) => ({
         id: row.id, employeeId: row.employee_id, employeeName: row.employee_name,
@@ -1913,7 +1921,7 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
     const existing = await pool.query("select status from earning_submissions where job_id = $1 and employee_id = $2", [jobId, subject.id]);
     if (["approved", "paid"].includes(existing.rows[0]?.status)) return res.status(409).json({ error: "A finalized earnings record cannot be changed." });
     if (contractSubmissionId) {
-      const contract = await pool.query("select 1 from contract_submissions where id = $1 and employee_id = $2", [contractSubmissionId, subject.id]);
+      const contract = await pool.query("select 1 from contract_submissions where id = $1 and employee_id = $2 and job_id = $3 and status <> 'rejected'", [contractSubmissionId, subject.id, jobId]);
       if (!contract.rows[0]) return res.status(400).json({ error: "The contract submission was not found." });
     }
     const result = await pool.query(

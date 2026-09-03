@@ -25,6 +25,7 @@ export interface EmployeeWorkspaceSnapshot {
   jobs: Job[];
   assignments: JobAssignment[];
   earnings: EarningSubmission[];
+  contracts: ContractSubmission[];
   solicitations: Solicitation[];
   payouts: PayoutSummary[];
 }
@@ -210,6 +211,8 @@ export function submitEmployeeUpsell(input: { jobId: string; description: string
 }
 
 export function submitEmployeeContract(input: {
+  jobId: string;
+  relatedJob: string;
   customerName: string;
   customerPhone: string;
   customerEmail: string;

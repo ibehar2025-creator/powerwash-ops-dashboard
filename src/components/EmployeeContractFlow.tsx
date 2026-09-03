@@ -3,6 +3,7 @@ import type { FormEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowLeft, FileSignature, PenLine, RotateCcw, Send } from "lucide-react";
 import { submitEmployeeContract } from "../lib/api";
 import { currency } from "../lib/calculations";
+import type { ContractSubmission, Customer, Job } from "../types/business";
 
 interface ContractDraft {
   customerName: string;
@@ -47,11 +48,16 @@ function agreementText(draft: ContractDraft) {
 
 export function EmployeeContractFlow({
   employeeId,
+  jobs,
+  customers,
   onSubmitted,
 }: {
   employeeId?: string;
-  onSubmitted: () => void;
+  jobs: Job[];
+  customers: Customer[];
+  onSubmitted: (contract: ContractSubmission) => void;
 }) {
+  const [jobId, setJobId] = useState("");
   const [draft, setDraft] = useState<ContractDraft>(emptyDraft);
   const [stage, setStage] = useState<"prepare" | "sign">("prepare");
   const [signerName, setSignerName] = useState("");
@@ -61,6 +67,22 @@ export function EmployeeContractFlow({
   const [message, setMessage] = useState("");
 
   const agreement = useMemo(() => agreementText(draft), [draft]);
+  const customerMap = useMemo(() => new Map(customers.map((customer) => [customer.id, customer])), [customers]);
+
+  function chooseJob(nextJobId: string) {
+    setJobId(nextJobId);
+    const job = jobs.find((item) => item.id === nextJobId);
+    if (!job) return;
+    const customer = customerMap.get(job.customerId);
+    setDraft((current) => ({
+      ...current,
+      customerName: customer?.name ?? current.customerName,
+      customerPhone: customer?.phone ?? current.customerPhone,
+      serviceAddress: job.address || customer?.address || current.serviceAddress,
+      serviceDescription: job.serviceType || current.serviceDescription,
+      price: String(job.price),
+    }));
+  }
 
   function update<K extends keyof ContractDraft>(key: K, value: ContractDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -89,6 +111,8 @@ export function EmployeeContractFlow({
     try {
       const saved = await submitEmployeeContract({
         ...draft,
+        jobId,
+        relatedJob: `${jobs.find((job) => job.id === jobId)?.date ?? ""} · ${draft.customerName}`,
         price: Number(draft.price),
         agreementText: agreement,
         signerName,
@@ -98,7 +122,7 @@ export function EmployeeContractFlow({
       });
       if (!saved) throw new Error("Contract service is unavailable.");
       setMessage("Signed contract saved and sent to the owners.");
-      window.setTimeout(onSubmitted, 1400);
+      window.setTimeout(() => onSubmitted(saved), 1400);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to submit the signed contract.");
     } finally {
@@ -135,6 +159,7 @@ export function EmployeeContractFlow({
     <div><p className="text-xs font-semibold uppercase text-lagoon">Prepare after the job</p><h2 className="text-2xl font-bold text-ink dark:text-white">Generate a customer contract</h2><p className="mt-1 text-sm text-slate-500">Enter the agreement details first. The next screen is for the homeowner to review and sign.</p></div>
     <form className="mt-5 rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900" onSubmit={generate}>
       <div className="grid gap-4 sm:grid-cols-2">
+        <label className="text-sm font-semibold sm:col-span-2">Assigned job<select required value={jobId} onChange={(event) => chooseJob(event.target.value)}><option value="">Choose the job this contract belongs to</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.date} · {customerMap.get(job.customerId)?.name ?? "Customer"} · {currency.format(job.price)}</option>)}</select><span className="mt-1 block text-xs font-normal text-slate-500">Linking the signed agreement to the job makes its 10% contract bonus available in Earnings.</span></label>
         <label className="text-sm font-semibold">Customer name<input required autoComplete="name" value={draft.customerName} onChange={(event) => update("customerName", event.target.value)} /></label>
         <label className="text-sm font-semibold">Customer phone<input type="tel" autoComplete="tel" value={draft.customerPhone} onChange={(event) => update("customerPhone", event.target.value)} /></label>
         <label className="text-sm font-semibold">Customer email<input type="email" autoComplete="email" value={draft.customerEmail} onChange={(event) => update("customerEmail", event.target.value)} /></label>
