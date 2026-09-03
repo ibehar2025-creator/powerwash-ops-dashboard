@@ -17,9 +17,8 @@ const syncUrl = process.env.SHEETS_SYNC_URL || process.env.VITE_SHEETS_SYNC_URL;
 const automaticSheetSyncIntervalMs = 30 * 60 * 1000;
 let lastAutomaticSheetSyncAt = 0;
 const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
-const signupAccessCode = process.env.AUTH_SIGNUP_CODE || "";
-const employeeAccessCode = process.env.AUTH_EMPLOYEE_CODE || signupAccessCode;
-const ownerAccessCode = process.env.AUTH_OWNER_CODE || signupAccessCode;
+const employeeAccessCode = process.env.AUTH_EMPLOYEE_CODE || "";
+const ownerAccessCode = process.env.AUTH_OWNER_CODE || process.env.AUTH_SIGNUP_CODE || "";
 const sessionCookieName = "powerwash_session";
 const authStateCookieName = "powerwash_auth_state";
 const sessionDurationMs = 30 * 24 * 60 * 60 * 1000;
@@ -1083,13 +1082,14 @@ app.post("/api/auth/register", requireDatabase, async (req, res, next) => {
     if (!Number.isInteger(age) || age < 13 || age > 120) return res.status(400).json({ error: "Enter an age between 13 and 120." });
     if (role !== "owner" && role !== "employee") return res.status(400).json({ error: "Choose owner or employee." });
     const requiredCode = role === "employee" ? employeeAccessCode : ownerAccessCode;
+    if (!requiredCode) return res.status(503).json({ error: `The ${role} signup code is not configured. Contact the owner.` });
     if (requiredCode && req.body.accessCode !== requiredCode) return res.status(403).json({ error: `The ${role} access code is incorrect.` });
     const profile = await verifyGoogleCredential(req.body.credential);
     const result = await pool.query(
       `insert into user_accounts (google_sub, email, name, picture_url, age, role)
        values ($1, $2, $3, $4, $5, $6)
        on conflict (google_sub) do update set email = excluded.email, name = excluded.name,
-         picture_url = excluded.picture_url, age = excluded.age, role = excluded.role,
+         picture_url = excluded.picture_url, age = excluded.age,
          last_login_at = now(), updated_at = now()
        returning *`,
       [profile.googleSub, profile.email, profile.name, profile.pictureUrl, age, role],
