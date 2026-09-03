@@ -261,6 +261,7 @@ export default function App() {
 }
 
 function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }) {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
@@ -279,8 +280,8 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const [mapJobFocus, setMapJobFocus] = useState<{ jobId: string; requestId: number } | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [createKind, setCreateKind] = useState<CreateKind | null>(null);
-  const [themePreference, setThemePreference] = useState(loadThemePreference);
-  const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference()));
+  const [themePreference, setThemePreference] = useState(() => loadThemePreference(user.id));
+  const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference(user.id)));
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
   const [syncing, setSyncing] = useState(false);
   const [showCalendarSkeleton, setShowCalendarSkeleton] = useState(false);
@@ -338,13 +339,13 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   }, []);
 
   useEffect(() => {
-    saveThemePreference(themePreference);
+    saveThemePreference(user.id, themePreference);
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => setDarkMode(themePreference === "dark" || (themePreference === "system" && media.matches));
     apply();
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [themePreference]);
+  }, [themePreference, user.id]);
 
   useEffect(() => {
     void syncSheets();

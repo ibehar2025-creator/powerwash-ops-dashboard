@@ -37,8 +37,8 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   const [data, setData] = useState<EmployeeWorkspaceSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<EmployeeTab>("home");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [themePreference, setThemePreference] = useState(loadThemePreference);
-  const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference()));
+  const [themePreference, setThemePreference] = useState(() => loadThemePreference(user.id));
+  const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference(user.id)));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -65,13 +65,13 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   }, [reload]);
 
   useEffect(() => {
-    saveThemePreference(themePreference);
+    saveThemePreference(user.id, themePreference);
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => setDarkMode(themePreference === "dark" || (themePreference === "system" && media.matches));
     apply();
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [themePreference]);
+  }, [themePreference, user.id]);
 
   useEffect(() => {
     const refresh = () => void reload();
