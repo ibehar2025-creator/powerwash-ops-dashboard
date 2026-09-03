@@ -30,6 +30,51 @@ select {
   font: inherit;
 }
 
+.dark {
+  color-scheme: dark;
+}
+
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark textarea,
+.dark select {
+  border-color: #475569;
+  background-color: #020617;
+  color: #f8fafc;
+}
+
+.dark input:not([type="checkbox"]):not([type="radio"]):disabled,
+.dark textarea:disabled,
+.dark select:disabled {
+  border-color: #334155;
+  background-color: #1e293b;
+  color: #94a3b8;
+  opacity: 1;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+.dark select option {
+  background-color: #020617;
+  color: #f8fafc;
+}
+
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc;
+  box-shadow: 0 0 0 1000px #020617 inset;
+}
+
+.dark .recharts-default-tooltip {
+  border-color: #475569 !important;
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
 .auth-page {
   background: #f1f5f9;
 }
