@@ -34,6 +34,7 @@ export interface Job {
   paymentStatus: PaymentStatus;
   paymentMethod?: PaymentMethod;
   notes: string;
+  employeeInstructions?: string;
   beforePhoto?: string;
   afterPhoto?: string;
   source: "mock" | "spreadsheet-import" | "manual";
@@ -234,7 +235,7 @@ export interface RecurringJobDetails {
   paymentStatus: PaymentStatus;
 }
 
-export type JobCreateInput = Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes"> & {
+export type JobCreateInput = Pick<Job, "date" | "time" | "customerId" | "address" | "serviceType" | "status" | "price" | "notes" | "employeeInstructions"> & {
   recurrence?: RecurringJobDetails;
 };
 

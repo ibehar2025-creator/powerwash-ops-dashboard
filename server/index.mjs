@@ -136,6 +136,7 @@ async function ensureMapSchema() {
     alter table user_accounts add column if not exists upsell_commission_pct numeric(6,4) not null default 0.30;
     alter table user_accounts add column if not exists contract_bonus_pct numeric(6,4) not null default 0.10;
     alter table user_accounts add column if not exists tip_share_pct numeric(6,4) not null default 1.00;
+    alter table jobs add column if not exists employee_instructions text not null default '';
     alter table solicitations add column if not exists created_by uuid references user_accounts(id) on delete set null;
 
     create table if not exists job_assignments (
@@ -354,6 +355,7 @@ const toJob = (row) => {
   paymentStatus: completed ? "paid" : "unpaid",
   paymentMethod: row.payment_method ?? undefined,
   notes: row.notes,
+  employeeInstructions: row.employee_instructions ?? "",
   beforePhoto: row.before_photo ?? undefined,
   afterPhoto: row.after_photo ?? undefined,
   source: row.source,
@@ -1322,7 +1324,7 @@ const recurringFrequencyLabels = {
 app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { date, time = "09:00", customerId, address, serviceType, status = "scheduled", price = 0, notes = "", recurrence } = req.body;
+    const { date, time = "09:00", customerId, address, serviceType, status = "scheduled", price = 0, notes = "", employeeInstructions = "", recurrence } = req.body;
     if (!date || !customerId || !address?.trim() || !serviceType?.trim()) {
       return res.status(400).json({ error: "Date, customer, address, and service are required." });
     }
@@ -1361,12 +1363,12 @@ app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
       await runSheetAction("addUpcomingJob", sheetRow);
     }
 
-    const overrides = { date: true, time: true, customerId: true, address: true, serviceType: true, status: true, price: true, notes: true };
+    const overrides = { date: true, time: true, customerId: true, address: true, serviceType: true, status: true, price: true, notes: true, employeeInstructions: true };
     await client.query("begin");
     const result = await client.query(
-      `insert into jobs (id, date, time, customer_id, address, service_type, status, price, amount_paid, payment_status, notes, source, website_overrides)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'manual', $12::jsonb) returning *`,
-      [jobId, date, time, customerId, address.trim(), serviceType.trim(), status, price, status === "completed" ? Number(price) || 0 : 0, status === "completed" ? "paid" : "unpaid", notes, JSON.stringify(overrides)],
+      `insert into jobs (id, date, time, customer_id, address, service_type, status, price, amount_paid, payment_status, notes, employee_instructions, source, website_overrides)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'manual', $13::jsonb) returning *`,
+      [jobId, date, time, customerId, address.trim(), serviceType.trim(), status, price, status === "completed" ? Number(price) || 0 : 0, status === "completed" ? "paid" : "unpaid", notes, String(employeeInstructions).trim(), JSON.stringify(overrides)],
     );
     let servicePlan;
     if (recurrence) {
@@ -1468,8 +1470,8 @@ app.patch("/api/leads/:id", requireDatabase, requireOwner, async (req, res, next
 
 app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next) => {
   try {
-    const { date, time, customerId, address, serviceType, status, tipAmount, price, paymentMethod, notes, latitude, longitude } = req.body;
-    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes"];
+    const { date, time, customerId, address, serviceType, status, tipAmount, price, paymentMethod, notes, employeeInstructions, latitude, longitude } = req.body;
+    const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes", "employeeInstructions"];
     const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
     const existingResult = await pool.query(
       `select jobs.*, customers.name as customer_name, customers.phone as customer_phone
@@ -1528,6 +1530,7 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
            price = coalesce($11, price),
            payment_method = coalesce($12, payment_method),
            notes = coalesce($13, notes),
+           employee_instructions = coalesce($17, employee_instructions),
            latitude = case when $5::text is not null and $5::text is distinct from address then null else coalesce($14, latitude) end,
            longitude = case when $5::text is not null and $5::text is distinct from address then null else coalesce($15, longitude) end,
            geocoded_address = case
@@ -1539,7 +1542,7 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
            updated_at = now()
        where id = $1
        returning *`,
-      [req.params.id, date, time, customerId, address, serviceType, status, effectivePaymentStatus, effectiveAmountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides)],
+      [req.params.id, date, time, customerId, address, serviceType, status, effectivePaymentStatus, effectiveAmountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides), employeeInstructions],
     );
     res.json(toJob(result.rows[0]));
   } catch (error) {

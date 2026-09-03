@@ -44,6 +44,7 @@ create table if not exists jobs (
   payment_status text not null check (payment_status in ('paid', 'unpaid', 'partially paid', 'past due')),
   payment_method text check (payment_method in ('Zelle', 'cash', 'card', 'check', 'other')),
   notes text not null default '',
+  employee_instructions text not null default '',
   before_photo text,
   after_photo text,
   source text not null default 'spreadsheet-import',
