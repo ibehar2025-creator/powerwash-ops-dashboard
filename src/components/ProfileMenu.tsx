@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BadgePercent, Building2, ChevronDown, CircleHelp, Clipboard, LogOut, Monitor, Moon, Save, Send, Sun, UserRound, X } from "lucide-react";
+import { BadgePercent, Building2, ChevronDown, CircleHelp, Clipboard, LogOut, Monitor, Moon, Save, Send, Sun, Trash2, UserRound, X } from "lucide-react";
 import { useAuth } from "../lib/authContext";
 import { submitManagerIssue } from "../lib/api";
 import type { ThemePreference } from "../lib/themePreference";
@@ -15,7 +15,7 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
   onOwnerNavigate?: (tab: "team" | "payroll" | "contracts") => void;
   preview?: boolean;
 }) {
-  const { user, updateProfile, signOut } = useAuth();
+  const { user, updateProfile, signOut, deleteAccount } = useAuth();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>(null);
   const [name, setName] = useState(user.name);
@@ -24,6 +24,8 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
   const [issue, setIssue] = useState("");
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,6 +52,12 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to send the report."); }
     finally { setWorking(false); }
   }
+  async function removeAccount() {
+    setWorking(true); setMessage("");
+    try { await deleteAccount(deleteConfirmation); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Unable to delete the account."); }
+    finally { setWorking(false); }
+  }
 
   return <div className="relative" ref={menuRef}>
     <button type="button" className="text-button min-w-0 gap-2 px-2" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label="Open profile menu">
@@ -67,7 +75,7 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
       {!preview && <button type="button" className="mt-1 flex w-full items-center gap-3 border-t border-slate-100 px-3 py-3 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50 dark:border-slate-800 dark:hover:bg-rose-500/10" onClick={() => void signOut()}><LogOut size={17} />Sign out</button>}
     </div>}
     {view && <div className="fixed inset-0 z-[100] grid place-items-center bg-ink/55 p-4" role="dialog" aria-modal="true"><section className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-ink dark:text-white">{view === "profile" ? "My profile" : view === "business" ? "Business settings" : view === "rates" ? "My commission rates" : view === "help" ? "Help & instructions" : "Report a problem"}</h2><button className="icon-button" onClick={() => setView(null)} aria-label="Close"><X size={17} /></button></div>
-      {view === "profile" && <div className="mt-5 space-y-4"><label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">Display name<input className={profileFieldClass} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">Phone<input className={profileFieldClass} type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Optional" /></label><label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">Profile photo URL<input className={profileFieldClass} type="url" value={pictureUrl} onChange={(event) => setPictureUrl(event.target.value)} placeholder="https://..." /></label><p className="text-xs text-slate-500 dark:text-slate-400">Your email and account role are managed by sign-in and cannot be changed here.</p><button className="primary-button w-full gap-2" disabled={working} onClick={() => void saveProfile()}><Save size={16} />{working ? "Saving..." : "Save profile"}</button></div>}
+      {view === "profile" && <div className="mt-5 space-y-4"><label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">Display name<input className={profileFieldClass} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">Phone<input className={profileFieldClass} type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Optional" /></label><label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">Profile photo URL<input className={profileFieldClass} type="url" value={pictureUrl} onChange={(event) => setPictureUrl(event.target.value)} placeholder="https://..." /></label><p className="text-xs text-slate-500 dark:text-slate-400">Your email and account role are managed by sign-in and cannot be changed here.</p><button className="primary-button w-full gap-2" disabled={working} onClick={() => void saveProfile()}><Save size={16} />{working ? "Saving..." : "Save profile"}</button>{!preview && <div className="border-t border-rose-200 pt-4 dark:border-rose-900/60"><h3 className="text-sm font-bold text-rose-700 dark:text-rose-300">Delete account</h3><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">Permanently removes your sign-in and personal profile information. Business and payment records may be retained as anonymized company records.</p>{confirmingDelete ? <div className="mt-3 space-y-3"><label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">Type DELETE to confirm<input className={profileFieldClass} value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" /></label><div className="flex gap-2"><button type="button" className="text-button flex-1" disabled={working} onClick={() => { setConfirmingDelete(false); setDeleteConfirmation(""); setMessage(""); }}>Cancel</button><button type="button" className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={working || deleteConfirmation !== "DELETE"} onClick={() => void removeAccount()}><Trash2 size={16} />{working ? "Deleting..." : "Delete forever"}</button></div></div> : <button type="button" className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-rose-300 px-4 py-2.5 text-sm font-bold text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30" onClick={() => setConfirmingDelete(true)}><Trash2 size={16} />Delete my account</button>}</div>}</div>}
       {view === "business" && <div className="mt-5 grid gap-3"><p className="text-sm text-slate-500">Quick access to owner-only business controls.</p><Shortcut title="Team & commission settings" detail="Contractors, rates, assignments, and approvals" onClick={() => { setView(null); onOwnerNavigate?.("team"); }} /><Shortcut title="Weekly contractor pay" detail="See weekly totals, due dates, and payment status" onClick={() => { setView(null); onOwnerNavigate?.("payroll"); }} /><Shortcut title="Customer contracts" detail="Review and manage company contracts" onClick={() => { setView(null); onOwnerNavigate?.("contracts"); }} /></div>}
       {view === "rates" && <div className="mt-5">{employee ? <div className="grid grid-cols-2 gap-3"><Rate label="Base commission" value={employee.baseCommissionPct} /><Rate label="Upsell commission" value={employee.upsellCommissionPct} /><Rate label="Contract bonus" value={employee.contractBonusPct} /><Rate label="Tip share" value={employee.tipSharePct} /></div> : <p className="text-sm text-slate-500">Your commission rates will appear after the owner activates your employee profile.</p>}<p className="mt-4 text-xs text-slate-500">Rates are read-only here. Ask the owner to make changes.</p></div>}
       {view === "help" && <div className="mt-5 space-y-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{user.role === "owner" && !preview ? <><p><strong>Jobs:</strong> create or edit work, then assign it from Team.</p><p><strong>Contractor Pay:</strong> approved earnings build the weekly total automatically. Confirm the amounts, pay by the shown Friday, then mark each contractor paid.</p><p><strong>Sheets:</strong> use the separate Sync Sheets button whenever you need an immediate update.</p></> : <><p><strong>Home:</strong> shows today’s assigned jobs and your earnings summary.</p><p><strong>Schedule and Map:</strong> show only jobs assigned to you.</p><p><strong>Earnings:</strong> submit job details and view finalized weekly statements.</p></>}</div>}

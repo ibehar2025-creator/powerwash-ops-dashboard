@@ -1133,6 +1133,38 @@ app.patch("/api/auth/profile", requireDatabase, requireAuth, async (req, res, ne
   }
 });
 
+app.delete("/api/auth/account", requireDatabase, requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    if (req.body?.confirmation !== "DELETE") {
+      return res.status(400).json({ error: "Type DELETE to confirm account deletion." });
+    }
+    await client.query("begin");
+    if (req.authUser.role === "owner") {
+      const owners = await client.query("select count(*)::integer as count from user_accounts where role = 'owner' and active = true");
+      if (owners.rows[0].count <= 1) {
+        await client.query("rollback");
+        return res.status(409).json({ error: "The only active owner cannot delete their account. Add another owner first." });
+      }
+    }
+    const deletedIdentity = `deleted:${req.authUser.id}`;
+    await client.query(
+      `update user_accounts set google_sub = $2, email = $3, name = 'Deleted account', picture_url = '', phone = '',
+         profile_overrides = '{}'::jsonb, active = false, updated_at = now() where id = $1`,
+      [req.authUser.id, deletedIdentity, `${deletedIdentity}@invalid.local`],
+    );
+    await client.query("delete from auth_sessions where user_id = $1", [req.authUser.id]);
+    await client.query("commit");
+    res.setHeader("Set-Cookie", cookie(sessionCookieName, "", { maxAge: 0 }));
+    res.json({ deleted: true });
+  } catch (error) {
+    await client.query("rollback");
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
 app.use("/api", requireAuth);
 
 app.post("/api/issues", requireDatabase, async (req, res, next) => {
