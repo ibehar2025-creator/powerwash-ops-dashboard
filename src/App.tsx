@@ -30,6 +30,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { useAuth } from "./lib/authContext";
+import { loadDarkModePreference, saveDarkModePreference } from "./lib/themePreference";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { InstallAppButton } from "./components/InstallAppButton";
 import { NotificationCenter } from "./components/NotificationCenter";
@@ -302,7 +303,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const [mapJobFocus, setMapJobFocus] = useState<{ jobId: string; requestId: number } | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [createKind, setCreateKind] = useState<CreateKind | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(loadDarkModePreference);
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
   const [syncing, setSyncing] = useState(false);
   const [showCalendarSkeleton, setShowCalendarSkeleton] = useState(false);
@@ -358,6 +359,16 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
     const interval = window.setInterval(() => setCurrentDate(isoToday()), 60_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    saveDarkModePreference(darkMode);
+  }, [darkMode]);
+
+  useEffect(() => {
+    void syncSheets();
+    const interval = window.setInterval(() => void syncSheets(), 30 * 60_000);
+    return () => window.clearInterval(interval);
+  }, [syncSheets]);
 
   useEffect(() => {
     void refreshOwnerOperations();

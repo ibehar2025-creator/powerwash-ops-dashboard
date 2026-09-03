@@ -14,6 +14,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const distPath = path.join(projectRoot, "dist");
 const syncUrl = process.env.SHEETS_SYNC_URL || process.env.VITE_SHEETS_SYNC_URL;
+const automaticSheetSyncIntervalMs = 30 * 60 * 1000;
+let lastAutomaticSheetSyncAt = 0;
 const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
 const signupAccessCode = process.env.AUTH_SIGNUP_CODE || "";
 const employeeAccessCode = process.env.AUTH_EMPLOYEE_CODE || signupAccessCode;
@@ -1138,7 +1140,16 @@ async function runSheetSync() {
   }
   payload.customers = [...customersById.values()];
   await syncSheetsIntoDatabase(payload);
+  lastAutomaticSheetSyncAt = Date.now();
   return loadSnapshot();
+}
+
+async function refreshSheetsIfStale() {
+  if (!syncUrl || Date.now() - lastAutomaticSheetSyncAt < automaticSheetSyncIntervalMs) return;
+  if (!activeSheetSync) {
+    activeSheetSync = runSheetSync().finally(() => { activeSheetSync = null; });
+  }
+  await activeSheetSync;
 }
 
 async function runSheetAction(action, row) {
@@ -1712,6 +1723,11 @@ const earningSelect = `
 
 app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
   try {
+    try {
+      await refreshSheetsIfStale();
+    } catch (syncError) {
+      console.error("Employee automatic sheet sync failed:", syncError);
+    }
     const subject = await employeeSubject(req);
     const jobsResult = await pool.query(
       `select jobs.* from jobs
@@ -1809,30 +1825,47 @@ app.patch("/api/employee/jobs/:id", requireDatabase, allowEmployeeOrOwner, async
 app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async (req, res, next) => {
   try {
     const subject = await employeeSubject(req);
-    const { jobId, tipAmount = 0, contractSubmissionId = null } = req.body;
-    const upsellProvided = Object.hasOwn(req.body, "upsellAmount");
-    const upsellAmount = upsellProvided ? req.body.upsellAmount : 0;
+    const {
+      jobId, tipAmount = 0, contractSubmissionId = null, hasUpsell = false,
+      upsellDescription = "", upsellOutcome = "", upsellQuotedAmount = 0, upsellNotes = "",
+    } = req.body;
     const tip = Number(tipAmount);
-    const upsell = Number(upsellAmount);
-    if (!jobId || !Number.isFinite(tip) || tip < 0 || !Number.isFinite(upsell) || upsell < 0) return res.status(400).json({ error: "Enter valid tip and upsell amounts." });
+    const quote = Number(upsellQuotedAmount);
+    const validOutcomes = ["accepted", "declined", "follow-up"];
+    if (!jobId || !Number.isFinite(tip) || tip < 0) return res.status(400).json({ error: "Enter a valid customer tip." });
+    if (hasUpsell && (typeof upsellDescription !== "string" || !upsellDescription.trim() || !validOutcomes.includes(upsellOutcome) || !Number.isFinite(quote) || quote < 0)) {
+      return res.status(400).json({ error: "Enter the service offered, customer result, and a valid quoted price." });
+    }
+    if (hasUpsell && upsellOutcome === "accepted" && quote <= 0) return res.status(400).json({ error: "An accepted upsell must have a price greater than zero." });
+    if (String(upsellDescription).length > 500 || String(upsellNotes).length > 2000) return res.status(400).json({ error: "The upsell details are too long." });
     const assignment = await pool.query("select * from job_assignments where job_id = $1 and employee_id = $2", [jobId, subject.id]);
     if (!assignment.rows[0]) return res.status(403).json({ error: "This job is not assigned to this employee." });
+    const existing = await pool.query("select status from earning_submissions where job_id = $1 and employee_id = $2", [jobId, subject.id]);
+    if (["approved", "paid"].includes(existing.rows[0]?.status)) return res.status(409).json({ error: "A finalized earnings record cannot be changed." });
     if (contractSubmissionId) {
       const contract = await pool.query("select 1 from contract_submissions where id = $1 and employee_id = $2", [contractSubmissionId, subject.id]);
       if (!contract.rows[0]) return res.status(400).json({ error: "The contract submission was not found." });
     }
     const result = await pool.query(
-      `insert into earning_submissions (job_id, employee_id, tip_amount, upsell_amount, contract_submission_id, status, owner_note)
-       values ($1, $2, $3, $4, $5, 'pending', '')
+      `insert into earning_submissions (
+         job_id, employee_id, tip_amount, upsell_amount, contract_submission_id,
+         upsell_description, upsell_outcome, upsell_quoted_amount, upsell_notes, status, owner_note
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', '')
        on conflict (job_id, employee_id) do update set tip_amount = excluded.tip_amount,
-         upsell_amount = case when $6 then excluded.upsell_amount else earning_submissions.upsell_amount end,
          contract_submission_id = excluded.contract_submission_id,
+         upsell_amount = excluded.upsell_amount, upsell_description = excluded.upsell_description,
+         upsell_outcome = excluded.upsell_outcome, upsell_quoted_amount = excluded.upsell_quoted_amount,
+         upsell_notes = excluded.upsell_notes,
          status = 'pending', owner_note = '', reviewed_by = null, reviewed_at = null, updated_at = now()
        returning id`,
-      [jobId, subject.id, tip, upsell, contractSubmissionId, upsellProvided],
+      [
+        jobId, subject.id, tip, hasUpsell && upsellOutcome === "accepted" ? quote : 0, contractSubmissionId,
+        hasUpsell ? upsellDescription.trim() : "", hasUpsell ? upsellOutcome : "",
+        hasUpsell ? quote : 0, hasUpsell ? String(upsellNotes).trim() : "",
+      ],
     );
     const full = await pool.query(`${earningSelect} where es.id = $1`, [result.rows[0].id]);
-    await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, upsell });
+    await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, hasUpsell, upsellOutcome, upsellQuotedAmount: hasUpsell ? quote : 0 });
     res.status(201).json(toEarning(full.rows[0]));
   } catch (error) {
     next(error);
