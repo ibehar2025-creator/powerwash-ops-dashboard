@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { BriefcaseBusiness, Check, LoaderCircle, LockKeyhole, ShieldCheck, UserRound, Users } from "lucide-react";
+import { BriefcaseBusiness, LoaderCircle, LockKeyhole, ShieldCheck, UserRound, Users } from "lucide-react";
 import { AuthContext } from "../lib/authContext";
 import type { AccountRole, AuthUser } from "../lib/authContext";
 
@@ -59,31 +59,18 @@ function GoogleButton({ clientId, onCredential }: { clientId: string; onCredenti
     };
   }, [clientId, onCredential]);
 
-  return <div className="flex min-h-11 w-full justify-center md:justify-start" ref={container} />;
+  return <div className="flex min-h-11 w-full justify-center" ref={container} />;
 }
 
 function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="auth-page grid min-h-[100dvh] place-items-center px-4 py-5 text-slate-700 sm:px-6 sm:py-8">
-      <main className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.16)] md:min-h-[600px] md:grid-cols-[1.08fr_0.92fr]">
-        <section className="auth-photo relative min-h-[225px] overflow-hidden text-white md:min-h-full">
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,20,32,0.08),rgba(8,20,32,0.86))] md:bg-[linear-gradient(180deg,rgba(8,20,32,0.12),rgba(8,20,32,0.9))]" />
-          <div className="relative flex h-full min-h-[225px] flex-col justify-between p-6 sm:p-8 md:min-h-full md:p-10">
-            <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-lg bg-lagoon text-lg font-bold shadow-lg shadow-black/20">PP</div>
-              <div><p className="text-xs font-semibold uppercase text-cyan-100">Private workspace</p><p className="text-sm font-semibold">The Powerwashing Pros</p></div>
-            </div>
-            <div className="max-w-md pt-12 md:pt-0">
-              <p className="text-xs font-semibold uppercase text-cyan-100">Business operations</p>
-              <h1 className="mt-2 text-3xl font-bold leading-tight sm:text-4xl">Your business,<br className="hidden md:block" /> ready for the day.</h1>
-              <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-slate-200">
-                <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-cyan-200" />Secure access</span>
-                <span className="inline-flex items-center gap-1.5"><Check size={14} className="text-cyan-200" />Owner and employee accounts</span>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section className="flex items-center p-6 sm:p-10 md:p-12">{children}</section>
+    <div className="auth-page grid min-h-[100dvh] place-items-center px-4 py-8 text-slate-700 sm:px-6">
+      <main className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_55px_rgba(15,23,42,0.12)]">
+        <header className="border-b border-slate-100 px-6 py-6 text-center sm:px-10">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-lagoon text-lg font-bold text-white">PP</div>
+          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-lagoon">The Powerwashing Pros</p>
+        </header>
+        <section className="p-6 sm:p-10">{children}</section>
       </main>
     </div>
   );
@@ -200,8 +187,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <AuthShell>
-      <div className="w-full text-center md:text-left">
-        <div className="mx-auto max-w-sm md:mx-0">
+      <div className="w-full text-center">
+        <div className="mx-auto max-w-sm">
           <div className="inline-flex items-center gap-2 rounded-md bg-mist px-2.5 py-1.5 text-xs font-semibold text-lagoon"><LockKeyhole size={14} />Team access</div>
           <h2 className="mt-5 text-3xl font-bold text-ink sm:text-4xl">Welcome back</h2>
           <p className="mt-3 text-sm leading-6 text-slate-500">Sign in with an approved Google account to open the business dashboard.</p>

@@ -31,26 +31,7 @@ select {
 }
 
 .auth-page {
-  background:
-    linear-gradient(rgba(241, 245, 249, 0.9), rgba(241, 245, 249, 0.9)),
-    repeating-linear-gradient(90deg, #dbe5ea 0, #dbe5ea 1px, transparent 1px, transparent 72px);
-}
-
-.auth-photo {
-  background-image: url("/powerwashing-signin.webp");
-  background-position: center;
-  background-size: cover;
-}
-
-@media (max-width: 767px) {
-  .auth-page {
-    align-items: start;
-    padding-top: max(1.25rem, env(safe-area-inset-top));
-  }
-
-  .auth-photo {
-    background-position: 38% 63%;
-  }
+  background: #f1f5f9;
 }
 
 @media (max-width: 1023px) {
