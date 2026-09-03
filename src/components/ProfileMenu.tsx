@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { BadgePercent, Building2, ChevronDown, CircleHelp, Clipboard, LogOut, Monitor, Moon, Save, Sun, UserRound, X } from "lucide-react";
+import { BadgePercent, Building2, ChevronDown, CircleHelp, LogOut, Monitor, Moon, Save, Send, Sun, UserRound, X } from "lucide-react";
 import { useAuth } from "../lib/authContext";
+import { submitManagerIssue } from "../lib/api";
 import type { ThemePreference } from "../lib/themePreference";
 import type { EmployeeProfile } from "../types/business";
 
@@ -38,10 +39,16 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
     catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save profile."); }
     finally { setWorking(false); }
   }
-  async function copyIssue() {
-    const details = `Dashboard problem\nAccount: ${user.name} (${user.email})\nPage: ${window.location.href}\nDetails: ${issue || "Add details here"}`;
-    await navigator.clipboard.writeText(details);
-    setMessage("Issue details copied. Send them to the owner with a screenshot.");
+  async function sendIssue() {
+    if (!issue.trim()) { setMessage("Describe the problem before sending it."); return; }
+    setWorking(true); setMessage("");
+    try {
+      const result = await submitManagerIssue(issue, window.location.href);
+      if (!result) throw new Error("The report service is unavailable.");
+      setIssue("");
+      setMessage("Sent to the manager. It is now in the owner’s notifications.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to send the report."); }
+    finally { setWorking(false); }
   }
 
   return <div className="relative" ref={menuRef}>
@@ -64,7 +71,7 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
       {view === "business" && <div className="mt-5 grid gap-3"><p className="text-sm text-slate-500">Quick access to owner-only business controls.</p><Shortcut title="Team & commission settings" detail="Contractors, rates, assignments, and approvals" onClick={() => { setView(null); onOwnerNavigate?.("team"); }} /><Shortcut title="Weekly contractor pay" detail="See weekly totals, due dates, and payment status" onClick={() => { setView(null); onOwnerNavigate?.("payroll"); }} /><Shortcut title="Customer contracts" detail="Review and manage company contracts" onClick={() => { setView(null); onOwnerNavigate?.("contracts"); }} /></div>}
       {view === "rates" && <div className="mt-5">{employee ? <div className="grid grid-cols-2 gap-3"><Rate label="Base commission" value={employee.baseCommissionPct} /><Rate label="Upsell commission" value={employee.upsellCommissionPct} /><Rate label="Contract bonus" value={employee.contractBonusPct} /><Rate label="Tip share" value={employee.tipSharePct} /></div> : <p className="text-sm text-slate-500">Your commission rates will appear after the owner activates your employee profile.</p>}<p className="mt-4 text-xs text-slate-500">Rates are read-only here. Ask the owner to make changes.</p></div>}
       {view === "help" && <div className="mt-5 space-y-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{user.role === "owner" && !preview ? <><p><strong>Jobs:</strong> create or edit work, then assign it from Team.</p><p><strong>Contractor Pay:</strong> approved earnings build the weekly total automatically. Confirm the amounts, pay by the shown Friday, then mark each contractor paid.</p><p><strong>Sheets:</strong> use the separate Sync Sheets button whenever you need an immediate update.</p></> : <><p><strong>Home:</strong> shows today’s assigned jobs and your earnings summary.</p><p><strong>Schedule and Map:</strong> show only jobs assigned to you.</p><p><strong>Earnings:</strong> submit job details and view finalized weekly statements.</p></>}</div>}
-      {view === "report" && <div className="mt-5 space-y-4"><p className="text-sm text-slate-500 dark:text-slate-400">Describe what happened, copy the report, and send it to the owner with a screenshot.</p><textarea className={`${profileFieldClass} min-h-32 resize-y`} value={issue} onChange={(event) => setIssue(event.target.value)} placeholder="What page were you on, what did you click, and what went wrong?" /><button className="primary-button w-full gap-2" onClick={() => void copyIssue()}><Clipboard size={16} />Copy issue details</button></div>}
+      {view === "report" && <div className="mt-5 space-y-4"><p className="text-sm text-slate-500 dark:text-slate-400">Describe what happened and send it directly to the manager’s notification center.</p><textarea className={`${profileFieldClass} min-h-32 resize-y`} value={issue} onChange={(event) => setIssue(event.target.value)} maxLength={4000} placeholder="What page were you on, what did you click, and what went wrong?" /><button className="primary-button w-full gap-2" disabled={working || !issue.trim()} onClick={() => void sendIssue()}><Send size={16} />{working ? "Sending..." : "Send to manager"}</button></div>}
       {message && <p className="mt-4 rounded-lg bg-mist p-3 text-sm font-medium text-lagoon dark:bg-cyan-500/10 dark:text-cyan-200">{message}</p>}
     </section></div>}
   </div>;

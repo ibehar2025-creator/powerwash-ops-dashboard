@@ -346,6 +346,17 @@ create table if not exists notification_reads (
   primary key (user_id, notification_key)
 );
 
+create table if not exists manager_issues (
+  id uuid primary key default gen_random_uuid(),
+  reporter_id uuid not null references user_accounts(id) on delete cascade,
+  message text not null,
+  page_url text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists manager_issues_created_at_idx on manager_issues(created_at desc);
+alter table manager_issues enable row level security;
+
 create table if not exists business_settings (
   id text primary key default 'default',
   business_name text not null default 'The Powerwashing Pros',

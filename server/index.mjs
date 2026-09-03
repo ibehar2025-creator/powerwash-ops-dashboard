@@ -119,6 +119,16 @@ async function ensureMapSchema() {
       primary key (user_id, notification_key)
     );
 
+    create table if not exists manager_issues (
+      id uuid primary key default gen_random_uuid(),
+      reporter_id uuid not null references user_accounts(id) on delete cascade,
+      message text not null,
+      page_url text not null default '',
+      created_at timestamptz not null default now()
+    );
+    create index if not exists manager_issues_created_at_idx on manager_issues(created_at desc);
+    alter table manager_issues enable row level security;
+
     alter table user_accounts add column if not exists active boolean not null default true;
     alter table user_accounts add column if not exists phone text not null default '';
     alter table user_accounts add column if not exists profile_overrides jsonb not null default '{}'::jsonb;
@@ -1054,6 +1064,7 @@ app.post("/api/auth/google", requireDatabase, async (req, res, next) => {
          last_login_at = now(), updated_at = now() where id = $1 returning *`,
       [user.id, profile.email, profile.name, profile.pictureUrl],
     );
+
     await createSession(res, user.id);
     res.json({ user: toAuthUser(updated.rows[0]) });
   } catch (error) {
@@ -1120,6 +1131,33 @@ app.patch("/api/auth/profile", requireDatabase, requireAuth, async (req, res, ne
 });
 
 app.use("/api", requireAuth);
+
+app.post("/api/issues", requireDatabase, async (req, res, next) => {
+  try {
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    const pageUrl = typeof req.body?.pageUrl === "string" ? req.body.pageUrl.trim() : "";
+    if (!message || message.length > 4000) return res.status(400).json({ error: "Describe the problem in 4,000 characters or fewer." });
+    if (pageUrl.length > 2000) return res.status(400).json({ error: "The page address is too long." });
+    const result = await pool.query(
+      `insert into manager_issues (reporter_id, message, page_url) values ($1, $2, $3)
+       returning id, message, page_url, created_at`,
+      [req.authUser.id, message, pageUrl],
+    );
+    await audit(req.authUser.id, "report_issue", "manager_issue", result.rows[0].id, { pageUrl });
+    res.status(201).json({ id: result.rows[0].id, reporterName: req.authUser.name, message: result.rows[0].message, pageUrl: result.rows[0].page_url, createdAt: result.rows[0].created_at });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/owner/issues", requireDatabase, requireOwner, async (_req, res, next) => {
+  try {
+    const result = await pool.query(
+      `select mi.id, mi.message, mi.page_url, mi.created_at, ua.name as reporter_name
+       from manager_issues mi join user_accounts ua on ua.id = mi.reporter_id
+       order by mi.created_at desc limit 100`,
+    );
+    res.json({ issues: result.rows.map((row) => ({ id: row.id, reporterName: row.reporter_name, message: row.message, pageUrl: row.page_url, createdAt: row.created_at })) });
+  } catch (error) { next(error); }
+});
 
 app.get("/api/notifications/read", requireDatabase, async (req, res, next) => {
   try {

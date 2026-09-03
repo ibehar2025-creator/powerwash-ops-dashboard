@@ -8,17 +8,19 @@ import {
   ClipboardList,
   FileSignature,
   MapPinOff,
+  MessageSquareWarning,
   RefreshCw,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { loadReadNotificationKeys, markNotificationsRead } from "../lib/api";
+import { loadManagerIssues, loadReadNotificationKeys, markNotificationsRead } from "../lib/api";
+import type { ManagerIssue } from "../lib/api";
 import { useAuth } from "../lib/authContext";
 import { followUpTiming } from "../lib/followUps";
 import type { ContractSubmission, Customer, EarningSubmission, Job, Lead, ServicePlan } from "../types/business";
 
 type NotificationTone = "urgent" | "today" | "upcoming";
-type NotificationKind = "lead" | "job" | "plan" | "contract" | "upsell" | "sync";
+type NotificationKind = "lead" | "job" | "plan" | "contract" | "upsell" | "sync" | "issue";
 
 type NotificationItem = {
   id: string;
@@ -54,6 +56,7 @@ function missingAddress(address: string) {
 
 function notificationIcon(item: NotificationItem) {
   if (item.kind === "sync") return RefreshCw;
+  if (item.kind === "issue") return MessageSquareWarning;
   if (item.kind === "lead") return CalendarClock;
   if (item.kind === "plan") return ClipboardList;
   if (item.kind === "contract") return FileSignature;
@@ -107,6 +110,7 @@ export function NotificationCenter({
   const [open, setOpen] = useState(false);
   const [readNotificationKeys, setReadNotificationKeys] = useState<Set<string>>(new Set());
   const [readStateLoaded, setReadStateLoaded] = useState(false);
+  const [managerIssues, setManagerIssues] = useState<ManagerIssue[]>([]);
   const customerNames = useMemo(() => new Map(customers.map((customer) => [customer.id, customer.name])), [customers]);
 
   useEffect(() => {
@@ -121,6 +125,18 @@ export function NotificationCenter({
       if (active) setReadStateLoaded(true);
     });
     return () => { active = false; };
+  }, [user.id]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshIssues = () => loadManagerIssues().then((result) => {
+      if (active) setManagerIssues(result?.issues ?? []);
+    }).catch(() => {
+      // Other business notifications remain available if reports cannot be loaded.
+    });
+    void refreshIssues();
+    const interval = window.setInterval(() => void refreshIssues(), 60_000);
+    return () => { active = false; window.clearInterval(interval); };
   }, [user.id]);
 
   const notifications = useMemo(() => {
@@ -247,6 +263,16 @@ export function NotificationCenter({
       });
     });
 
+    managerIssues.forEach((issue) => {
+      items.push({
+        id: `manager-issue-${issue.id}`,
+        tone: "urgent",
+        title: `Problem reported by ${issue.reporterName}`,
+        detail: issue.message,
+        kind: "issue",
+      });
+    });
+
     const normalizedSyncStatus = syncStatus.toLowerCase();
     if (["failed", "error", "unavailable", "could not", "not configured"].some((word) => normalizedSyncStatus.includes(word))) {
       items.push({
@@ -260,7 +286,7 @@ export function NotificationCenter({
 
     const rank = { urgent: 0, today: 1, upcoming: 2 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
-  }, [contracts, customerNames, currentDate, earnings, jobs, leads, plans, syncStatus]);
+  }, [contracts, customerNames, currentDate, earnings, jobs, leads, managerIssues, plans, syncStatus]);
 
   const attentionCount = readStateLoaded
     ? notifications.filter((item) => !readNotificationKeys.has(notificationSeenKey(item))).length
@@ -327,7 +353,7 @@ export function NotificationCenter({
                 return <div key={item.id} className="flex items-start rounded-lg transition hover:bg-slate-50 dark:hover:bg-slate-800"><button type="button" className="flex min-w-0 flex-1 items-start gap-3 p-3 text-left" disabled={item.kind === "sync" && syncing} onClick={() => openItem(item)}><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${item.tone === "urgent" ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200" : item.tone === "today" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200" : "bg-mist text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200"}`}><Icon size={17} /></span><span className="min-w-0"><strong className="block text-sm text-ink dark:text-white">{item.title}</strong><span className="mt-1 block break-words text-xs leading-5 text-slate-500">{item.kind === "sync" && syncing ? "Syncing Google Sheets..." : item.detail}</span></span></button><button type="button" className="icon-button mr-2 mt-3 h-8 w-8 shrink-0" aria-label={`Mark ${item.title} as read`} title="Mark as read" onClick={() => markItemRead(item)}><Check size={16} /></button></div>;
               })}</section>;
             })}
-            {visibleNotifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No unread follow-ups, jobs, renewals, schedule issues, or sync problems need attention.</p></div>}
+            {visibleNotifications.length === 0 && <div className="p-8 text-center"><Bell className="mx-auto text-slate-300" /><p className="mt-3 font-semibold text-ink dark:text-white">You are caught up</p><p className="mt-1 text-sm text-slate-500">No unread reports, follow-ups, jobs, renewals, schedule issues, or sync problems need attention.</p></div>}
           </div>
         </div>
       </>}

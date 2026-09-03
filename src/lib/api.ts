@@ -42,6 +42,14 @@ export interface OwnerPayrollSnapshot {
   preview: PayrollPreview;
 }
 
+export interface ManagerIssue {
+  id: string;
+  reporterName: string;
+  message: string;
+  pageUrl: string;
+  createdAt: string;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -164,6 +172,14 @@ export function markNotificationsRead(keys: string[]) {
     method: "POST",
     body: JSON.stringify({ keys }),
   });
+}
+
+export function submitManagerIssue(message: string, pageUrl: string) {
+  return request<ManagerIssue>("/api/issues", { method: "POST", body: JSON.stringify({ message, pageUrl }) });
+}
+
+export function loadManagerIssues() {
+  return request<{ issues: ManagerIssue[] }>("/api/owner/issues");
 }
 
 export function loadEmployeeWorkspace(employeeId?: string) {
