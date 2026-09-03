@@ -5,9 +5,9 @@ export function loadDarkModePreference() {
     const saved = window.localStorage.getItem(themePreferenceKey);
     if (saved === "dark") return true;
     if (saved === "light") return false;
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
