@@ -7,11 +7,12 @@ export interface AuthUser {
   email: string;
   name: string;
   pictureUrl: string;
+  phone: string;
   age: number;
   role: AccountRole;
 }
 
-export const AuthContext = createContext<{ user: AuthUser; signOut: () => Promise<void> } | null>(null);
+export const AuthContext = createContext<{ user: AuthUser; updateProfile: (profile: Pick<AuthUser, "name" | "phone" | "pictureUrl">) => Promise<void>; signOut: () => Promise<void> } | null>(null);
 
 export function useAuth() {
   const value = useContext(AuthContext);

@@ -92,6 +92,8 @@ async function ensureMapSchema() {
       email text not null unique,
       name text not null,
       picture_url text not null default '',
+      phone text not null default '',
+      profile_overrides jsonb not null default '{}'::jsonb,
       age integer not null check (age between 13 and 120),
       role text not null check (role in ('owner', 'employee')),
       created_at timestamptz not null default now(),
@@ -117,6 +119,8 @@ async function ensureMapSchema() {
     );
 
     alter table user_accounts add column if not exists active boolean not null default true;
+    alter table user_accounts add column if not exists phone text not null default '';
+    alter table user_accounts add column if not exists profile_overrides jsonb not null default '{}'::jsonb;
     alter table user_accounts add column if not exists base_commission_pct numeric(6,4) not null default 0.20;
     alter table user_accounts add column if not exists upsell_commission_pct numeric(6,4) not null default 0.30;
     alter table user_accounts add column if not exists contract_bonus_pct numeric(6,4) not null default 0.10;
@@ -640,7 +644,7 @@ async function verifyGoogleCredential(credential) {
   return { googleSub: claims.sub, email: claims.email.toLowerCase(), name: claims.name || claims.email, pictureUrl: claims.picture || "" };
 }
 
-const toAuthUser = (row) => ({ id: row.id, email: row.email, name: row.name, pictureUrl: row.picture_url, age: row.age, role: row.role });
+const toAuthUser = (row) => ({ id: row.id, email: row.email, name: row.name, pictureUrl: row.picture_url, phone: row.phone ?? "", age: row.age, role: row.role });
 
 async function createSession(res, userId) {
   const token = randomBytes(32).toString("base64url");
@@ -1038,12 +1042,15 @@ app.post("/api/auth/google", requireDatabase, async (req, res, next) => {
     const user = result.rows[0];
     if (!user) return res.json({ needsProfile: true, profile: { email: profile.email, name: profile.name, pictureUrl: profile.pictureUrl } });
     if (!user.active) return res.status(403).json({ error: "This account has been deactivated by an owner." });
-    await pool.query(
-      "update user_accounts set email = $2, name = $3, picture_url = $4, last_login_at = now(), updated_at = now() where id = $1",
+    const updated = await pool.query(
+      `update user_accounts set email = $2,
+         name = case when profile_overrides ? 'name' then name else $3 end,
+         picture_url = case when profile_overrides ? 'pictureUrl' then picture_url else $4 end,
+         last_login_at = now(), updated_at = now() where id = $1 returning *`,
       [user.id, profile.email, profile.name, profile.pictureUrl],
     );
     await createSession(res, user.id);
-    res.json({ user: { ...toAuthUser(user), email: profile.email, name: profile.name, pictureUrl: profile.pictureUrl } });
+    res.json({ user: toAuthUser(updated.rows[0]) });
   } catch (error) {
     next(error);
   }
@@ -1082,6 +1089,26 @@ app.post("/api/auth/logout", async (req, res, next) => {
     if (token && pool) await pool.query("delete from auth_sessions where token_hash = $1", [hashToken(token)]);
     res.setHeader("Set-Cookie", cookie(sessionCookieName, "", { maxAge: 0 }));
     res.json({ signedOut: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/auth/profile", requireDatabase, requireAuth, async (req, res, next) => {
+  try {
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    const pictureUrl = typeof req.body?.pictureUrl === "string" ? req.body.pictureUrl.trim() : "";
+    if (!name || name.length > 120) return res.status(400).json({ error: "Enter a name up to 120 characters." });
+    if (phone.length > 40) return res.status(400).json({ error: "Enter a phone number up to 40 characters." });
+    if (pictureUrl.length > 2000 || (pictureUrl && !/^https:\/\//i.test(pictureUrl))) return res.status(400).json({ error: "Profile photo must use a secure https URL." });
+    const result = await pool.query(
+      `update user_accounts set name = $2, phone = $3, picture_url = $4,
+         profile_overrides = coalesce(profile_overrides, '{}'::jsonb) || '{"name":true,"pictureUrl":true}'::jsonb,
+         updated_at = now() where id = $1 returning *`,
+      [req.authUser.id, name, phone, pictureUrl],
+    );
+    res.json({ user: toAuthUser(result.rows[0]) });
   } catch (error) {
     next(error);
   }

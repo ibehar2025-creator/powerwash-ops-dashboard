@@ -156,8 +156,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setAccessCode("");
   }
 
+  async function updateProfile(profile: Pick<AuthUser, "name" | "phone" | "pictureUrl">) {
+    const result = await authRequest<{ user: AuthUser }>("/api/auth/profile", { method: "PATCH", body: JSON.stringify(profile) });
+    setUser(result.user);
+  }
+
   if (loading) return <LoadingScreen />;
-  if (user) return <AuthContext.Provider value={{ user, signOut }}>{children}</AuthContext.Provider>;
+  if (user) return <AuthContext.Provider value={{ user, updateProfile, signOut }}>{children}</AuthContext.Provider>;
 
   if (!config?.enabled) {
     return <AuthShell><div className="w-full"><ShieldCheck className="text-lagoon" size={32} /><h2 className="mt-5 text-2xl font-bold text-ink">Sign-in setup required</h2><p className="mt-2 text-sm leading-6 text-slate-500">Google authentication has not been connected to this deployment yet.</p>{error && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}</div></AuthShell>;

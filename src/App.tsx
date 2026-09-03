@@ -13,26 +13,23 @@ import {
   FileSignature,
   ExternalLink,
   LayoutDashboard,
-  LogOut,
   MapPinned,
   Menu,
-  Moon,
   Pencil,
   Plus,
   RefreshCw,
   Save,
   Sparkles,
   Star,
-  Sun,
   Trash2,
   UserRoundCog,
   X,
   WalletCards,
 } from "lucide-react";
 import { useAuth } from "./lib/authContext";
-import { loadDarkModePreference, saveDarkModePreference } from "./lib/themePreference";
+import { loadThemePreference, saveThemePreference, themeIsDark } from "./lib/themePreference";
 import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
-import { InstallAppButton } from "./components/InstallAppButton";
+import { ProfileMenu } from "./components/ProfileMenu";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { EmployeeWorkspace } from "./components/EmployeeWorkspace";
 import { OwnerContractsView, OwnerTeamView } from "./components/OwnerOperations";
@@ -101,26 +98,6 @@ function TabLoader({ label }: { label: string }) {
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function ThemeSwitch({ darkMode, onToggle }: { darkMode: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      className={cx("theme-switch", darkMode && "is-dark")}
-      onClick={onToggle}
-      aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-      aria-pressed={darkMode}
-      title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-    >
-      <span className="theme-stars" aria-hidden="true"><i /><i /><i /></span>
-      <span className="theme-cloud" aria-hidden="true"><i /><i /></span>
-      <span className="theme-orb" aria-hidden="true">
-        <Sun className="theme-sun" size={18} strokeWidth={2.4} />
-        <Moon className="theme-moon" size={17} strokeWidth={2.4} />
-      </span>
-    </button>
-  );
 }
 
 function findCustomer(customers: Customer[], customerId: string) {
@@ -284,7 +261,6 @@ export default function App() {
 }
 
 function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }) {
-  const { user, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
@@ -303,7 +279,8 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const [mapJobFocus, setMapJobFocus] = useState<{ jobId: string; requestId: number } | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [createKind, setCreateKind] = useState<CreateKind | null>(null);
-  const [darkMode, setDarkMode] = useState(loadDarkModePreference);
+  const [themePreference, setThemePreference] = useState(loadThemePreference);
+  const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference()));
   const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
   const [syncing, setSyncing] = useState(false);
   const [showCalendarSkeleton, setShowCalendarSkeleton] = useState(false);
@@ -361,8 +338,13 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   }, []);
 
   useEffect(() => {
-    saveDarkModePreference(darkMode);
-  }, [darkMode]);
+    saveThemePreference(themePreference);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => setDarkMode(themePreference === "dark" || (themePreference === "system" && media.matches));
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [themePreference]);
 
   useEffect(() => {
     void syncSheets();
@@ -610,7 +592,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
                 <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="text-2xl font-bold text-ink dark:text-white">{activeLabel}</h1><p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p></div>
               </div>
-              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button type="button" className="text-button hidden xl:inline-flex" onClick={onPreviewEmployee}>Preview employee</button><InstallAppButton /><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode(!darkMode)} /><button type="button" className="text-button min-w-0 gap-2 px-2" onClick={() => void signOut()} title="Sign out" aria-label={`Sign out ${user.name}`} >{user.pictureUrl ? <img className="h-6 w-6 shrink-0 rounded-full" src={user.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-mist text-xs font-bold text-lagoon">{user.name.slice(0, 1).toUpperCase()}</span>}<span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{user.role}</span></span><LogOut size={15} /></button></div>
+              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button type="button" className="text-button hidden xl:inline-flex" onClick={onPreviewEmployee}>Preview employee</button><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ProfileMenu theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
             </div>
           </header>
           {activeTab === "jobs" && <GlobalSearch customers={customers} jobs={jobs} onJob={setSelectedJob} onNew={setCreateKind} />}

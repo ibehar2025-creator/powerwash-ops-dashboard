@@ -1,13 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, DollarSign, Home, LogOut, MapPinned, Menu, Moon, Navigation, Phone, Save, Sparkles, Sun, X } from "lucide-react";
-import { InstallAppButton } from "./InstallAppButton";
+import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, DollarSign, Home, MapPinned, Menu, Navigation, Phone, Save, Sparkles, X } from "lucide-react";
+import { ProfileMenu } from "./ProfileMenu";
 import { EmployeePayrollStatements } from "./EmployeePayrollStatements";
 import { loadEmployeePayroll, loadEmployeeWorkspace, loadReadNotificationKeys, markNotificationsRead, saveEmployeeJobPatch, submitEmployeeEarnings } from "../lib/api";
 import type { EmployeeWorkspaceSnapshot } from "../lib/api";
 import { useAuth } from "../lib/authContext";
 import { currency, isoToday } from "../lib/calculations";
-import { loadDarkModePreference, saveDarkModePreference } from "../lib/themePreference";
+import { loadThemePreference, saveThemePreference, themeIsDark } from "../lib/themePreference";
 import type { EarningSubmission, Job, JobStatus, PayrollRun } from "../types/business";
 
 type EmployeeTab = "home" | "schedule" | "map" | "earnings";
@@ -22,10 +22,6 @@ const employeeInputClass = "mt-2 w-full rounded-lg border border-slate-200 bg-wh
 const employeeTextareaClass = `${employeeInputClass} min-h-28 resize-y`;
 const BusinessMap = lazy(() => import("./BusinessMap").then((module) => ({ default: module.BusinessMap })));
 
-function EmployeeThemeSwitch({ darkMode, onToggle }: { darkMode: boolean; onToggle: () => void }) {
-  return <button type="button" className="icon-button" onClick={onToggle} aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} title={darkMode ? "Light mode" : "Dark mode"}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</button>;
-}
-
 function moneyTotal(items: EarningSubmission[], statusesToInclude: EarningSubmission["status"][]) {
   return items.filter((item) => statusesToInclude.includes(item.status)).reduce((sum, item) => sum + item.totalEarnings, 0);
 }
@@ -37,11 +33,12 @@ function statusStyle(status: string) {
 }
 
 export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolean; onExitPreview?: () => void }) {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const [data, setData] = useState<EmployeeWorkspaceSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<EmployeeTab>("home");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(loadDarkModePreference);
+  const [themePreference, setThemePreference] = useState(loadThemePreference);
+  const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference()));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -68,8 +65,13 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   }, [reload]);
 
   useEffect(() => {
-    saveDarkModePreference(darkMode);
-  }, [darkMode]);
+    saveThemePreference(themePreference);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => setDarkMode(themePreference === "dark" || (themePreference === "system" && media.matches));
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [themePreference]);
 
   useEffect(() => {
     const refresh = () => void reload();
@@ -114,7 +116,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
     </aside>
     <main className="min-w-0 flex-1 overflow-x-hidden">
       {preview && <div className="employee-preview-banner flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900"><span>Owner preview: employee workspace</span><button className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1" onClick={onExitPreview}>Return to owner</button></div>}
-      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2"><InstallAppButton /><EmployeeNotifications data={data} statements={statements} assignmentMap={assignmentMap} /><EmployeeThemeSwitch darkMode={darkMode} onToggle={() => setDarkMode((value) => !value)} />{!preview && <button className="icon-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={17} /></button>}</div></div></header>
+      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2"><EmployeeNotifications data={data} statements={statements} assignmentMap={assignmentMap} /><ProfileMenu theme={themePreference} onTheme={setThemePreference} employee={employee} preview={preview} /></div></div></header>
       <div className="p-4 sm:p-6">{content}</div>
     </main>
     {menuOpen && <div className="fixed inset-0 z-[70] lg:hidden"><button className="absolute inset-0 bg-ink/45" onClick={() => setMenuOpen(false)} aria-label="Close navigation" /><aside className="absolute bottom-0 left-0 top-0 w-[min(82vw,320px)] bg-white p-4 shadow-soft dark:bg-slate-900"><div className="mb-5 flex items-center justify-between"><strong className="text-ink dark:text-white">Employee menu</strong><button className="icon-button" onClick={() => setMenuOpen(false)}><X size={17} /></button></div><EmployeeNav active={activeTab} onChoose={(tab) => { setActiveTab(tab); setMenuOpen(false); }} /></aside></div>}
