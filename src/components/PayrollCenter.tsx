@@ -1,75 +1,103 @@
 import { useEffect, useMemo, useState } from "react";
-import { Banknote, CheckCircle2, Download, FileText, Plus, Trash2 } from "lucide-react";
-import { addPayrollAdjustment, createPayrollRun, deletePayrollAdjustment, finalizePayrollRun, loadOwnerPayroll, recordPayrollPayment } from "../lib/api";
+import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, WalletCards } from "lucide-react";
+import { createPayrollRun, finalizePayrollRun, loadOwnerPayroll, recordPayrollPayment } from "../lib/api";
 import type { OwnerPayrollSnapshot } from "../lib/api";
 import { currency, isoToday } from "../lib/calculations";
-import type { EmployeeProfile, PayrollRun } from "../types/business";
+import type { EmployeeProfile, PayrollLine, PayrollRun } from "../types/business";
 
-function employeeTotals(run: PayrollRun, employeeId: string) {
-  const lines = run.lines.filter((item) => item.employeeId === employeeId);
-  const adjustments = run.adjustments.filter((item) => item.employeeId === employeeId);
-  const gross = lines.reduce((sum, item) => sum + item.amount, 0);
-  const additions = adjustments.filter((item) => item.adjustmentType === "addition").reduce((sum, item) => sum + item.amount, 0);
-  const deductions = adjustments.filter((item) => item.adjustmentType === "deduction").reduce((sum, item) => sum + item.amount, 0);
-  return { lines, adjustments, gross, additions, deductions, net: gross + additions - deductions };
+type ContractorTotal = { employeeId: string; employeeName: string; lines: PayrollLine[]; total: number };
+
+function contractorTotals(lines: PayrollLine[]) {
+  const grouped = new Map<string, ContractorTotal>();
+  for (const line of lines) {
+    const current = grouped.get(line.employeeId) ?? { employeeId: line.employeeId, employeeName: line.employeeName, lines: [], total: 0 };
+    current.lines.push(line);
+    current.total += line.amount;
+    grouped.set(line.employeeId, current);
+  }
+  return [...grouped.values()].sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+}
+
+function displayDate(value: string) {
+  return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
-  const [runs, setRuns] = useState<PayrollRun[]>([]);
-  const [preview, setPreview] = useState<OwnerPayrollSnapshot["preview"]>();
-  const [selectedId, setSelectedId] = useState("");
+  const [snapshot, setSnapshot] = useState<OwnerPayrollSnapshot>();
   const [loading, setLoading] = useState(true);
-  const [working, setWorking] = useState(false);
+  const [working, setWorking] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [adjustment, setAdjustment] = useState({ employeeId: employees[0]?.id ?? "", adjustmentType: "addition" as "addition" | "deduction", category: "bonus" as "bonus" | "reimbursement" | "deduction" | "correction" | "other", description: "", amount: "" });
-  const [paymentEmployee, setPaymentEmployee] = useState("");
-  const [payment, setPayment] = useState({ paymentMethod: "bank" as "bank" | "check", paidAt: isoToday(), reference: "", note: "" });
+  const [historyOpen, setHistoryOpen] = useState(false);
 
-  async function reload() {
-    setLoading(true); setError("");
+  async function reload(showLoader = false) {
+    if (showLoader) setLoading(true);
+    setError("");
     try {
       const result = await loadOwnerPayroll();
-      if (!result) throw new Error("Payroll service is unavailable.");
-      setRuns(result.runs); setPreview(result.preview);
-      setSelectedId((current) => current || result.runs[0]?.id || "");
-    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to load payroll."); }
-    finally { setLoading(false); }
+      if (!result) throw new Error("Contractor payments are unavailable.");
+      setSnapshot(result);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Unable to load contractor payments.");
+    } finally { setLoading(false); }
   }
   useEffect(() => { void reload(); }, []);
 
-  const run = runs.find((item) => item.id === selectedId) ?? runs[0];
-  const employeeIds = useMemo(() => run ? [...new Set([...run.lines.map((item) => item.employeeId), ...run.adjustments.map((item) => item.employeeId)])] : [], [run]);
-  const unpaidIds = run ? employeeIds.filter((id) => !run.payments.some((paymentItem) => paymentItem.employeeId === id)) : [];
+  const preview = snapshot?.preview;
+  const currentRun = snapshot?.runs.find((run) => run.periodStart === preview?.periodStart && run.periodEnd === preview?.periodEnd);
+  const totals = useMemo(() => contractorTotals(currentRun?.lines ?? preview?.eligibleLines ?? []), [currentRun?.lines, preview?.eligibleLines]);
+  const weeklyTotal = currentRun?.netPay ?? totals.reduce((sum, person) => sum + person.total, 0);
+  const paidIds = new Set(currentRun?.payments.map((payment) => payment.employeeId) ?? []);
 
-  function replaceRun(updated: PayrollRun) {
-    setRuns((current) => [updated, ...current.filter((item) => item.id !== updated.id)].sort((a, b) => b.periodStart.localeCompare(a.periodStart)));
-    setSelectedId(updated.id);
-  }
-  async function act(action: () => Promise<PayrollRun | null>, success: string) {
-    setWorking(true); setError(""); setMessage("");
-    try { const result = await action(); if (!result) throw new Error("Payroll service is unavailable."); replaceRun(result); setMessage(success); }
-    catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Payroll could not be updated."); }
-    finally { setWorking(false); }
+  async function prepareWeek() {
+    if (!preview) return;
+    setWorking("prepare"); setError(""); setMessage("");
+    try {
+      const draft = currentRun ?? await createPayrollRun(preview);
+      if (!draft) throw new Error("The weekly payment list could not be created.");
+      const ready = draft.status === "draft" ? await finalizePayrollRun(draft.id) : draft;
+      if (!ready) throw new Error("The weekly payment list could not be confirmed.");
+      setMessage(`Amounts confirmed. Pay contractors by ${displayDate(ready.payday)}.`);
+      await reload();
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to confirm this week."); }
+    finally { setWorking(""); }
   }
 
-  if (loading) return <div className="grid min-h-[360px] place-items-center text-sm font-semibold text-slate-500">Loading payroll...</div>;
-  return <div className="space-y-5">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon">Owner only</p><h2 className="text-2xl font-bold text-ink dark:text-white">Weekly payroll</h2><p className="mt-1 text-sm text-slate-500">Internal commission payroll records. Taxes, filings, and bank transfers are handled outside this app.</p></div>{preview && !runs.some((item) => item.periodStart === preview.periodStart && item.periodEnd === preview.periodEnd) && <button className="primary-button gap-2" disabled={working || !preview.eligibleLines.length} onClick={() => void act(() => createPayrollRun(preview), "Draft payroll created.")}><Plus size={16} />Create {preview.periodStart} payroll</button>}</div>
-    {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}{message && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">{message}</p>}
-    {preview && <div className="grid gap-3 sm:grid-cols-3"><Metric label="Uncaptured earnings" value={currency.format(preview.eligibleLines.reduce((sum, item) => sum + item.amount, 0))} detail="Completed work ready for a draft" /><Metric label="Missing approvals" value={String(preview.missingApprovals)} detail="Extras not yet included" /><Metric label="Default payday" value={preview.payday} detail="Friday after the period" /></div>}
-    <div className="grid gap-4 xl:grid-cols-[0.75fr_1.5fr]">
-      <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-semibold text-ink dark:text-white">Payroll history</h3><div className="mt-3 space-y-2">{runs.map((item) => <button key={item.id} className={`w-full rounded-lg border p-3 text-left ${item.id === run?.id ? "border-lagoon bg-mist dark:bg-cyan-500/10" : "border-slate-200 dark:border-slate-700"}`} onClick={() => setSelectedId(item.id)}><div className="flex justify-between gap-3"><strong>{item.periodStart} – {item.periodEnd}</strong><Status value={item.status} /></div><p className="mt-1 text-sm text-slate-500">{currency.format(item.netPay)} · payday {item.payday}</p></button>)}{!runs.length && <p className="rounded-lg border border-dashed p-5 text-sm text-slate-500">No payroll runs yet. Complete and assign jobs, then create this week’s draft.</p>}</div><div className="mt-5 border-t pt-4 dark:border-slate-700"><p className="text-xs font-semibold uppercase text-slate-400">Legacy payouts</p><p className="mt-1 text-xs text-slate-500">Existing payout history remains available in Team and is not rewritten.</p></div></section>
-      {run ? <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase text-lagoon">{run.status} payroll</p><h3 className="text-xl font-bold text-ink dark:text-white">{run.periodStart} – {run.periodEnd}</h3><p className="text-sm text-slate-500">Payday {run.payday}</p></div><div className="flex flex-wrap gap-2"><a className="text-button gap-2" href={`/api/owner/payroll/${run.id}/export.csv`}><Download size={15} />CSV</a>{run.status === "draft" && <button className="primary-button gap-2" disabled={working} onClick={() => void act(() => finalizePayrollRun(run.id), "Payroll finalized and employee statements published.")}><CheckCircle2 size={15} />Finalize payroll</button>}</div></div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-4"><Metric label="Gross earnings" value={currency.format(run.grossEarnings)} /><Metric label="Additions" value={currency.format(run.totalAdditions)} /><Metric label="Deductions" value={currency.format(run.totalDeductions)} /><Metric label="Amount to record" value={currency.format(run.netPay)} /></div>
-        <div className="mt-5 space-y-3">{employeeIds.map((employeeId) => { const totals = employeeTotals(run, employeeId); const employee = employees.find((item) => item.id === employeeId); const recorded = run.payments.find((item) => item.employeeId === employeeId); return <article key={employeeId} className="rounded-lg border border-slate-200 p-4 dark:border-slate-700"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h4 className="font-semibold text-ink dark:text-white">{employee?.name ?? totals.lines[0]?.employeeName ?? "Employee"}</h4><p className="text-xs text-slate-500">Gross {currency.format(totals.gross + totals.additions)} · deductions {currency.format(totals.deductions)}</p></div><strong className="text-lg text-ink dark:text-white">{currency.format(totals.net)}</strong></div><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead className="text-xs uppercase text-slate-400"><tr><th className="py-2">Date</th><th>Type</th><th>Description</th><th className="text-right">Amount</th></tr></thead><tbody>{totals.lines.map((line) => <tr key={line.id} className="border-t dark:border-slate-700"><td className="py-2">{line.workDate}</td><td className="capitalize">{line.lineType.replaceAll("_", " ")}</td><td>{line.customerName} · {line.description}</td><td className="text-right">{currency.format(line.amount)}</td></tr>)}{totals.adjustments.map((item) => <tr key={item.id} className="border-t dark:border-slate-700"><td className="py-2">—</td><td className="capitalize">{item.category}</td><td>{item.description}</td><td className={`text-right ${item.adjustmentType === "deduction" ? "text-rose-600" : ""}`}>{item.adjustmentType === "deduction" ? "−" : "+"}{currency.format(item.amount)}{run.status === "draft" && <button className="ml-2 text-rose-500" title="Remove adjustment" onClick={() => void act(() => deletePayrollAdjustment(run.id, item.id), "Adjustment removed.")}><Trash2 size={14} /></button>}</td></tr>)}</tbody></table></div>{recorded && <p className="mt-3 rounded-lg bg-emerald-50 p-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">Paid {recorded.paidAt.slice(0, 10)} by {recorded.paymentMethod}{recorded.reference ? ` · ${recorded.reference}` : ""}</p>}</article>; })}</div>
-        {run.status === "draft" && <form className="mt-5 rounded-lg bg-slate-50 p-4 dark:bg-slate-800/60" onSubmit={(event) => { event.preventDefault(); void act(() => addPayrollAdjustment(run.id, { ...adjustment, amount: Number(adjustment.amount) }), "Adjustment added."); setAdjustment((current) => ({ ...current, description: "", amount: "" })); }}><h4 className="font-semibold text-ink dark:text-white">Add payroll adjustment</h4><div className="settings-grid mt-3"><label>Employee<select required value={adjustment.employeeId} onChange={(event) => setAdjustment({ ...adjustment, employeeId: event.target.value })}>{employees.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Direction<select value={adjustment.adjustmentType} onChange={(event) => setAdjustment({ ...adjustment, adjustmentType: event.target.value as "addition" | "deduction", category: event.target.value === "deduction" ? "deduction" : "bonus" })}><option value="addition">Addition</option><option value="deduction">Deduction</option></select></label><label>Category<select value={adjustment.category} onChange={(event) => setAdjustment({ ...adjustment, category: event.target.value as typeof adjustment.category })}>{(adjustment.adjustmentType === "addition" ? ["bonus", "reimbursement", "correction", "other"] : ["deduction", "correction", "other"]).map((item) => <option key={item}>{item}</option>)}</select></label><label>Amount<input required type="number" min="0.01" step="0.01" value={adjustment.amount} onChange={(event) => setAdjustment({ ...adjustment, amount: event.target.value })} /></label><label className="sm:col-span-2">Description<input required value={adjustment.description} onChange={(event) => setAdjustment({ ...adjustment, description: event.target.value })} placeholder="Performance bonus or accountant-provided deduction" /></label></div><button className="text-button mt-3 gap-2" disabled={working}><Plus size={15} />Add adjustment</button></form>}
-        {run.status === "finalized" && unpaidIds.length > 0 && <form className="mt-5 rounded-lg bg-slate-50 p-4 dark:bg-slate-800/60" onSubmit={(event) => { event.preventDefault(); const employeeId = paymentEmployee || unpaidIds[0]; void act(() => recordPayrollPayment(run.id, { employeeId, ...payment }), "Payment recorded."); }}><h4 className="font-semibold text-ink dark:text-white">Record employee payment</h4><div className="settings-grid mt-3"><label>Employee<select value={paymentEmployee || unpaidIds[0]} onChange={(event) => setPaymentEmployee(event.target.value)}>{unpaidIds.map((id) => <option key={id} value={id}>{employees.find((item) => item.id === id)?.name ?? "Employee"}</option>)}</select></label><label>Method<select value={payment.paymentMethod} onChange={(event) => setPayment({ ...payment, paymentMethod: event.target.value as "bank" | "check" })}><option value="bank">Bank payment</option><option value="check">Check</option></select></label><label>Paid date<input required type="date" value={payment.paidAt} onChange={(event) => setPayment({ ...payment, paidAt: event.target.value })} /></label><label>Reference<input value={payment.reference} onChange={(event) => setPayment({ ...payment, reference: event.target.value })} placeholder="Optional confirmation" /></label><label className="sm:col-span-2">Note<input value={payment.note} onChange={(event) => setPayment({ ...payment, note: event.target.value })} /></label></div><button className="primary-button mt-3 gap-2" disabled={working}><Banknote size={15} />Record payment</button></form>}
-      </section> : <section className="grid min-h-[360px] place-items-center rounded-lg border border-dashed p-6 text-center text-slate-500"><div><FileText className="mx-auto mb-3" /><p className="font-semibold">Create the first weekly payroll draft</p></div></section>}
-    </div>
+  async function markPaid(employeeId: string) {
+    if (!currentRun) return;
+    setWorking(employeeId); setError(""); setMessage("");
+    try {
+      const updated = await recordPayrollPayment(currentRun.id, { employeeId, paymentMethod: "bank", reference: "", note: "1099 contractor payment", paidAt: isoToday() });
+      if (!updated) throw new Error("The payment could not be recorded.");
+      setMessage("Payment marked as paid.");
+      await reload();
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to mark the payment paid."); }
+    finally { setWorking(""); }
+  }
+
+  if (loading) return <div className="grid min-h-[360px] place-items-center text-sm font-semibold text-slate-500"><span className="text-center"><RefreshCw className="mx-auto mb-3 animate-spin" />Loading contractor payments...</span></div>;
+  return <div className="mx-auto max-w-5xl space-y-5">
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon">Owner only</p><h2 className="text-2xl font-bold text-ink dark:text-white">Weekly contractor payments</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Approved job earnings automatically build this week’s 1099 contractor total.</p></div><button className="text-button gap-2" disabled={Boolean(working)} onClick={() => void reload(true)}><RefreshCw size={15} />Refresh totals</button></header>
+    {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}
+    {message && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">{message}</p>}
+    {preview && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="bg-gradient-to-r from-lagoon to-cyan-600 p-5 text-white sm:p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-100">Week of {displayDate(preview.periodStart)}</p><p className="mt-2 text-4xl font-bold">{currency.format(weeklyTotal)}</p><p className="mt-1 text-sm text-cyan-50">{totals.length} contractor{totals.length === 1 ? "" : "s"} · through {displayDate(preview.periodEnd)}</p></div><div className="rounded-xl bg-white/15 px-4 py-3 backdrop-blur"><div className="flex items-center gap-2 text-cyan-50"><CalendarClock size={19} /><span className="text-xs font-bold uppercase tracking-wide">Pay by</span></div><p className="mt-1 text-xl font-bold">{displayDate(preview.payday)}</p></div></div></div>
+      <div className="p-4 sm:p-6"><div className="space-y-3">{totals.map((person) => {
+        const paid = paidIds.has(person.employeeId);
+        const name = employees.find((item) => item.id === person.employeeId)?.name ?? person.employeeName;
+        const jobCount = person.lines.filter((line) => line.lineType === "commission").length;
+        return <article key={person.employeeId} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-ink dark:text-white">{name}</h3><p className="mt-1 text-sm text-slate-500">{jobCount} approved job{jobCount === 1 ? "" : "s"} plus approved tips and upsells</p></div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className="text-xl text-ink dark:text-white">{currency.format(person.total)}</strong>{paid ? <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"><Check size={14} />Paid</span> : currentRun?.status === "finalized" ? <button className="primary-button" disabled={Boolean(working)} onClick={() => void markPaid(person.employeeId)}>{working === person.employeeId ? "Saving..." : "Mark paid"}</button> : null}</div></div><details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-lagoon">View earnings included</summary><div className="mt-2 space-y-2">{person.lines.map((line) => <div key={line.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span>{displayDate(line.workDate)} · {line.customerName} · {line.lineType.replaceAll("_", " ")}</span><strong>{currency.format(line.amount)}</strong></div>)}</div></details></article>;
+      })}</div>
+        {!totals.length && <div className="py-10 text-center"><WalletCards className="mx-auto text-slate-300" size={34} /><p className="mt-3 font-semibold text-ink dark:text-white">No approved earnings yet</p><p className="mt-1 text-sm text-slate-500">Approve completed-job earnings in Team and they will appear here automatically.</p></div>}
+        {totals.length > 0 && (!currentRun || currentRun.status === "draft") && <button className="primary-button mt-5 w-full gap-2" disabled={Boolean(working)} onClick={() => void prepareWeek()}><CheckCircle2 size={17} />{working === "prepare" ? "Confirming..." : "Confirm weekly amounts"}</button>}
+        {preview.missingApprovals > 0 && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{preview.missingApprovals} completed-job submission{preview.missingApprovals === 1 ? " is" : "s are"} still waiting for approval and not included yet.</p>}
+      </div>
+    </section>}
+    <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"><button className="flex w-full items-center justify-between p-4 text-left font-semibold text-ink dark:text-white" onClick={() => setHistoryOpen((value) => !value)}><span>Previous payment weeks</span>{historyOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>{historyOpen && <div className="border-t border-slate-200 p-4 dark:border-slate-800"><div className="space-y-2">{snapshot?.runs.filter((run) => run.id !== currentRun?.id).map((run) => <HistoryRow key={run.id} run={run} />)}{!snapshot?.runs.filter((run) => run.id !== currentRun?.id).length && <p className="text-sm text-slate-500">No previous weekly payment records.</p>}</div></div>}</section>
+    <p className="px-1 text-xs leading-5 text-slate-500 dark:text-slate-400">This page tracks internal contractor earnings and payment status only. It does not calculate taxes or create tax forms.</p>
   </div>;
 }
 
-function Metric({ label, value, detail }: { label: string; value: string; detail?: string }) { return <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold text-ink dark:text-white">{value}</p>{detail && <p className="mt-1 text-xs text-slate-400">{detail}</p>}</div>; }
-function Status({ value }: { value: PayrollRun["status"] }) { return <span className={`rounded-md px-2 py-1 text-xs font-semibold capitalize ${value === "paid" ? "bg-emerald-100 text-emerald-700" : value === "finalized" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{value}</span>; }
+function HistoryRow({ run }: { run: PayrollRun }) {
+  return <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-ink dark:text-white">{displayDate(run.periodStart)} – {displayDate(run.periodEnd)}</p><p className="text-xs text-slate-500">Pay date {displayDate(run.payday)}</p></div><div className="flex items-center gap-3"><strong>{currency.format(run.netPay)}</strong><span className={`rounded-md px-2 py-1 text-xs font-bold ${run.status === "paid" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200" : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200"}`}>{run.status === "paid" ? "Paid" : "Payment due"}</span></div></div>;
+}

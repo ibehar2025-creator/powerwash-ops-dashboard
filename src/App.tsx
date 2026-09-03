@@ -76,7 +76,7 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
   { id: "team", label: "Team", icon: UserRoundCog },
-  { id: "payroll", label: "Payroll", icon: WalletCards },
+  { id: "payroll", label: "Contractor Pay", icon: WalletCards },
   { id: "contracts", label: "Contracts", icon: FileSignature },
 ];
 
