@@ -349,7 +349,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
 
   useEffect(() => {
     void syncSheets();
-    const interval = window.setInterval(() => void syncSheets(), 30 * 60_000);
+    const interval = window.setInterval(() => void syncSheets(), 15 * 60_000);
     return () => window.clearInterval(interval);
   }, [syncSheets]);
 
