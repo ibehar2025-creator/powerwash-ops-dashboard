@@ -550,19 +550,25 @@ async function eligiblePayrollLines(db, periodEnd) {
      join user_accounts ua on ua.id = ja.employee_id
      left join earning_submissions es on es.job_id = j.id and es.employee_id = ja.employee_id
      left join contract_submissions cs on cs.id = es.contract_submission_id
-     where j.status = 'completed' and j.date <= $1 and coalesce(es.status, '') <> 'paid'
+     where j.status = 'completed' and j.date <= $1 and es.status = 'approved'
      order by j.date, ua.name, c.name`,
     [periodEnd],
   );
   const lines = [];
-  let missingApprovals = 0;
+  const missing = await db.query(
+    `select count(*)::int as count
+     from job_assignments ja
+     join jobs j on j.id = ja.job_id
+     join earning_submissions es on es.job_id = j.id and es.employee_id = ja.employee_id
+     where j.status = 'completed' and j.date <= $1 and es.status in ('pending', 'draft')`,
+    [periodEnd],
+  );
+  const missingApprovals = missing.rows[0]?.count ?? 0;
   for (const row of result.rows) {
     const candidates = [{ key: `${row.job_id}:commission`, type: "commission", description: "Job commission", amount: Number(row.original_job_price) * Number(row.base_commission_pct) }];
-    if (row.earning_id && row.earning_status === "approved") {
-      if (Number(row.upsell_amount) > 0) candidates.push({ key: `${row.job_id}:upsell`, type: "upsell", description: "Approved upsell commission", amount: Number(row.upsell_amount) * Number(row.upsell_commission_pct) });
-      if (row.contract_submission_id && row.contract_status === "approved") candidates.push({ key: `${row.job_id}:contract_bonus`, type: "contract_bonus", description: "Approved service contract bonus", amount: Number(row.original_job_price) * Number(row.contract_bonus_pct) });
-      if (Number(row.tip_amount) > 0) candidates.push({ key: `${row.job_id}:tip`, type: "tip", description: "Tip share", amount: Number(row.tip_amount) * Number(row.tip_share_pct) });
-    } else if (row.earning_id && ["pending", "draft"].includes(row.earning_status)) missingApprovals += 1;
+    if (Number(row.upsell_amount) > 0) candidates.push({ key: `${row.job_id}:upsell`, type: "upsell", description: "Approved upsell commission", amount: Number(row.upsell_amount) * Number(row.upsell_commission_pct) });
+    if (row.contract_submission_id && row.contract_status === "approved") candidates.push({ key: `${row.job_id}:contract_bonus`, type: "contract_bonus", description: "Approved service contract bonus", amount: Number(row.original_job_price) * Number(row.contract_bonus_pct) });
+    if (Number(row.tip_amount) > 0) candidates.push({ key: `${row.job_id}:tip`, type: "tip", description: "Tip share", amount: Number(row.tip_amount) * Number(row.tip_share_pct) });
     for (const item of candidates.filter((item) => item.amount > 0)) {
       const used = await db.query("select 1 from payroll_run_lines where source_key = $1", [item.key]);
       if (used.rows[0]) continue;
