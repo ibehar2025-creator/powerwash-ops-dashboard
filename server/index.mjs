@@ -1819,6 +1819,7 @@ const earningSelect = `
   select es.*, ja.original_job_price, ja.base_commission_pct, ja.upsell_commission_pct,
     ja.contract_bonus_pct, ja.tip_share_pct, ua.name as employee_name,
     customers.name as customer_name, jobs.date as job_date, jobs.status as job_status,
+    jobs.date <= current_date as job_is_due,
     contract_submissions.status as contract_status
   from earning_submissions es
   join job_assignments ja on ja.job_id = es.job_id and ja.employee_id = es.employee_id
@@ -2168,11 +2169,26 @@ app.post("/api/owner/earnings/:id/review", requireDatabase, requireOwner, async 
     if (!current.rows[0]) return res.status(404).json({ error: "Earnings submission was not found." });
     if (decision === "approved" && current.rows[0].job_date && current.rows[0].status === "paid") return res.status(409).json({ error: "Paid earnings cannot be reviewed again." });
     if (decision === "approved") {
-      if (current.rows[0].job_status !== "completed") return res.status(409).json({ error: "Complete the job before approving its earnings." });
+      if (current.rows[0].job_status === "canceled") return res.status(409).json({ error: "Canceled jobs cannot have earnings approved." });
+      if (current.rows[0].job_status !== "completed" && !current.rows[0].job_is_due) return res.status(409).json({ error: "Future jobs must be completed before approving their earnings." });
       if (current.rows[0].contract_submission_id && current.rows[0].contract_status !== "approved") return res.status(409).json({ error: "Approve the related contract before approving its bonus." });
       const finalPrice = Number(current.rows[0].original_job_price) + Number(current.rows[0].upsell_amount);
-      await runSheetAction("updateJob", { jobId: current.rows[0].job_id, price: finalPrice, tipAmount: Number(current.rows[0].tip_amount) });
-      await client.query("update jobs set price = $2, tip_amount = $3, updated_at = now() where id = $1", [current.rows[0].job_id, finalPrice, current.rows[0].tip_amount]);
+      const tipAmount = Number(current.rows[0].tip_amount);
+      await runSheetAction("updateJob", {
+        jobId: current.rows[0].job_id,
+        status: "completed",
+        price: finalPrice,
+        tipAmount,
+        paymentStatus: "paid",
+        amountPaid: finalPrice,
+      });
+      await client.query(
+        `update jobs set status = 'completed', price = $2, tip_amount = $3,
+         payment_status = 'paid', amount_paid = $2,
+         website_overrides = website_overrides || $4::jsonb, updated_at = now()
+         where id = $1`,
+        [current.rows[0].job_id, finalPrice, tipAmount, JSON.stringify({ status: true, price: true, tipAmount: true, paymentStatus: true, amountPaid: true })],
+      );
     }
     await client.query(
       "update earning_submissions set status = $2, owner_note = $3, reviewed_by = $4, reviewed_at = now(), updated_at = now() where id = $1",
