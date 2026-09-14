@@ -253,14 +253,11 @@ function DataTable({ children }: { children: ReactNode }) {
 
 export default function App() {
   const { user } = useAuth();
-  const [employeePreview, setEmployeePreview] = useState(false);
-  if (user.role === "employee" || employeePreview) {
-    return <EmployeeWorkspace preview={employeePreview} onExitPreview={() => setEmployeePreview(false)} />;
-  }
-  return <OwnerDashboard onPreviewEmployee={() => setEmployeePreview(true)} />;
+  if (user.role === "employee") return <EmployeeWorkspace />;
+  return <OwnerDashboard />;
 }
 
-function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }) {
+function OwnerDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -584,7 +581,6 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
         <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:block">
           <div className="mb-6 rounded-lg bg-ink p-4 text-white"><p className="text-sm text-cyan-100">The</p><h1 className="text-xl font-bold">Powerwashing Pros</h1><p className="mt-2 text-xs text-slate-300">Daily control center for jobs, scheduling, and growth.</p></div>
           <nav className="space-y-1">{tabs.filter((tab) => !tab.mobileOnly).map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`desktop-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}</nav>
-          <button type="button" className="nav-item mt-5 border-t border-slate-200 pt-5 dark:border-slate-700" onClick={onPreviewEmployee}><UserRoundCog size={18} /><span>Preview employee</span></button>
         </aside>
         <main className="flex min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
           <header className="app-header min-w-0 max-w-full border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
@@ -593,7 +589,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
                 <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="text-2xl font-bold text-ink dark:text-white">{activeLabel}</h1><p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p></div>
               </div>
-              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><button type="button" className="text-button hidden xl:inline-flex" onClick={onPreviewEmployee}>Preview employee</button><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ProfileMenu theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
+              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ProfileMenu theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
             </div>
           </header>
           {activeTab === "jobs" && <GlobalSearch customers={customers} jobs={jobs} onJob={setSelectedJob} onNew={setCreateKind} />}
@@ -605,7 +601,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
                   <div><p className="text-sm text-cyan-100">The</p><h2 className="text-lg font-bold">Powerwashing Pros</h2><p className="mt-1 text-xs text-slate-300">Choose a dashboard tab.</p></div>
                   <button className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/20 text-white transition hover:bg-white/10" onClick={() => setMobileMenuOpen(false)} title="Close navigation" aria-label="Close navigation"><X size={18} /></button>
                 </div>
-                <nav className="space-y-1 overflow-y-auto">{tabs.map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`mobile-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}<button type="button" className="nav-item mt-3 border-t border-slate-200 pt-4 dark:border-slate-700" onClick={onPreviewEmployee}><UserRoundCog size={18} /><span>Preview employee</span></button></nav>
+                <nav className="space-y-1 overflow-y-auto">{tabs.map((tab) => { const Icon = tab.icon; return <button key={tab.id} data-testid={`mobile-tab-${tab.id}`} onClick={() => chooseTab(tab.id)} className={cx("nav-item", activeTab === tab.id && "active")}><Icon size={18} /><span>{tab.label}</span></button>; })}</nav>
               </aside>
             </div>
           )}
