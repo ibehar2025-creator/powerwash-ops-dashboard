@@ -2083,8 +2083,22 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
         hasUpsell ? quote : 0, hasUpsell ? String(upsellNotes).trim() : "",
       ],
     );
+    const jobResult = await pool.query("select price from jobs where id = $1", [jobId]);
+    const completedPrice = Number(jobResult.rows[0]?.price ?? 0);
+    await runSheetAction("updateJob", {
+      jobId,
+      status: "completed",
+      paymentStatus: "paid",
+      amountPaid: completedPrice,
+    });
+    await pool.query(
+      `update jobs set status = 'completed', payment_status = 'paid', amount_paid = price,
+       website_overrides = website_overrides || '{"status": true}'::jsonb, updated_at = now()
+       where id = $1`,
+      [jobId],
+    );
     const full = await pool.query(`${earningSelect} where es.id = $1`, [result.rows[0].id]);
-    await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, hasUpsell, upsellOutcome, upsellQuotedAmount: hasUpsell ? quote : 0 });
+    await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, hasUpsell, upsellOutcome, upsellQuotedAmount: hasUpsell ? quote : 0, jobMarkedCompleted: true });
     void sendPushToRole("owner", { title: "Earnings need approval", body: `${subject.name} submitted earnings${hasUpsell ? " with an upsell" : ""}.`, tag: `earning-${result.rows[0].id}` }).catch(console.error);
     res.status(201).json(toEarning(full.rows[0]));
   } catch (error) {
