@@ -584,13 +584,14 @@ function OwnerDashboard() {
         </aside>
         <main className="flex min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
           <header className="app-header min-w-0 max-w-full border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-3">
-                <button className="icon-button mt-1 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
-                <div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="text-2xl font-bold text-ink dark:text-white">{activeLabel}</h1><p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p></div>
+            <div className="owner-header-row flex min-w-0 items-end justify-between gap-2">
+              <div className="flex min-w-0 items-end gap-2">
+                <button className="icon-button shrink-0 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
+                <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300 sm:text-xs">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="break-words text-lg font-bold leading-9 text-ink dark:text-white sm:text-2xl">{activeLabel}</h1></div>
               </div>
-              <div className="flex items-center gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 sm:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="text-button" disabled={syncing} onClick={() => void syncSheets()}>{syncing ? "Syncing" : "Sync sheets"}</button><ProfileMenu theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
+              <div className="owner-header-actions flex shrink-0 items-center gap-1 sm:gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 xl:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="icon-button shrink-0" title={syncing ? "Syncing sheets" : "Sync sheets"} aria-label={syncing ? "Syncing sheets" : "Sync sheets"} disabled={syncing} onClick={() => void syncSheets()}><RefreshCw size={18} className={syncing ? "animate-spin" : ""} /></button><ProfileMenu compact theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
             </div>
+            <p className="mt-2 break-words text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p>
           </header>
           {activeTab === "jobs" && <GlobalSearch customers={customers} jobs={jobs} onJob={setSelectedJob} onNew={setCreateKind} />}
           {mobileMenuOpen && (

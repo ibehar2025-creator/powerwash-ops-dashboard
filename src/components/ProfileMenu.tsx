@@ -9,12 +9,13 @@ import { PushNotificationSettings } from "./PushNotificationSettings";
 type View = "profile" | "notifications" | "help" | "report" | "business" | "rates" | null;
 const profileFieldClass = "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-lagoon focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500";
 
-export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview = false }: {
+export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview = false, compact = false }: {
   theme: ThemePreference;
   onTheme: (theme: ThemePreference) => void;
   employee?: EmployeeProfile;
   onOwnerNavigate?: (tab: "team" | "payroll" | "contracts") => void;
   preview?: boolean;
+  compact?: boolean;
 }) {
   const { user, updateProfile, signOut, deleteAccount } = useAuth();
   const [open, setOpen] = useState(false);
@@ -61,9 +62,9 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
   }
 
   return <div className="relative" ref={menuRef}>
-    <button type="button" className="text-button min-w-0 gap-2 px-2" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label="Open profile menu">
+    <button type="button" className={compact ? "icon-button shrink-0" : "text-button min-w-0 gap-2 px-2"} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label="Open profile menu" title="Profile">
       {user.pictureUrl ? <img className="h-7 w-7 shrink-0 rounded-full object-cover" src={user.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-mist text-xs font-bold text-lagoon">{user.name.slice(0, 1).toUpperCase()}</span>}
-      <span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{preview ? "Employee preview" : user.role}</span></span><ChevronDown size={14} />
+      {!compact && <><span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{preview ? "Employee preview" : user.role}</span></span><ChevronDown size={14} /></>}
     </button>
     {open && <div className="absolute right-0 z-[80] mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
       <div className="border-b border-slate-100 px-3 py-2 dark:border-slate-800"><p className="truncate text-sm font-semibold text-ink dark:text-white">{user.name}</p><p className="truncate text-xs text-slate-500">{user.email}</p></div>
