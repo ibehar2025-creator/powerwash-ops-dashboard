@@ -1,4 +1,4 @@
-const cacheName = "powerwashing-pros-shell-v1";
+const cacheName = "powerwashing-pros-shell-v2";
 const appShell = [
   "/",
   "/manifest.webmanifest",
@@ -46,4 +46,29 @@ self.addEventListener("fetch", (event) => {
       })),
     );
   }
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data?.json() ?? {}; } catch { data = { body: event.data?.text() ?? "" }; }
+  event.waitUntil(self.registration.showNotification(data.title || "The Powerwashing Pros", {
+    body: data.body || "You have a new update.",
+    icon: "/pwa-icon-192.png",
+    badge: "/pwa-icon-192.png",
+    tag: data.tag || "powerwashing-pros",
+    data: { url: data.url || "/" },
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    const existing = clients.find((client) => client.url.startsWith(self.location.origin));
+    if (existing) {
+      existing.navigate(targetUrl);
+      return existing.focus();
+    }
+    return self.clients.openWindow(targetUrl);
+  }));
 });

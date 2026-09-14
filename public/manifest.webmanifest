@@ -3,6 +3,7 @@
   "short_name": "Powerwashing Pros",
   "description": "Business operations dashboard for The Powerwashing Pros.",
   "start_url": "/",
+  "id": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

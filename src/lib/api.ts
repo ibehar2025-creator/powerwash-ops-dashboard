@@ -175,6 +175,34 @@ export function markNotificationsRead(keys: string[]) {
   });
 }
 
+export interface PushConfig {
+  enabled: boolean;
+  publicKey: string;
+  subscribed: boolean;
+}
+
+export function loadPushConfig() {
+  return request<PushConfig>("/api/push/config");
+}
+
+export function savePushSubscription(subscription: PushSubscriptionJSON) {
+  return request<{ subscribed: boolean }>("/api/push/subscriptions", {
+    method: "POST",
+    body: JSON.stringify(subscription),
+  });
+}
+
+export function removePushSubscription(endpoint: string) {
+  return request<{ subscribed: boolean }>("/api/push/subscriptions", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export function sendTestPush() {
+  return request<{ sent: boolean }>("/api/push/test", { method: "POST" });
+}
+
 export function submitManagerIssue(message: string, pageUrl: string) {
   return request<ManagerIssue>("/api/issues", { method: "POST", body: JSON.stringify({ message, pageUrl }) });
 }

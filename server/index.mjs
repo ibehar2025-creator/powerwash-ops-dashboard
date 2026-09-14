@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import webpush from "web-push";
 
 const { Pool } = pg;
 
@@ -23,6 +24,11 @@ const sessionCookieName = "powerwash_session";
 const authStateCookieName = "powerwash_auth_state";
 const sessionDurationMs = 30 * 24 * 60 * 60 * 1000;
 const standardUpsellCommissionPct = 0.30;
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || "";
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || "";
+const vapidSubject = process.env.VAPID_SUBJECT || "mailto:ibehar@emeryweiner.org";
+const pushEnabled = Boolean(vapidPublicKey && vapidPrivateKey);
+if (pushEnabled) webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 let activeSheetSync = null;
 let googleCertCache = { expiresAt: 0, keys: [] };
 
@@ -32,6 +38,41 @@ const pool = process.env.DATABASE_URL
       ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
     })
   : null;
+
+async function sendPushToUsers(userIds, notification) {
+  if (!pushEnabled || !pool || !userIds.length) return;
+  const subscriptions = await pool.query(
+    `select id, endpoint, p256dh, auth from push_subscriptions
+     where user_id = any($1::uuid[])`,
+    [userIds],
+  );
+  const payload = JSON.stringify({
+    title: notification.title,
+    body: notification.body,
+    url: notification.url || "/",
+    tag: notification.tag || "powerwashing-pros",
+  });
+  await Promise.allSettled(subscriptions.rows.map(async (subscription) => {
+    try {
+      await webpush.sendNotification({
+        endpoint: subscription.endpoint,
+        keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+      }, payload, { TTL: 60 * 60 * 24 });
+    } catch (error) {
+      if (error?.statusCode === 404 || error?.statusCode === 410) {
+        await pool.query("delete from push_subscriptions where id = $1", [subscription.id]);
+        return;
+      }
+      console.error("Unable to deliver push notification", error?.message || error);
+    }
+  }));
+}
+
+async function sendPushToRole(role, notification) {
+  if (!pushEnabled || !pool) return;
+  const users = await pool.query("select id from user_accounts where role = $1 and active = true", [role]);
+  await sendPushToUsers(users.rows.map((row) => row.id), notification);
+}
 
 async function ensureMapSchema() {
   if (!pool) return;
@@ -117,6 +158,17 @@ async function ensureMapSchema() {
       read_at timestamptz not null default now(),
       primary key (user_id, notification_key)
     );
+
+    create table if not exists push_subscriptions (
+      id uuid primary key default gen_random_uuid(),
+      user_id uuid not null references user_accounts(id) on delete cascade,
+      endpoint text not null unique,
+      p256dh text not null,
+      auth text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create index if not exists push_subscriptions_user_id_idx on push_subscriptions(user_id);
 
     create table if not exists manager_issues (
       id uuid primary key default gen_random_uuid(),
@@ -1034,7 +1086,7 @@ async function syncSheetsIntoDatabase(payload) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, database: Boolean(pool) });
+  res.json({ ok: true, database: Boolean(pool), pushNotifications: pushEnabled });
 });
 
 app.get("/api/auth/config", (_req, res) => {
@@ -1185,6 +1237,7 @@ app.post("/api/issues", requireDatabase, async (req, res, next) => {
       [req.authUser.id, message, pageUrl],
     );
     await audit(req.authUser.id, "report_issue", "manager_issue", result.rows[0].id, { pageUrl });
+    void sendPushToRole("owner", { title: "Employee reported a problem", body: `${req.authUser.name}: ${message.slice(0, 140)}`, tag: `issue-${result.rows[0].id}` }).catch(console.error);
     res.status(201).json({ id: result.rows[0].id, reporterName: req.authUser.name, message: result.rows[0].message, pageUrl: result.rows[0].page_url, createdAt: result.rows[0].created_at });
   } catch (error) { next(error); }
 });
@@ -1231,6 +1284,52 @@ app.post("/api/notifications/read", requireDatabase, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get("/api/push/config", requireDatabase, async (req, res, next) => {
+  try {
+    const result = await pool.query("select count(*)::integer as count from push_subscriptions where user_id = $1", [req.authUser.id]);
+    res.json({ enabled: pushEnabled, publicKey: pushEnabled ? vapidPublicKey : "", subscribed: result.rows[0].count > 0 });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/push/subscriptions", requireDatabase, async (req, res, next) => {
+  try {
+    const { endpoint, keys } = req.body || {};
+    if (!pushEnabled) return res.status(503).json({ error: "Phone notifications are not configured yet." });
+    if (typeof endpoint !== "string" || endpoint.length > 4000 || typeof keys?.p256dh !== "string" || typeof keys?.auth !== "string") {
+      return res.status(400).json({ error: "The notification subscription is invalid." });
+    }
+    await pool.query(
+      `insert into push_subscriptions (user_id, endpoint, p256dh, auth)
+       values ($1, $2, $3, $4)
+       on conflict (endpoint) do update set user_id = excluded.user_id, p256dh = excluded.p256dh,
+         auth = excluded.auth, updated_at = now()`,
+      [req.authUser.id, endpoint, keys.p256dh, keys.auth],
+    );
+    res.status(201).json({ subscribed: true });
+  } catch (error) { next(error); }
+});
+
+app.delete("/api/push/subscriptions", requireDatabase, async (req, res, next) => {
+  try {
+    const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
+    if (!endpoint) return res.status(400).json({ error: "The notification subscription is invalid." });
+    await pool.query("delete from push_subscriptions where user_id = $1 and endpoint = $2", [req.authUser.id, endpoint]);
+    res.json({ subscribed: false });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/push/test", requireDatabase, async (req, res, next) => {
+  try {
+    if (!pushEnabled) return res.status(503).json({ error: "Phone notifications are not configured yet." });
+    await sendPushToUsers([req.authUser.id], {
+      title: "Notifications are working",
+      body: `The Powerwashing Pros can now notify ${req.authUser.name} on this device.`,
+      tag: `push-test-${req.authUser.id}`,
+    });
+    res.json({ sent: true });
+  } catch (error) { next(error); }
 });
 
 app.get("/api/bootstrap", requireDatabase, requireOwner, async (_req, res, next) => {
@@ -1986,6 +2085,7 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
     );
     const full = await pool.query(`${earningSelect} where es.id = $1`, [result.rows[0].id]);
     await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, hasUpsell, upsellOutcome, upsellQuotedAmount: hasUpsell ? quote : 0 });
+    void sendPushToRole("owner", { title: "Earnings need approval", body: `${subject.name} submitted earnings${hasUpsell ? " with an upsell" : ""}.`, tag: `earning-${result.rows[0].id}` }).catch(console.error);
     res.status(201).json(toEarning(full.rows[0]));
   } catch (error) {
     next(error);
@@ -2078,6 +2178,7 @@ app.post("/api/employee/contracts", requireDatabase, allowEmployeeOrOwner, async
     await audit(req.authUser.id, "submit_signed_contract", "contract", result.rows[0].id, {
       customerName: customerName.trim(), frequency: frequency.trim(), relatedJob: relatedJob.trim(), price: numericPrice,
     });
+    void sendPushToRole("owner", { title: "New signed contract", body: `${subject.name} submitted ${customerName.trim()}'s signed agreement.`, tag: `contract-${result.rows[0].id}` }).catch(console.error);
     res.status(201).json(toContract({ ...result.rows[0], employee_name: subject.name }));
   } catch (error) {
     next(error);
@@ -2147,6 +2248,7 @@ app.post("/api/owner/assignments", requireDatabase, requireOwner, async (req, re
       [jobId, employeeId, req.authUser.id, job.rows[0].price, profile.base_commission_pct, standardUpsellCommissionPct, profile.contract_bonus_pct, profile.tip_share_pct],
     );
     await audit(req.authUser.id, "assign_job", "job", jobId, { employeeId });
+    void sendPushToUsers([employeeId], { title: "New job assigned", body: `${job.rows[0].date} at ${job.rows[0].time} · ${job.rows[0].address}`, tag: `assignment-${jobId}` }).catch(console.error);
     res.status(201).json(toAssignment({ ...result.rows[0], employee_name: profile.name }));
   } catch (error) {
     next(error);
@@ -2202,6 +2304,7 @@ app.post("/api/owner/earnings/:id/review", requireDatabase, requireOwner, async 
     );
     await audit(req.authUser.id, `earning_${decision}`, "earning", req.params.id, { ownerNote });
     const result = await client.query(`${earningSelect} where es.id = $1`, [req.params.id]);
+    void sendPushToUsers([current.rows[0].employee_id], { title: `Earnings ${decision}`, body: ownerNote || `Your earnings submission was ${decision}.`, tag: `earning-review-${req.params.id}` }).catch(console.error);
     res.json(toEarning(result.rows[0]));
   } catch (error) {
     next(error);
@@ -2256,6 +2359,7 @@ app.post("/api/owner/contracts/:id/review", requireDatabase, requireOwner, async
     await client.query("commit");
     await audit(req.authUser.id, `contract_${decision}`, "contract", req.params.id, { ownerNote });
     const employee = await pool.query("select name from user_accounts where id = $1", [updated.rows[0].employee_id]);
+    void sendPushToUsers([updated.rows[0].employee_id], { title: `Contract ${decision}`, body: ownerNote || `${updated.rows[0].customer_name}'s contract was ${decision}.`, tag: `contract-review-${req.params.id}` }).catch(console.error);
     res.json(toContract({ ...updated.rows[0], employee_name: employee.rows[0]?.name }));
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
@@ -2390,6 +2494,7 @@ app.post("/api/owner/payroll/:id/finalize", requireDatabase, requireOwner, async
     }
     await pool.query("update payroll_runs set status = 'finalized', finalized_by = $2, finalized_at = now(), updated_at = now() where id = $1", [req.params.id, req.authUser.id]);
     await audit(req.authUser.id, "finalize_payroll", "payroll", req.params.id, { netPay: run.netPay });
+    void sendPushToUsers([...employeeIds], { title: "Weekly earnings statement ready", body: `Your statement for ${run.periodStart} through ${run.periodEnd} is ready.`, tag: `payroll-finalized-${req.params.id}` }).catch(console.error);
     const updated = await loadPayrollRuns(pool); res.json(updated.find((item) => item.id === req.params.id));
   } catch (error) { next(error); }
 });
@@ -2414,6 +2519,7 @@ app.post("/api/owner/payroll/:id/payments", requireDatabase, requireOwner, async
     if (paymentCount.rows[0].count >= people.size) await client.query("update payroll_runs set status = 'paid', updated_at = now() where id = $1", [req.params.id]);
     await client.query("commit");
     await audit(req.authUser.id, "record_payroll_payment", "payroll", req.params.id, { employeeId, amount: totals.netPay, paymentMethod });
+    void sendPushToUsers([employeeId], { title: "Payment recorded", body: `$${totals.netPay.toFixed(2)} was recorded as paid on ${paidAt}.`, tag: `payroll-payment-${req.params.id}-${employeeId}` }).catch(console.error);
     const updated = await loadPayrollRuns(pool); res.status(201).json(updated.find((item) => item.id === req.params.id));
   } catch (error) { await client.query("rollback").catch(() => undefined); next(error); } finally { client.release(); }
 });
