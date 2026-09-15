@@ -31,19 +31,7 @@ const contractInputClass = "mt-2 block w-full min-w-0 rounded-lg border border-s
 const contractTextareaClass = `${contractInputClass} min-h-28 resize-y`;
 const contractLabelClass = "block min-w-0 text-sm font-semibold text-slate-700 dark:text-slate-200";
 
-function agreementText(draft: ContractDraft) {
-  const price = currency.format(Number(draft.price));
-  const notes = draft.notes.trim() || "No additional notes.";
-  return [
-    "RECURRING POWER WASHING SERVICE AGREEMENT",
-    "",
-    `Customer: ${draft.customerName.trim()}`,
-    `Service address: ${draft.serviceAddress.trim()}`,
-    `Services: ${draft.serviceDescription.trim()}`,
-    `Service frequency: ${draft.frequency.trim()}`,
-    `Price per service: ${price}`,
-    `Additional notes: ${notes}`,
-    "",
+const recurringTerms = [
     "The customer (Customer) authorizes The Powerwashing Pros (Company) to provide the services listed above at the stated frequency and price. Work outside the listed service scope requires customer approval and may have an additional charge. Either party may request a change to or cancellation of future service by contacting the other party before the next scheduled visit.",
     "",
     "Rescheduling and Weather Delays",
@@ -65,6 +53,22 @@ function agreementText(draft: ContractDraft) {
     "By signing electronically, Customer confirms the accuracy of the information above and agrees to all terms of this Recurring Service Plan.",
     "",
     "The customer agrees to use an electronic signature and asks The Powerwashing Pros to accept this recurring-service agreement. The signed agreement is submitted to the business owner for confirmation.",
+].join("\n");
+
+function agreementText(draft: ContractDraft) {
+  const price = currency.format(Number(draft.price));
+  const notes = draft.notes.trim() || "No additional notes.";
+  return [
+    "RECURRING POWER WASHING SERVICE AGREEMENT",
+    "",
+    `Customer: ${draft.customerName.trim()}`,
+    `Service address: ${draft.serviceAddress.trim()}`,
+    `Services: ${draft.serviceDescription.trim()}`,
+    `Service frequency: ${draft.frequency.trim()}`,
+    `Price per service: ${price}`,
+    `Additional notes: ${notes}`,
+    "",
+    recurringTerms,
   ].join("\n");
 }
 
@@ -163,7 +167,7 @@ export function EmployeeContractFlow({
           <div className="border-b border-slate-200 pb-5 dark:border-slate-700"><p className="text-sm font-semibold text-lagoon">The Powerwashing Pros</p><h3 className="mt-1 text-xl font-bold text-ink dark:text-white">Recurring Power Washing Service Agreement</h3><p className="mt-1 text-xs text-slate-500">Prepared {new Date().toLocaleDateString()}</p></div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2"><AgreementField label="Customer" value={draft.customerName} /><AgreementField label="Phone" value={draft.customerPhone || "Not provided"} /><AgreementField label="Email" value={draft.customerEmail || "Not provided"} /><AgreementField label="Service address" value={draft.serviceAddress} /><AgreementField label="Services" value={draft.serviceDescription} /><AgreementField label="Frequency" value={draft.frequency} /><AgreementField label="Price per service" value={currency.format(Number(draft.price))} /></div>
           {draft.notes && <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-800"><p className="text-xs font-semibold uppercase text-slate-500">Additional notes</p><p className="mt-1 whitespace-pre-wrap text-sm">{draft.notes}</p></div>}
-          <div className="mt-6 space-y-3 text-sm leading-6 text-slate-600 dark:text-slate-300"><p>The customer authorizes The Powerwashing Pros to provide the services listed above at the stated frequency and price. Service dates will be coordinated with the customer and may change because of weather, property access, or mutual scheduling needs.</p><p>Work outside the listed service scope requires customer approval and may have an additional charge. Either party may request a change to or cancellation of future service by contacting the other party before the next scheduled visit.</p><p>By signing below, the customer confirms that the information above is accurate and asks The Powerwashing Pros to accept this recurring-service agreement. The signed agreement is submitted to the business owner for confirmation.</p></div>
+          <div className="mt-6 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600 dark:text-slate-300">{recurringTerms}</div>
         </article>
         <section className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center gap-2"><PenLine className="text-lagoon" size={19} /><h3 className="font-semibold text-ink dark:text-white">Customer signature</h3></div>

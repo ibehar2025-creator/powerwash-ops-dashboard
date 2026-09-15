@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 const source = fs.readFileSync(new URL('../src/components/EmployeeContractFlow.tsx', import.meta.url), 'utf8');
-const builder = source.slice(source.indexOf('function agreementText('), source.indexOf('export function EmployeeContractFlow'));
+const builder = source.slice(source.indexOf('const recurringTerms ='), source.indexOf('export function EmployeeContractFlow'));
 const context = vm.createContext({ currency: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }) });
 vm.runInContext(ts.transpile(builder), context);
 
@@ -21,4 +21,5 @@ test('new recurring agreements include every visible requested term', () => {
 
 test('signing submits the displayed agreement snapshot', () => {
   assert.match(source, /agreementText: agreement/);
+  assert.match(source, /\{recurringTerms\}<\/div>/);
 });
