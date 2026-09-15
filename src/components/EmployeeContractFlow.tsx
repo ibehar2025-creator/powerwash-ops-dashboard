@@ -31,7 +31,25 @@ const contractInputClass = "mt-2 block w-full min-w-0 rounded-lg border border-s
 const contractTextareaClass = `${contractInputClass} min-h-28 resize-y`;
 const contractLabelClass = "block min-w-0 text-sm font-semibold text-slate-700 dark:text-slate-200";
 
-const recurringTerms = [
+function annualCleaningCount(frequency: string) {
+  const value = frequency.trim().toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ");
+  const counts: Record<string, number> = {
+    monthly: 12, "every month": 12, "every 1 month": 12,
+    quarterly: 4, "every quarter": 4, "every 3 months": 4, "3 month": 4,
+    "every 2 months": 6, "2 month": 6,
+    "every 4 months": 3, "4 month": 3,
+    semiannual: 2, "semi annual": 2, "every 6 months": 2, "6 month": 2, "twice a year": 2,
+    yearly: 1, annually: 1, annual: 1, "once a year": 1, "every year": 1, "every 12 months": 1,
+  };
+  return counts[value] ?? null;
+}
+
+function recurringTerms(frequency: string) {
+  const count = annualCleaningCount(frequency);
+  const coverage = count === null
+    ? `scheduled cleanings at the agreed frequency of "${frequency.trim()}"`
+    : `${count} scheduled cleaning${count === 1 ? "" : "s"} at the agreed frequency of "${frequency.trim()}"`;
+  return [
     "The customer (Customer) authorizes The Powerwashing Pros (Company) to provide the services listed above at the stated frequency and price. Work outside the listed service scope requires customer approval and may have an additional charge. Either party may request a change to or cancellation of future service by contacting the other party before the next scheduled visit.",
     "",
     "Rescheduling and Weather Delays",
@@ -46,7 +64,7 @@ const recurringTerms = [
     "",
     "Term, Renewal, and Plan Continuation",
     "",
-    "This Agreement covers 2 scheduled cleaning(s) over a 12-month period. The plan does not automatically renew. Service concludes at the end of this period unless Customer and Company agree in writing to continue on new terms.",
+    `This Agreement covers ${coverage} over a 12-month period. The plan does not automatically renew. Service concludes at the end of this period unless Customer and Company agree in writing to continue on new terms.`,
     "",
     "Acknowledgment",
     "",
@@ -54,6 +72,7 @@ const recurringTerms = [
     "",
     "The customer agrees to use an electronic signature and asks The Powerwashing Pros to accept this recurring-service agreement. The signed agreement is submitted to the business owner for confirmation.",
 ].join("\n");
+}
 
 function agreementText(draft: ContractDraft) {
   const price = currency.format(Number(draft.price));
@@ -68,7 +87,7 @@ function agreementText(draft: ContractDraft) {
     `Price per service: ${price}`,
     `Additional notes: ${notes}`,
     "",
-    recurringTerms,
+    recurringTerms(draft.frequency),
   ].join("\n");
 }
 
@@ -167,7 +186,7 @@ export function EmployeeContractFlow({
           <div className="border-b border-slate-200 pb-5 dark:border-slate-700"><p className="text-sm font-semibold text-lagoon">The Powerwashing Pros</p><h3 className="mt-1 text-xl font-bold text-ink dark:text-white">Recurring Power Washing Service Agreement</h3><p className="mt-1 text-xs text-slate-500">Prepared {new Date().toLocaleDateString()}</p></div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2"><AgreementField label="Customer" value={draft.customerName} /><AgreementField label="Phone" value={draft.customerPhone || "Not provided"} /><AgreementField label="Email" value={draft.customerEmail || "Not provided"} /><AgreementField label="Service address" value={draft.serviceAddress} /><AgreementField label="Services" value={draft.serviceDescription} /><AgreementField label="Frequency" value={draft.frequency} /><AgreementField label="Price per service" value={currency.format(Number(draft.price))} /></div>
           {draft.notes && <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-800"><p className="text-xs font-semibold uppercase text-slate-500">Additional notes</p><p className="mt-1 whitespace-pre-wrap text-sm">{draft.notes}</p></div>}
-          <div className="mt-6 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600 dark:text-slate-300">{recurringTerms}</div>
+          <div className="mt-6 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600 dark:text-slate-300">{recurringTerms(draft.frequency)}</div>
         </article>
         <section className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center gap-2"><PenLine className="text-lagoon" size={19} /><h3 className="font-semibold text-ink dark:text-white">Customer signature</h3></div>
