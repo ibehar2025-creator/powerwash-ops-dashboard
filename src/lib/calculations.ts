@@ -141,6 +141,7 @@ export function cumulativeRevenueOverTime(jobs: Job[]) {
     .map(([date, revenue]) => ({
       date,
       label: date.slice(5),
+      timestamp: Date.parse(`${date}T12:00:00Z`),
       total: total += revenue,
     }));
 }
