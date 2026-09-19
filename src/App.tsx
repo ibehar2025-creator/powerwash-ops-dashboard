@@ -633,7 +633,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
 }
 
 function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { jobs: Job[]; leads: Lead[]; invoices: Invoice[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string }) {
-  const [revenueRange, setRevenueRange] = useState<"90d" | "12m" | "all">("all");
+  const [revenueRange, setRevenueRange] = useState<"ytd" | "90d" | "12m" | "all">("ytd");
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const recurringRevenue = annualRecurringRevenue(plans);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
@@ -642,10 +642,11 @@ function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { job
   const visibleRevenue = useMemo(() => {
     if (revenueRange === "all") return revenueGrowth;
     const cutoff = dateFromIso(currentDate);
-    cutoff.setDate(cutoff.getDate() - (revenueRange === "90d" ? 90 : 365));
+    if (revenueRange === "ytd") cutoff.setMonth(0, 1);
+    else cutoff.setDate(cutoff.getDate() - (revenueRange === "90d" ? 90 : 365));
     const cutoffIso = isoFromDate(cutoff);
-    return revenueGrowth.filter((point) => point.date >= cutoffIso);
-  }, [currentDate, revenueGrowth, revenueRange]);
+    return cumulativeRevenueOverTime(jobs.filter((job) => job.date >= cutoffIso && job.date <= currentDate));
+  }, [currentDate, jobs, revenueGrowth, revenueRange]);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
@@ -671,9 +672,9 @@ function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { job
         <DashboardMetric className="xl:col-span-4" label="Customer reviews" value={`${average.toFixed(1)} / 5`} detail={`${reviews.length} imported reviews`} icon={Star} />
       </div>
 
-      <Section title="Total revenue growth" kicker="Cumulative booked revenue" action={<div className="segmented" aria-label="Revenue chart range">{(["90d", "12m", "all"] as const).map((range) => <button key={range} type="button" onClick={() => setRevenueRange(range)} className={cx(revenueRange === range && "active")}>{range === "all" ? "All time" : range === "12m" ? "12 months" : "90 days"}</button>)}</div>}>
+      <Section title="Total revenue growth" kicker="Cumulative booked revenue" action={<div className="segmented" aria-label="Revenue chart range">{(["ytd", "90d", "12m", "all"] as const).map((range) => <button key={range} type="button" onClick={() => setRevenueRange(range)} className={cx(revenueRange === range && "active")}>{range === "ytd" ? "YTD" : range === "all" ? "All time" : range === "12m" ? "12 months" : "90 days"}</button>)}</div>}>
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3"><p className="text-2xl font-bold text-ink dark:text-white">{currency.format(visibleRevenue.at(-1)?.total ?? 0)}</p><p className="text-xs text-slate-500 dark:text-slate-400">Hover or tap a point for details · Canceled jobs excluded</p></div>
-        <div className="h-72 min-h-72 w-full" aria-label="Interactive total revenue growth chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={visibleRevenue} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}><defs><linearGradient id="revenueGrowthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#087f8c" stopOpacity={0.3} /><stop offset="100%" stopColor="#087f8c" stopOpacity={0.03} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#cbd5e1" opacity={0.5} /><XAxis dataKey="label" minTickGap={28} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={48} tickFormatter={(value) => `$${Math.round(Number(value) / 1000)}k`} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [currency.format(Number(value)), "Total revenue"]} labelFormatter={(_, payload) => payload[0]?.payload?.date ?? ""} contentStyle={{ borderRadius: 6, borderColor: "#cbd5e1", fontSize: 12 }} /><Area type="monotone" dataKey="total" stroke="#087f8c" strokeWidth={3} fill="url(#revenueGrowthFill)" dot={{ r: 3, fill: "#087f8c", stroke: "#ffffff", strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} /></AreaChart></ResponsiveContainer></div>
+        <div className="h-72 min-h-72 w-full" aria-label="Interactive total revenue growth chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={visibleRevenue} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}><defs><linearGradient id="revenueGrowthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#087f8c" stopOpacity={0.3} /><stop offset="100%" stopColor="#087f8c" stopOpacity={0.03} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#cbd5e1" opacity={0.5} /><XAxis dataKey="timestamp" type="number" scale="time" domain={["dataMin", "dataMax"]} tickCount={7} minTickGap={28} tickFormatter={(value) => new Date(Number(value)).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", timeZone: "UTC" })} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={48} tickFormatter={(value) => `$${Math.round(Number(value) / 1000)}k`} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [currency.format(Number(value)), "Total revenue"]} labelFormatter={(value) => new Date(Number(value)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} contentStyle={{ borderRadius: 6, borderColor: "#cbd5e1", fontSize: 12 }} /><Area type="stepAfter" dataKey="total" stroke="#087f8c" strokeWidth={3} fill="url(#revenueGrowthFill)" dot={{ r: 3, fill: "#087f8c", stroke: "#ffffff", strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} /></AreaChart></ResponsiveContainer></div>
       </Section>
 
       <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{spreadsheetImportNotice}</p>

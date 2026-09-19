@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
+import { previousWeeklyPayPeriod } from "./payday.mjs";
 
 const { Pool } = pg;
 
@@ -158,6 +159,13 @@ async function ensureMapSchema() {
       notification_key text not null,
       read_at timestamptz not null default now(),
       primary key (user_id, notification_key)
+    );
+
+    create table if not exists scheduled_notification_deliveries (
+      notification_key text not null,
+      user_id uuid not null references user_accounts(id) on delete cascade,
+      delivered_at timestamptz not null default now(),
+      primary key (notification_key, user_id)
     );
 
     create table if not exists push_subscriptions (
@@ -2413,7 +2421,8 @@ function validatePayrollDates(periodStart, periodEnd, payday) {
   const start = new Date(`${periodStart}T12:00:00Z`);
   const end = new Date(`${periodEnd}T12:00:00Z`);
   if (start.getUTCDay() !== 1 || end.getUTCDay() !== 0 || Math.round((end - start) / 86400000) !== 6) return "Payroll periods must run Monday through Sunday.";
-  if (payday <= periodEnd) return "Payday must be after the pay period.";
+  const pay = new Date(`${payday}T12:00:00Z`);
+  if (pay.getUTCDay() !== 2 || Math.round((pay - end) / 86400000) !== 2) return "Payday must be the Tuesday after the pay period.";
   return "";
 }
 
@@ -2427,7 +2436,7 @@ app.get("/api/owner/payroll", requireDatabase, requireOwner, async (req, res, ne
     const day = today.getUTCDay();
     const start = new Date(today); start.setUTCDate(today.getUTCDate() - ((day + 6) % 7));
     const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
-    const payday = new Date(end); payday.setUTCDate(end.getUTCDate() + 5);
+    const payday = new Date(end); payday.setUTCDate(end.getUTCDate() + 2);
     const periodStart = start.toISOString().slice(0, 10), periodEnd = end.toISOString().slice(0, 10);
     const [runs, eligible] = await Promise.all([loadPayrollRuns(pool), eligiblePayrollLines(pool, periodEnd)]);
     res.json({ runs, preview: { periodStart, periodEnd, payday: payday.toISOString().slice(0, 10), eligibleLines: eligible.lines, missingApprovals: eligible.missingApprovals } });
@@ -2566,11 +2575,59 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: "Server error", detail: error.message });
 });
 
+async function sendTuesdayContractorPayReminder(now = new Date()) {
+  if (!pushEnabled || !pool) return;
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const businessDate = Object.fromEntries(dateParts.map((part) => [part.type, part.value]));
+  const todayIso = `${businessDate.year}-${businessDate.month}-${businessDate.day}`;
+  if (new Date(`${todayIso}T12:00:00Z`).getUTCDay() !== 2) return;
+
+  const period = previousWeeklyPayPeriod(todayIso);
+  const notificationKey = `contractor-pay-tuesday|${todayIso}`;
+  const owners = await pool.query(
+    `select distinct ua.id from user_accounts ua
+     join push_subscriptions ps on ps.user_id = ua.id
+     where ua.role = 'owner' and ua.active = true
+       and not exists (
+         select 1 from scheduled_notification_deliveries snd
+         where snd.notification_key = $1 and snd.user_id = ua.id
+       )`,
+    [notificationKey],
+  );
+  if (!owners.rows.length) return;
+
+  const eligible = await eligiblePayrollLines(pool, period.periodEnd);
+  if (!eligible.lines.length && !eligible.missingApprovals) return;
+  const amount = eligible.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  const approvalNote = eligible.missingApprovals
+    ? ` ${eligible.missingApprovals} submission${eligible.missingApprovals === 1 ? " is" : "s are"} still awaiting approval.`
+    : "";
+  const ownerIds = owners.rows.map((row) => row.id);
+  await sendPushToUsers(ownerIds, {
+    title: "Contractor pay is due today",
+    body: `$${amount.toFixed(2)} is ready for the week of ${period.periodStart}–${period.periodEnd}.${approvalNote}`,
+    tag: notificationKey,
+  });
+  await Promise.all(ownerIds.map((userId) => pool.query(
+    `insert into scheduled_notification_deliveries (notification_key, user_id)
+     values ($1, $2) on conflict do nothing`,
+    [notificationKey, userId],
+  )));
+}
+
 async function startServer() {
   await ensureMapSchema();
   app.listen(port, "0.0.0.0", () => {
     console.log(`The Powerwashing Pros dashboard listening on ${port}`);
   });
+  void sendTuesdayContractorPayReminder().catch((error) => console.error("Unable to send contractor payday reminder", error));
+  const paydayReminderInterval = setInterval(
+    () => void sendTuesdayContractorPayReminder().catch((error) => console.error("Unable to send contractor payday reminder", error)),
+    30 * 60 * 1000,
+  );
+  paydayReminderInterval.unref();
 }
 
 startServer().catch((error) => {

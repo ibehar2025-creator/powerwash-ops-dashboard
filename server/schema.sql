@@ -348,6 +348,13 @@ create table if not exists notification_reads (
   primary key (user_id, notification_key)
 );
 
+create table if not exists scheduled_notification_deliveries (
+  notification_key text not null,
+  user_id uuid not null references user_accounts(id) on delete cascade,
+  delivered_at timestamptz not null default now(),
+  primary key (notification_key, user_id)
+);
+
 create table if not exists push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references user_accounts(id) on delete cascade,
