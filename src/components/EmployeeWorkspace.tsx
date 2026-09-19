@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { BadgeDollarSign, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, DollarSign, FileSignature, Home, MapPinned, Menu, Navigation, Phone, RefreshCw, Save, Sparkles, X } from "lucide-react";
+import { createEmployeePreview, previewEarnings, previewContract } from "../lib/employeePreview";
 import { ProfileMenu } from "./ProfileMenu";
 import { EmployeePayrollStatements } from "./EmployeePayrollStatements";
 import { EmployeeContractFlow } from "./EmployeeContractFlow";
@@ -55,6 +56,11 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   const mounted = useRef(true);
 
   const refreshWorkspace = useCallback((options: { initial?: boolean; force?: boolean } = {}) => {
+    if (preview) {
+      setData((current) => current ?? createEmployeePreview(isoToday()));
+      setInitialLoading(false);
+      return Promise.resolve();
+    }
     if (activeRefresh.current) return activeRefresh.current;
     const now = Date.now();
     if (!options.initial && !options.force && now - lastRefreshAttemptAt.current < employeeRefreshCooldownMs) return Promise.resolve();
@@ -82,7 +88,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
     });
     activeRefresh.current = request;
     return request;
-  }, []);
+  }, [preview]);
 
   useEffect(() => {
     mounted.current = true;
@@ -120,7 +126,12 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
   const jobsToday = assignedJobs.filter((job) => job.date === today);
 
   async function updateJob(jobId: string, patch: Pick<Partial<Job>, "status" | "notes">) {
-    const saved = await saveEmployeeJobPatch(jobId, patch, preview ? employee?.id : undefined);
+    if (preview) {
+      setData((current) => current ? { ...current, jobs: current.jobs.map((job) => job.id === jobId ? { ...job, ...patch } : job) } : current);
+      setSelectedJob(null);
+      return;
+    }
+    const saved = await saveEmployeeJobPatch(jobId, patch);
     if (!saved) throw new Error("The job could not be saved.");
     setData((current) => current ? { ...current, jobs: current.jobs.map((job) => job.id === jobId ? saved : job) } : current);
     setSelectedJob(null);
@@ -133,7 +144,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
         {activeTab === "schedule" && <EmployeeSchedule jobs={assignedJobs} customerMap={customerMap} onJob={setSelectedJob} />}
         {activeTab === "map" && <Suspense fallback={<div className="grid min-h-80 place-items-center rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-900">Loading map...</div>}><BusinessMap employeeView customers={data.customers} jobs={assignedJobs} solicitations={[]} onSaveJobCoordinates={async () => undefined} onCreateSolicitation={async () => undefined} onUpdateSolicitation={async () => undefined} onDeleteSolicitation={async () => undefined} /></Suspense>}
         {activeTab === "earnings" && <><EmployeePayrollStatements statements={statements} /><div className="mt-5"><EmployeeEarnings earnings={data.earnings} payouts={data.payouts} jobs={assignedJobs} customerMap={customerMap} onSubmit={setEarningsJob} /></div></>}
-        {activeTab === "contracts" && <EmployeeContractFlow employeeId={preview ? employee?.id : undefined} jobs={assignedJobs} customers={data.customers} onSubmitted={(contract) => setData((current) => current ? { ...current, contracts: [contract, ...current.contracts.filter((item) => item.id !== contract.id)] } : current)} />}
+        {activeTab === "contracts" && <EmployeeContractFlow submitContract={preview ? previewContract : undefined} employeeId={preview ? employee?.id : undefined} jobs={assignedJobs} customers={data.customers} onSubmitted={(contract) => setData((current) => current ? { ...current, contracts: [contract, ...current.contracts.filter((item) => item.id !== contract.id)] } : current)} />}
       </> : null;
 
   return <div className={darkMode ? "dark" : ""}><div className="flex min-h-screen bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-200">
@@ -142,13 +153,13 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
       <EmployeeNav active={activeTab} onChoose={setActiveTab} />
     </aside>
     <main className="min-w-0 flex-1 overflow-x-hidden">
-      {preview && <div className="employee-preview-banner flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900"><span>Owner preview: employee workspace</span><button className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1" onClick={onExitPreview}>Return to owner</button></div>}
-      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2">{refreshing && <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2 py-2 text-[11px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300"><RefreshCw className="animate-spin" size={13} />Updating...</span>}<EmployeeNotifications data={data} statements={statements} assignmentMap={assignmentMap} /><ProfileMenu theme={themePreference} onTheme={setThemePreference} employee={employee} preview={preview} /></div></div></header>
+      {preview && <div className="employee-preview-banner flex items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900"><span>Practice preview - changes are not saved</span><button className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1" onClick={onExitPreview}>Return to owner</button></div>}
+      <header className={`${preview ? "" : "app-header "}border-b border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900`}><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button className="icon-button lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={18} /></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Employee workspace</p><h1 className="truncate text-2xl font-bold text-ink dark:text-white">{tabs.find((tab) => tab.id === activeTab)?.label}</h1><p className="truncate text-xs text-slate-500">{employee?.name ?? user.name}</p></div></div><div className="flex items-center gap-2">{refreshing && <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2 py-2 text-[11px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300"><RefreshCw className="animate-spin" size={13} />Updating...</span>}<EmployeeNotifications preview={preview} data={data} statements={statements} assignmentMap={assignmentMap} /><ProfileMenu theme={themePreference} onTheme={setThemePreference} employee={employee} preview={preview} /></div></div></header>
       <div className="p-4 sm:p-6">{refreshError && data && <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between"><span>Couldn’t update: {refreshError} Your existing information is still shown.</span><button className="shrink-0 font-semibold underline" disabled={refreshing} onClick={() => void refreshWorkspace({ force: true })}>{refreshing ? "Retrying..." : "Try again"}</button></div>}{content}</div>
     </main>
     {menuOpen && <div className="fixed inset-0 z-[70] lg:hidden"><button className="absolute inset-0 bg-ink/45" onClick={() => setMenuOpen(false)} aria-label="Close navigation" /><aside className="absolute bottom-0 left-0 top-0 w-[min(82vw,320px)] bg-white p-4 shadow-soft dark:bg-slate-900"><div className="mb-5 flex items-center justify-between"><strong className="text-ink dark:text-white">Employee menu</strong><button className="icon-button" onClick={() => setMenuOpen(false)}><X size={17} /></button></div><EmployeeNav active={activeTab} onChoose={(tab) => { setActiveTab(tab); setMenuOpen(false); }} /></aside></div>}
     {selectedJob && <EmployeeJobModal job={selectedJob} customer={customerMap.get(selectedJob.customerId)} assigned={assignmentMap.has(selectedJob.id)} onClose={() => setSelectedJob(null)} onSave={updateJob} onEarnings={() => { setSelectedJob(null); setEarningsJob(selectedJob); }} />}
-    {earningsJob && <EarningsModal job={earningsJob} employeeId={preview ? employee?.id : undefined} assignment={assignmentMap.get(earningsJob.id)} contracts={(data?.contracts ?? []).filter((contract) => contract.jobId === earningsJob.id && contract.status !== "rejected")} existing={data?.earnings.find((item) => item.jobId === earningsJob.id)} onOpenContracts={() => { setEarningsJob(null); setActiveTab("contracts"); }} onClose={() => setEarningsJob(null)} onSaved={(saved) => { setData((current) => current ? { ...current, jobs: current.jobs.map((job) => job.id === earningsJob.id ? { ...job, status: "completed", paymentStatus: "paid", amountPaid: job.price } : job), earnings: current.earnings.some((item) => item.id === saved.id) ? current.earnings.map((item) => item.id === saved.id ? saved : item) : [saved, ...current.earnings] } : current); setEarningsJob(null); }} />}
+    {earningsJob && <EarningsModal submitEarnings={preview ? previewEarnings : undefined} job={earningsJob} employeeId={preview ? employee?.id : undefined} assignment={assignmentMap.get(earningsJob.id)} contracts={(data?.contracts ?? []).filter((contract) => contract.jobId === earningsJob.id && contract.status !== "rejected")} existing={data?.earnings.find((item) => item.jobId === earningsJob.id)} onOpenContracts={() => { setEarningsJob(null); setActiveTab("contracts"); }} onClose={() => setEarningsJob(null)} onSaved={(saved) => { setData((current) => current ? { ...current, jobs: current.jobs.map((job) => job.id === earningsJob.id ? { ...job, status: "completed", paymentStatus: "paid", amountPaid: job.price } : job), earnings: current.earnings.some((item) => item.id === saved.id) ? current.earnings.map((item) => item.id === saved.id ? saved : item) : [saved, ...current.earnings] } : current); setEarningsJob(null); }} />}
   </div></div>;
 }
 
@@ -247,7 +258,7 @@ function EmployeeJobModal({ job, customer, assigned, onClose, onSave, onEarnings
 
 function Info({ label, value }: { label: string; value: string }) { return <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><span className="text-xs text-slate-500">{label}</span><strong className="mt-1 block text-sm text-ink dark:text-white">{value || "Not listed"}</strong></div>; }
 
-function EarningsModal({ job, employeeId, assignment, contracts, existing, onOpenContracts, onClose, onSaved }: { job: Job; employeeId?: string; assignment?: JobAssignment; contracts: ContractSubmission[]; existing?: EarningSubmission; onOpenContracts: () => void; onClose: () => void; onSaved: (saved: EarningSubmission) => void }) {
+function EarningsModal({ submitEarnings = submitEmployeeEarnings, job, employeeId, assignment, contracts, existing, onOpenContracts, onClose, onSaved }: { submitEarnings?: typeof submitEmployeeEarnings; job: Job; employeeId?: string; assignment?: JobAssignment; contracts: ContractSubmission[]; existing?: EarningSubmission; onOpenContracts: () => void; onClose: () => void; onSaved: (saved: EarningSubmission) => void }) {
   const [gasCost, setGasCost] = useState(existing?.gasCost ? String(existing.gasCost) : "");
   const [tip, setTip] = useState(existing?.tipAmount ? String(existing.tipAmount) : "");
   const [hasContract, setHasContract] = useState(Boolean(existing?.contractSubmissionId));
@@ -262,7 +273,7 @@ function EarningsModal({ job, employeeId, assignment, contracts, existing, onOpe
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const saved = await submitEmployeeEarnings({
+      const saved = await submitEarnings({
         jobId: job.id,
         tipAmount: Number(tip) || 0,
         gasCost: gasCost === "" ? 0 : Number(gasCost),
@@ -294,9 +305,9 @@ function EarningsReceipt({ earning }: { earning: EarningSubmission }) {
   return <div className="mt-3 w-full max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950/60"><div className="mb-2 flex items-center justify-between gap-2"><strong className="text-sm text-ink dark:text-white">Earnings receipt</strong><span className={`rounded-md px-2 py-1 font-semibold ${statusStyle(earning.status)}`}>{earning.status}</span></div><dl className="space-y-1.5">{lines.map((line) => <div key={line.label} className="flex justify-between gap-4"><dt className="text-slate-500">{line.label}</dt><dd className="font-semibold text-ink dark:text-white">{currency.format(line.amount)}</dd></div>)}<div className="mt-2 flex justify-between gap-4 border-t border-slate-200 pt-2 dark:border-slate-700"><dt className="font-bold text-ink dark:text-white">Estimated total</dt><dd className="font-bold text-lagoon dark:text-cyan-200">{currency.format(earning.totalEarnings)}</dd></div></dl></div>;
 }
 
-function EmployeeNotifications({ data, statements, assignmentMap }: { data: EmployeeWorkspaceSnapshot | null; statements: PayrollRun[]; assignmentMap: Map<string, unknown> }) {
+function EmployeeNotifications({ preview, data, statements, assignmentMap }: { preview?: boolean; data: EmployeeWorkspaceSnapshot | null; statements: PayrollRun[]; assignmentMap: Map<string, unknown> }) {
   const [open, setOpen] = useState(false); const [read, setRead] = useState<Set<string>>(new Set());
-  useEffect(() => { void loadReadNotificationKeys().then((result) => setRead(new Set(result?.readKeys ?? []))); }, []);
+  useEffect(() => { if (!preview) void loadReadNotificationKeys().then((result) => setRead(new Set(result?.readKeys ?? []))); }, [preview]);
   const today = isoToday();
   const items = useMemo(() => {
     if (!data) return [];
@@ -307,13 +318,13 @@ function EmployeeNotifications({ data, statements, assignmentMap }: { data: Empl
   }, [assignmentMap, data, statements, today]);
   const visible = items.filter((item) => !read.has(item.key));
   const attentionCount = items.filter((item) => !read.has(`inbox-seen|${item.key}`)).length;
-  function mark(key: string) { setRead((current) => new Set([...current, key])); void markNotificationsRead([key]); }
+  function mark(key: string) { setRead((current) => new Set([...current, key])); if (!preview) void markNotificationsRead([key]); }
   function toggle() {
     if (!open) {
       const seenKeys = items.map((item) => `inbox-seen|${item.key}`).filter((key) => !read.has(key));
       if (seenKeys.length) {
         setRead((current) => new Set([...current, ...seenKeys]));
-        void markNotificationsRead(seenKeys);
+        if (!preview) void markNotificationsRead(seenKeys);
       }
     }
     setOpen(!open);

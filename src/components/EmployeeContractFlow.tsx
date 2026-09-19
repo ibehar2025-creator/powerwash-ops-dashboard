@@ -96,7 +96,9 @@ export function EmployeeContractFlow({
   jobs,
   customers,
   onSubmitted,
+  submitContract = submitEmployeeContract,
 }: {
+  submitContract?: typeof submitEmployeeContract;
   employeeId?: string;
   jobs: Job[];
   customers: Customer[];
@@ -154,7 +156,7 @@ export function EmployeeContractFlow({
     setSaving(true);
     setMessage("");
     try {
-      const saved = await submitEmployeeContract({
+      const saved = await submitContract({
         ...draft,
         jobId,
         relatedJob: `${jobs.find((job) => job.id === jobId)?.date ?? ""} · ${draft.customerName}`,
@@ -166,7 +168,7 @@ export function EmployeeContractFlow({
         employeeId,
       });
       if (!saved) throw new Error("Contract service is unavailable.");
-      setMessage("Signed contract saved and sent to the owners.");
+      setMessage(submitContract === submitEmployeeContract ? "Signed contract saved and sent to the owners." : "Practice contract completed. Nothing was sent or saved.");
       window.setTimeout(() => onSubmitted(saved), 1400);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to submit the signed contract.");
