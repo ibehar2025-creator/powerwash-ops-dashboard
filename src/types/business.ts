@@ -89,6 +89,7 @@ export interface EarningSubmission {
   customerName: string;
   jobDate: string;
   originalJobPrice: number;
+  gasCost: number;
   tipAmount: number;
   upsellAmount: number;
   upsellDescription: string;
@@ -144,7 +145,7 @@ export interface PayoutSummary {
 }
 
 export type PayrollStatus = "draft" | "finalized" | "paid";
-export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip";
+export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip" | "gas_reimbursement";
 
 export interface PayrollLine {
   id: string;

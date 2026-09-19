@@ -222,6 +222,7 @@ export function saveEmployeeJobPatch(jobId: string, patch: Pick<Partial<Job>, "s
 
 export function submitEmployeeEarnings(input: {
   jobId: string;
+  gasCost?: number;
   tipAmount: number;
   contractSubmissionId?: string;
   employeeId?: string;

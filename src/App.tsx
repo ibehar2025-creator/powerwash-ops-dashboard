@@ -253,11 +253,13 @@ function DataTable({ children }: { children: ReactNode }) {
 
 export default function App() {
   const { user } = useAuth();
+  const [employeePreview, setEmployeePreview] = useState(false);
   if (user.role === "employee") return <EmployeeWorkspace />;
-  return <OwnerDashboard />;
+  if (employeePreview) return <EmployeeWorkspace preview onExitPreview={() => setEmployeePreview(false)} />;
+  return <OwnerDashboard onPreviewEmployee={() => setEmployeePreview(true)} />;
 }
 
-function OwnerDashboard() {
+function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -589,7 +591,7 @@ function OwnerDashboard() {
                 <button className="icon-button shrink-0 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300 sm:text-xs">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="break-words text-lg font-bold leading-9 text-ink dark:text-white sm:text-2xl">{activeLabel}</h1></div>
               </div>
-              <div className="owner-header-actions flex shrink-0 items-center gap-1 sm:gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 xl:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="icon-button shrink-0" title={syncing ? "Syncing sheets" : "Sync sheets"} aria-label={syncing ? "Syncing sheets" : "Sync sheets"} disabled={syncing} onClick={() => void syncSheets()}><RefreshCw size={18} className={syncing ? "animate-spin" : ""} /></button><ProfileMenu compact theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
+              <div className="owner-header-actions flex shrink-0 items-center gap-1 sm:gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 xl:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="icon-button shrink-0" title={syncing ? "Syncing sheets" : "Sync sheets"} aria-label={syncing ? "Syncing sheets" : "Sync sheets"} disabled={syncing} onClick={() => void syncSheets()}><RefreshCw size={18} className={syncing ? "animate-spin" : ""} /></button><ProfileMenu onPreviewEmployee={onPreviewEmployee} compact theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
             </div>
             <p className="mt-2 break-words text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p>
           </header>

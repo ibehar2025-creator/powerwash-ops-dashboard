@@ -304,6 +304,9 @@ async function ensureMapSchema() {
     update job_assignments ja set upsell_commission_pct = 0.30
     where ja.upsell_commission_pct is distinct from 0.30
       and not exists (select 1 from payroll_run_lines prl where prl.source_key = ja.job_id || ':upsell');
+    alter table earning_submissions add column if not exists gas_cost numeric(12,2) not null default 0 check (gas_cost >= 0);
+    alter table payroll_run_lines drop constraint if exists payroll_run_lines_line_type_check;
+    alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement'));
     alter table payroll_runs enable row level security;
     alter table payroll_run_lines enable row level security;
     alter table payroll_adjustments enable row level security;
@@ -491,13 +494,14 @@ const toAssignment = (row) => ({
 
 function earningAmounts(row) {
   const original = Number(row.original_job_price || 0);
+  const gasCost = Number(row.gas_cost || 0);
   const tip = Number(row.tip_amount || 0);
   const upsell = Number(row.upsell_amount || 0);
   const baseEarnings = original * Number(row.base_commission_pct || 0);
   const upsellEarnings = upsell * Number(row.upsell_commission_pct || 0);
   const contractEarnings = row.contract_submission_id ? original * Number(row.contract_bonus_pct || 0) : 0;
   const tipEarnings = tip * Number(row.tip_share_pct || 0);
-  return { baseEarnings, upsellEarnings, contractEarnings, tipEarnings, totalEarnings: baseEarnings + upsellEarnings + contractEarnings + tipEarnings };
+  return { baseEarnings, upsellEarnings, contractEarnings, tipEarnings, totalEarnings: baseEarnings + upsellEarnings + contractEarnings + tipEarnings + gasCost };
 }
 
 const toEarning = (row) => ({
@@ -508,6 +512,7 @@ const toEarning = (row) => ({
   customerName: row.customer_name ?? "Customer",
   jobDate: row.job_date?.toISOString?.().slice(0, 10) ?? row.job_date,
   originalJobPrice: Number(row.original_job_price || 0),
+  gasCost: Number(row.gas_cost || 0),
   tipAmount: Number(row.tip_amount),
   upsellAmount: Number(row.upsell_amount),
   upsellDescription: row.upsell_description ?? "",
@@ -595,7 +600,7 @@ async function eligiblePayrollLines(db, periodEnd) {
     `select j.id as job_id, j.date as work_date, j.status as job_status, c.name as customer_name,
       ja.employee_id, ua.name as employee_name, ja.original_job_price, ja.base_commission_pct,
       ja.upsell_commission_pct, ja.contract_bonus_pct, ja.tip_share_pct,
-      es.id as earning_id, es.status as earning_status, es.tip_amount, es.upsell_amount, es.contract_submission_id,
+      es.id as earning_id, es.status as earning_status, es.gas_cost, es.tip_amount, es.upsell_amount, es.contract_submission_id,
       cs.status as contract_status
      from job_assignments ja
      join jobs j on j.id = ja.job_id
@@ -622,6 +627,7 @@ async function eligiblePayrollLines(db, periodEnd) {
     if (Number(row.upsell_amount) > 0) candidates.push({ key: `${row.job_id}:upsell`, type: "upsell", description: "Approved upsell commission", amount: Number(row.upsell_amount) * Number(row.upsell_commission_pct) });
     if (row.contract_submission_id && row.contract_status === "approved") candidates.push({ key: `${row.job_id}:contract_bonus`, type: "contract_bonus", description: "Approved service contract bonus", amount: Number(row.original_job_price) * Number(row.contract_bonus_pct) });
     if (Number(row.tip_amount) > 0) candidates.push({ key: `${row.job_id}:tip`, type: "tip", description: "Tip share", amount: Number(row.tip_amount) * Number(row.tip_share_pct) });
+    if (Number(row.gas_cost) > 0) candidates.push({ key: `${row.job_id}:gas_reimbursement`, type: "gas_reimbursement", description: "Gas reimbursement", amount: Number(row.gas_cost) });
     for (const item of candidates.filter((item) => item.amount > 0)) {
       const used = await db.query("select 1 from payroll_run_lines where source_key = $1", [item.key]);
       if (used.rows[0]) continue;
@@ -2046,9 +2052,11 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
   try {
     const subject = await employeeSubject(req);
     const {
-      jobId, tipAmount = 0, contractSubmissionId = null, hasUpsell = false,
+      jobId, gasCost = 0, tipAmount = 0, contractSubmissionId = null, hasUpsell = false,
       upsellDescription = "", upsellOutcome = "", upsellQuotedAmount = 0, upsellNotes = "",
     } = req.body;
+    const gas = Number(gasCost);
+    if (!Number.isFinite(gas) || gas < 0 || gas > 999999.99 || Math.abs(gas * 100 - Math.round(gas * 100)) > 0.000001) return res.status(400).json({ error: "Enter a valid gas cost with at most two decimal places." });
     const tip = Number(tipAmount);
     const quote = Number(upsellQuotedAmount);
     const validOutcomes = ["accepted", "declined", "follow-up"];
@@ -2069,9 +2077,9 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
     const result = await pool.query(
       `insert into earning_submissions (
          job_id, employee_id, tip_amount, upsell_amount, contract_submission_id,
-         upsell_description, upsell_outcome, upsell_quoted_amount, upsell_notes, status, owner_note
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', '')
-       on conflict (job_id, employee_id) do update set tip_amount = excluded.tip_amount,
+         upsell_description, upsell_outcome, upsell_quoted_amount, upsell_notes, gas_cost, status, owner_note
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', '')
+       on conflict (job_id, employee_id) do update set tip_amount = excluded.tip_amount, gas_cost = excluded.gas_cost,
          contract_submission_id = excluded.contract_submission_id,
          upsell_amount = excluded.upsell_amount, upsell_description = excluded.upsell_description,
          upsell_outcome = excluded.upsell_outcome, upsell_quoted_amount = excluded.upsell_quoted_amount,
@@ -2081,12 +2089,12 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
       [
         jobId, subject.id, tip, hasUpsell && upsellOutcome === "accepted" ? quote : 0, contractSubmissionId,
         hasUpsell ? upsellDescription.trim() : "", hasUpsell ? upsellOutcome : "",
-        hasUpsell ? quote : 0, hasUpsell ? String(upsellNotes).trim() : "",
+        hasUpsell ? quote : 0, hasUpsell ? String(upsellNotes).trim() : "", gas,
       ],
     );
     await completeJobAfterEarnings({ db: pool, updateSheet: runSheetAction, jobId });
     const full = await pool.query(`${earningSelect} where es.id = $1`, [result.rows[0].id]);
-    await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, hasUpsell, upsellOutcome, upsellQuotedAmount: hasUpsell ? quote : 0, jobMarkedCompleted: true });
+    await audit(req.authUser.id, "submit_earnings", "earning", result.rows[0].id, { jobId, tip, gasCost: gas, hasUpsell, upsellOutcome, upsellQuotedAmount: hasUpsell ? quote : 0, jobMarkedCompleted: true });
     void sendPushToRole("owner", { title: "Earnings need approval", body: `${subject.name} submitted earnings${hasUpsell ? " with an upsell" : ""}.`, tag: `earning-${result.rows[0].id}` }).catch(console.error);
     res.status(201).json(toEarning(full.rows[0]));
   } catch (error) {

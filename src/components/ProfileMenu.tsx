@@ -9,11 +9,12 @@ import { PushNotificationSettings } from "./PushNotificationSettings";
 type View = "profile" | "notifications" | "help" | "report" | "business" | "rates" | null;
 const profileFieldClass = "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-lagoon focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500";
 
-export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview = false, compact = false }: {
+export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, onPreviewEmployee, preview = false, compact = false }: {
   theme: ThemePreference;
   onTheme: (theme: ThemePreference) => void;
   employee?: EmployeeProfile;
   onOwnerNavigate?: (tab: "team" | "payroll" | "contracts") => void;
+  onPreviewEmployee?: () => void;
   preview?: boolean;
   compact?: boolean;
 }) {
@@ -72,6 +73,7 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, preview
       <div className="my-1 border-t border-slate-100 pt-2 dark:border-slate-800"><p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Appearance</p><div className="mt-2 grid grid-cols-3 gap-1">{([{ id: "light", label: "Light", icon: Sun }, { id: "dark", label: "Dark", icon: Moon }, { id: "system", label: "System", icon: Monitor }] as const).map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => onTheme(id)} className={`rounded-lg border px-2 py-2 text-xs font-semibold ${theme === id ? "border-lagoon bg-mist text-lagoon dark:bg-cyan-500/15" : "border-transparent hover:bg-slate-100 dark:hover:bg-slate-800"}`}><Icon className="mx-auto mb-1" size={15} />{label}</button>)}</div></div>
       {user.role === "owner" && !preview && <MenuButton icon={Building2} label="Business settings" onClick={() => show("business")} />}
       {(employee || user.role === "employee") && <MenuButton icon={BadgePercent} label="My commission rates" onClick={() => show("rates")} />}
+      {user.role === "owner" && !preview && onPreviewEmployee && <MenuButton icon={Monitor} label="Employee preview" onClick={() => { setOpen(false); onPreviewEmployee(); }} />}
       {!preview && <MenuButton icon={BellRing} label="Phone notifications" onClick={() => show("notifications")} />}
       <MenuButton icon={CircleHelp} label="Help & instructions" onClick={() => show("help")} />
       <MenuButton icon={Clipboard} label="Report a problem" onClick={() => show("report")} />
