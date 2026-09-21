@@ -51,37 +51,6 @@ export interface ManagerIssue {
   createdAt: string;
 }
 
-export type MetaAdsLevel = "campaign" | "adset" | "ad";
-
-export interface MetaAdMetric {
-  id: string;
-  name: string;
-  dateStart: string;
-  dateStop: string;
-  spend: number;
-  impressions: number;
-  reach: number;
-  clicks: number;
-  ctr: number;
-  cpc: number;
-  leads: number;
-  costPerLead: number | null;
-}
-
-export interface MetaAdsReport {
-  configured: boolean;
-  readOnly: true;
-  permission: "ads_read";
-  verifiedPermissions: string[];
-  account: { id: string; name: string; currency: string };
-  range?: { since: string; until: string };
-  level?: MetaAdsLevel;
-  summary?: MetaAdMetric;
-  trend?: MetaAdMetric[];
-  breakdown?: MetaAdMetric[];
-  reporting: { timezone: string; lastSuccessfulRefresh: string | null; delayNotice: string; missingData: string[] };
-}
-
 async function request<T>(path: string, options?: RequestInit): Promise<T | null> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -100,11 +69,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T | null
 
 export function loadDatabaseSnapshot() {
   return request<DatabaseSnapshot>("/api/bootstrap");
-}
-
-export function loadMetaAdsReport(input: { since: string; until: string; level: MetaAdsLevel }) {
-  const query = new URLSearchParams(input);
-  return request<MetaAdsReport>(`/api/owner/meta-ads?${query.toString()}`);
 }
 
 export function syncSheetsToDatabase() {

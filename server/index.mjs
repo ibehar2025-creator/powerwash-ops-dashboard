@@ -8,7 +8,6 @@ import pg from "pg";
 import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
 import { previousWeeklyPayPeriod } from "./payday.mjs";
-import { loadMetaAdsReport, metaAdsAccess, parseMetaAdsQuery } from "./meta-ads.mjs";
 
 const { Pool } = pg;
 
@@ -31,9 +30,6 @@ const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || "";
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || "";
 const vapidSubject = process.env.VAPID_SUBJECT || "mailto:ibehar@emeryweiner.org";
 const pushEnabled = Boolean(vapidPublicKey && vapidPrivateKey);
-const metaAdsAccessToken = process.env.META_ADS_ACCESS_TOKEN || "";
-const metaAdAccountId = process.env.META_AD_ACCOUNT_ID || "1269731845278311";
-const metaGraphApiVersion = process.env.META_GRAPH_API_VERSION || "v25.0";
 if (pushEnabled) webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 let activeSheetSync = null;
 let googleCertCache = { expiresAt: 0, keys: [] };
@@ -1243,46 +1239,6 @@ app.delete("/api/auth/account", requireDatabase, requireAuth, async (req, res, n
 });
 
 app.use("/api", requireAuth);
-
-app.all("/api/owner/meta-ads", requireDatabase, (req, res, next) => {
-  const denial = metaAdsAccess(req.authUser?.role, req.method);
-  if (!denial) return next();
-  if (denial.status === 405) res.setHeader("Allow", "GET");
-  return res.status(denial.status).json({ error: denial.error });
-});
-
-app.get("/api/owner/meta-ads", async (req, res) => {
-  if (!metaAdsAccessToken) {
-    return res.json({
-      configured: false,
-      readOnly: true,
-      permission: "ads_read",
-      verifiedPermissions: [],
-      account: { id: metaAdAccountId, name: "Powerwashing Pros", currency: "USD" },
-      reporting: {
-        timezone: "Available after Meta is connected",
-        lastSuccessfulRefresh: null,
-        delayNotice: "Meta may revise conversion and lead results as attributed events are received and processed.",
-        missingData: ["Add a server-side Meta access token with ads_read only to begin reporting."],
-      },
-    });
-  }
-  const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const part = (type) => todayParts.find((item) => item.type === type)?.value;
-  const todayIso = `${part("year")}-${part("month")}-${part("day")}`;
-  let query;
-  try {
-    query = parseMetaAdsQuery(req.query, todayIso);
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
-  try {
-    return res.json(await loadMetaAdsReport({ token: metaAdsAccessToken, accountId: metaAdAccountId, version: metaGraphApiVersion, ...query }));
-  } catch (error) {
-    console.error("Meta Ads reporting error:", error.message);
-    return res.status(502).json({ error: "Meta reporting is unavailable.", detail: error.message });
-  }
-});
 
 app.post("/api/issues", requireDatabase, async (req, res, next) => {
   try {
