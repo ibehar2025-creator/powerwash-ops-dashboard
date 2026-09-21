@@ -107,7 +107,7 @@ export function EmployeeWorkspace({ preview, onExitPreview }: { preview?: boolea
 
   useEffect(() => {
     const refresh = () => void refreshWorkspace();
-    const interval = window.setInterval(refresh, 30 * 60_000);
+    const interval = window.setInterval(refresh, 14 * 60_000);
     const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", onVisibility);
