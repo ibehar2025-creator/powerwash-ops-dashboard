@@ -271,6 +271,13 @@ export function assignEmployeeToJob(jobId: string, employeeId: string) {
   return request<JobAssignment>("/api/owner/assignments", { method: "POST", body: JSON.stringify({ jobId, employeeId }) });
 }
 
+export function saveJobCommission(jobId: string, baseCommissionPct: number) {
+  return request<JobAssignment>(`/api/owner/assignments/${encodeURIComponent(jobId)}/commission`, {
+    method: "PATCH",
+    body: JSON.stringify({ baseCommissionPct }),
+  });
+}
+
 export function removeJobAssignment(jobId: string) {
   return request<{ deleted: boolean }>(`/api/owner/assignments/${jobId}`, { method: "DELETE" });
 }

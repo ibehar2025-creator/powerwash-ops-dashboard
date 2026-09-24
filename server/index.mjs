@@ -2273,6 +2273,36 @@ app.post("/api/owner/assignments", requireDatabase, requireOwner, async (req, re
   }
 });
 
+app.patch("/api/owner/assignments/:jobId/commission", requireDatabase, requireOwner, async (req, res, next) => {
+  try {
+    const pct = req.body?.baseCommissionPct;
+    if (typeof pct !== "number" || !Number.isFinite(pct) || pct < 0 || pct > 1 || Math.abs(Math.round(pct * 10000) - pct * 10000) > 0.000001) {
+      return res.status(400).json({ error: "Enter a commission between 0% and 100%, with at most two decimal places." });
+    }
+    const result = await pool.query(
+      `update job_assignments ja set base_commission_pct = $2
+       where ja.job_id = $1
+         and not exists (
+           select 1 from earning_submissions es
+           where es.job_id = ja.job_id and es.status in ('approved', 'paid')
+         )
+         and not exists (
+           select 1 from payroll_run_lines prl where prl.job_id = ja.job_id
+         )
+       returning ja.*, (select name from user_accounts where id = ja.employee_id) as employee_name`,
+      [req.params.jobId, pct],
+    );
+    if (!result.rows[0]) {
+      const exists = await pool.query("select 1 from job_assignments where job_id = $1", [req.params.jobId]);
+      return res.status(exists.rows[0] ? 409 : 404).json({ error: exists.rows[0] ? "This job's earnings are approved or in payroll and its commission can no longer change." : "This job is not assigned to an employee." });
+    }
+    await audit(req.authUser.id, "update_job_commission", "job", req.params.jobId, { baseCommissionPct: pct });
+    res.json(toAssignment(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.delete("/api/owner/assignments/:jobId", requireDatabase, requireOwner, async (req, res, next) => {
   try {
     const approved = await pool.query("select 1 from earning_submissions where job_id = $1 and status in ('approved', 'paid')", [req.params.jobId]);
