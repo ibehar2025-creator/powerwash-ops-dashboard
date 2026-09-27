@@ -19,10 +19,6 @@ function originalDate(job: Job) {
 }
 
 function spreadsheetStatus(job: Job) {
-  if (!job.websiteEditedFields?.includes("status")) {
-    const match = job.notes.match(/Spreadsheet status:\s*([^.]+)/i);
-    if (match?.[1]) return match[1].trim();
-  }
   if (job.status === "completed") return "Complete";
   if (job.status === "scheduled") return "Incomplete";
   return job.status.replace(/\b\w/g, (letter) => letter.toUpperCase());
