@@ -6,7 +6,7 @@ import vm from "node:vm";
 const source = fs.readFileSync(new URL("../server/index.mjs", import.meta.url), "utf8");
 const amounts = source.slice(source.indexOf("function earningAmounts("), source.indexOf("const toEarning"));
 const payroll = source.slice(source.indexOf("async function eligiblePayrollLines("), source.indexOf("const toCalendarEvent"));
-const context = vm.createContext({ isoDateValue: (value) => value });
+const context = vm.createContext({ isoDateValue: (value) => value, salesPayrollLines: async () => ({ lines: [], missingApprovals: 0 }) });
 vm.runInContext(amounts + payroll, context);
 const row = {
   job_id: "test-job", employee_id: "test-employee", earning_id: "test-earning",

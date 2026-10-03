@@ -8,6 +8,7 @@ import pg from "pg";
 import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
 import { previousWeeklyPayPeriod } from "./payday.mjs";
+import { ensureSalesSchema, installSalesRoutes, ownerOrSalesman, salesPayrollLines, priceAfterUpsell } from "./sales.mjs";
 
 const { Pool } = pg;
 
@@ -21,6 +22,7 @@ const automaticSheetSyncIntervalMs = 14 * 60 * 1000;
 let lastAutomaticSheetSyncAt = 0;
 const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
 const employeeAccessCode = process.env.AUTH_EMPLOYEE_CODE || "";
+const salesmanAccessCode = process.env.AUTH_SALESMAN_CODE || "";
 const ownerAccessCode = process.env.AUTH_OWNER_CODE || process.env.AUTH_SIGNUP_CODE || "";
 const sessionCookieName = "powerwash_session";
 const authStateCookieName = "powerwash_auth_state";
@@ -314,7 +316,7 @@ async function ensureMapSchema() {
       and not exists (select 1 from payroll_run_lines prl where prl.source_key = ja.job_id || ':upsell');
     alter table earning_submissions add column if not exists gas_cost numeric(12,2) not null default 0 check (gas_cost >= 0);
     alter table payroll_run_lines drop constraint if exists payroll_run_lines_line_type_check;
-    alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement'));
+    alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement', 'sales_commission'));
     alter table payroll_runs enable row level security;
     alter table payroll_run_lines enable row level security;
     alter table payroll_adjustments enable row level security;
@@ -646,7 +648,8 @@ async function eligiblePayrollLines(db, periodEnd) {
       });
     }
   }
-  return { lines, missingApprovals };
+  const sales = await salesPayrollLines(db, periodEnd);
+  return { lines: [...lines, ...sales.lines], missingApprovals: missingApprovals + sales.missingApprovals };
 }
 
 const toCalendarEvent = (row) => ({
@@ -670,8 +673,8 @@ async function syncSolicitationLead(client, solicitation) {
   }
 
   const result = await client.query(
-    `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes)
-     values ($1, 'Map follow-up', 'Contact info pending', $2, 'Map solicitation', 'new', 0, $3, $4)
+    `insert into leads (id, name, contact, address, source, status, estimated_value, follow_up_date, notes, created_by)
+     values ($1, 'Map follow-up', 'Contact info pending', $2, 'Map solicitation', 'new', 0, $3, $4, $5)
      on conflict (id) do update set
        address = case when leads.website_overrides ? 'address' then leads.address else excluded.address end,
        source = excluded.source,
@@ -679,7 +682,7 @@ async function syncSolicitationLead(client, solicitation) {
        notes = case when leads.website_overrides ? 'notes' then leads.notes else excluded.notes end,
        updated_at = now()
      returning *`,
-    [leadId, solicitation.address, solicitation.follow_up_date, solicitation.notes || ""],
+    [leadId, solicitation.address, solicitation.follow_up_date, solicitation.notes || "", solicitation.created_by],
   );
   return toLead(result.rows[0]);
 }
@@ -872,7 +875,7 @@ async function upsertLeads(client, leads = []) {
     );
 }
 
-async function upsertJobs(client, jobs = []) {
+async function upsertJobs(client, jobs = [], snapshotStartedAt = new Date()) {
   if (jobs.length === 0) return;
   const rows = jobs.map((job) => {
     const completed = job.status === "completed";
@@ -932,8 +935,9 @@ async function upsertJobs(client, jobs = []) {
          longitude = case when jobs.address is distinct from excluded.address then null else jobs.longitude end,
          geocoded_address = case when jobs.address is distinct from excluded.address then null else jobs.geocoded_address end,
          website_overrides = '{}'::jsonb,
-         updated_at = now()`,
-      [JSON.stringify(rows)],
+         updated_at = clock_timestamp()
+       where jobs.updated_at <= $2::timestamptz`,
+      [JSON.stringify(rows), snapshotStartedAt],
     );
 }
 
@@ -1069,7 +1073,7 @@ function assertUniqueSyncIds(payload) {
   }
 }
 
-async function syncSheetsIntoDatabase(payload) {
+async function syncSheetsIntoDatabase(payload, snapshotStartedAt) {
   assertUniqueSyncIds(payload);
   const client = await pool.connect();
   const customerIds = (payload.customers ?? []).map((customer) => customer.id);
@@ -1082,15 +1086,16 @@ async function syncSheetsIntoDatabase(payload) {
     await client.query("begin");
     await upsertCustomers(client, payload.customers);
     await upsertLeads(client, payload.leads);
-    await upsertJobs(client, payload.jobs);
+    await upsertJobs(client, payload.jobs, snapshotStartedAt);
     await upsertInvoices(client, payload.invoices);
     await upsertReviews(client, payload.reviews);
     await upsertServicePlans(client, payload.servicePlans);
     await client.query("delete from service_plans where id like 'sp-%' and not (id = any($1::text[]))", [servicePlanIds]);
     await client.query("delete from invoices where id like 'sheet-invoice-%' and not (id = any($1::text[]))", [invoiceIds]);
-    await client.query("delete from jobs where source = 'spreadsheet-import' and not (id = any($1::text[]))", [jobIds]);
+    await client.query("update jobs set status='canceled',updated_at=clock_timestamp() where source='spreadsheet-import' and status<>'canceled' and not (id=any($1::text[])) and updated_at <= $2::timestamptz and exists(select 1 from sales_credits where job_id=jobs.id)", [jobIds, snapshotStartedAt]);
+    await client.query("delete from jobs where source = 'spreadsheet-import' and not (id = any($1::text[])) and updated_at <= $2::timestamptz and not exists(select 1 from sales_credits where job_id=jobs.id)", [jobIds, snapshotStartedAt]);
     await client.query("delete from reviews where source = 'spreadsheet-import' and not (id = any($1::text[]))", [reviewIds]);
-    await client.query("delete from customers where id like 'sheet-customer-%' and not (id = any($1::text[]))", [customerIds]);
+    await client.query("delete from customers where id like 'sheet-customer-%' and not (id = any($1::text[])) and not exists(select 1 from jobs where customer_id=customers.id)", [customerIds]);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback");
@@ -1107,7 +1112,7 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/auth/config", (_req, res) => {
   const state = randomBytes(24).toString("base64url");
   res.setHeader("Set-Cookie", cookie(authStateCookieName, state, { maxAge: 10 * 60 * 1000 }));
-  res.json({ enabled: Boolean(googleClientId && pool), clientId: googleClientId, state, signupCodeRequired: Boolean(employeeAccessCode || ownerAccessCode) });
+  res.json({ enabled: Boolean(googleClientId && pool), clientId: googleClientId, state, signupCodeRequired: Boolean(employeeAccessCode || ownerAccessCode || salesmanAccessCode) });
 });
 
 app.get("/api/auth/session", async (req, res, next) => {
@@ -1153,8 +1158,8 @@ app.post("/api/auth/register", requireDatabase, async (req, res, next) => {
     const age = Number(req.body.age);
     const role = req.body.role;
     if (!Number.isInteger(age) || age < 13 || age > 120) return res.status(400).json({ error: "Enter an age between 13 and 120." });
-    if (role !== "owner" && role !== "employee") return res.status(400).json({ error: "Choose owner or employee." });
-    const requiredCode = role === "employee" ? employeeAccessCode : ownerAccessCode;
+    if (!["owner", "employee", "salesman"].includes(role)) return res.status(400).json({ error: "Choose owner, employee, or salesman." });
+    const requiredCode = role === "salesman" ? salesmanAccessCode : role === "employee" ? employeeAccessCode : ownerAccessCode;
     if (!requiredCode) return res.status(503).json({ error: `The ${role} signup code is not configured. Contact the owner.` });
     if (requiredCode && req.body.accessCode !== requiredCode) return res.status(403).json({ error: `The ${role} access code is incorrect.` });
     const profile = await verifyGoogleCredential(req.body.credential);
@@ -1167,6 +1172,7 @@ app.post("/api/auth/register", requireDatabase, async (req, res, next) => {
        returning *`,
       [profile.googleSub, profile.email, profile.name, profile.pictureUrl, age, role],
     );
+    if (!result.rows[0].active) return res.status(403).json({ error: "This account is inactive. Contact the owner." });
     await createSession(res, result.rows[0].id);
     res.status(201).json({ user: toAuthUser(result.rows[0]) });
   } catch (error) {
@@ -1356,6 +1362,7 @@ app.get("/api/bootstrap", requireDatabase, requireOwner, async (_req, res, next)
 });
 
 async function runSheetSync() {
+  const { rows: [{ started_at: snapshotStartedAt }] } = await pool.query("select clock_timestamp() as started_at");
   const response = await fetch(syncUrl, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Sheet sync endpoint failed with ${response.status}`);
   const payload = await response.json();
@@ -1364,7 +1371,7 @@ async function runSheetSync() {
     if (plan.customer?.id && !customersById.has(plan.customer.id)) customersById.set(plan.customer.id, plan.customer);
   }
   payload.customers = [...customersById.values()];
-  await syncSheetsIntoDatabase(payload);
+  await syncSheetsIntoDatabase(payload, snapshotStartedAt);
   lastAutomaticSheetSyncAt = Date.now();
   return loadSnapshot();
 }
@@ -1544,10 +1551,13 @@ app.post("/api/jobs", requireDatabase, requireOwner, async (req, res, next) => {
 app.delete("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const existing = await client.query("select id from jobs where id = $1", [req.params.id]);
-    if (!existing.rows[0]) return res.status(404).json({ error: "Job not found." });
-    await runSheetAction("deleteJob", { jobId: req.params.id });
     await client.query("begin");
+    const existing = await client.query("select id from jobs where id = $1 for update", [req.params.id]);
+    if (!existing.rows[0]) return res.status(404).json({ error: "Job not found." });
+    const locked = await client.query("select 1 from sales_credits sc where sc.job_id=$1 and (sc.status in ('approved','paid') or exists(select 1 from payroll_run_lines where sales_credit_id=sc.id))", [req.params.id]);
+    if (locked.rows[0]) return res.status(409).json({ error: "This job has locked sales earnings. Cancel it and use a payroll correction instead of deleting it." });
+    await runSheetAction("deleteJob", { jobId: req.params.id });
+    await client.query("delete from sales_credits where job_id=$1", [req.params.id]);
     await client.query("delete from invoices where job_id = $1", [req.params.id]);
     await client.query("delete from jobs where id = $1", [req.params.id]);
     await client.query("commit");
@@ -1556,6 +1566,7 @@ app.delete("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next
     await client.query("rollback").catch(() => undefined);
     next(error);
   } finally {
+    await client.query("rollback").catch(() => undefined);
     client.release();
   }
 });
@@ -1621,15 +1632,17 @@ app.patch("/api/leads/:id", requireDatabase, requireOwner, async (req, res, next
 });
 
 app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
   try {
+    await client.query("begin");
     const { date, time, customerId, address, serviceType, status, tipAmount, price, paymentMethod, notes, employeeInstructions, latitude, longitude } = req.body;
     const editableFields = ["date", "time", "customerId", "address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes", "employeeInstructions"];
     const overrides = Object.fromEntries(editableFields.filter((field) => Object.hasOwn(req.body, field)).map((field) => [field, true]));
-    const existingResult = await pool.query(
+    const existingResult = await client.query(
       `select jobs.*, customers.name as customer_name, customers.phone as customer_phone
        from jobs
        left join customers on customers.id = jobs.customer_id
-       where jobs.id = $1`,
+       where jobs.id = $1 for update of jobs`,
       [req.params.id],
     );
     const existing = existingResult.rows[0];
@@ -1647,7 +1660,7 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
       let customerName = existing.customer_name ?? "Customer";
       let customerPhone = existing.customer_phone ?? "";
       if (customerId && customerId !== existing.customer_id) {
-        const customerResult = await pool.query("select name, phone from customers where id = $1", [customerId]);
+        const customerResult = await client.query("select name, phone from customers where id = $1", [customerId]);
         if (!customerResult.rows[0]) {
           res.status(400).json({ error: "Customer was not found." });
           return;
@@ -1661,14 +1674,14 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
       if (Object.hasOwn(req.body, "date") || Object.hasOwn(req.body, "time")) {
         Object.assign(sheetRow, { date: date ?? databaseDate(existing.date), time: time ?? existing.time });
       }
-      for (const field of ["address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes"]) {
+      for (const field of ["address", "serviceType", "status", "tipAmount", "price", "paymentMethod", "notes", "employeeInstructions"]) {
         if (Object.hasOwn(req.body, field)) sheetRow[field] = req.body[field];
       }
       Object.assign(sheetRow, { paymentStatus: effectivePaymentStatus, amountPaid: effectiveAmountPaid });
       await runSheetAction("updateJob", sheetRow);
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `update jobs
        set date = coalesce($2, date),
            time = coalesce($3, time),
@@ -1691,18 +1704,23 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
              else geocoded_address
            end,
            website_overrides = website_overrides || $16::jsonb,
-           updated_at = now()
+           updated_at = clock_timestamp()
        where id = $1
        returning *`,
       [req.params.id, date, time, customerId, address, serviceType, status, effectivePaymentStatus, effectiveAmountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides), employeeInstructions],
     );
+    await client.query("commit");
     res.json(toJob(result.rows[0]));
   } catch (error) {
+    await client.query("rollback").catch(() => undefined);
     next(error);
+  } finally {
+    await client.query("rollback").catch(() => undefined);
+    client.release();
   }
 });
 
-app.post("/api/solicitations", requireDatabase, requireOwner, async (req, res, next) => {
+app.post("/api/solicitations", requireDatabase, ownerOrSalesman, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { address, latitude, longitude, solicitedDate, outcome, followUpDate, notes } = req.body;
@@ -1710,7 +1728,7 @@ app.post("/api/solicitations", requireDatabase, requireOwner, async (req, res, n
       res.status(400).json({ error: "Address and valid coordinates are required." });
       return;
     }
-    const subject = await employeeSubject(req);
+    const subject = req.authUser;
     await client.query("begin");
     const result = await client.query(
       `insert into solicitations (address, latitude, longitude, solicited_date, outcome, follow_up_date, notes, created_by)
@@ -1730,7 +1748,7 @@ app.post("/api/solicitations", requireDatabase, requireOwner, async (req, res, n
   }
 });
 
-app.patch("/api/solicitations/:id", requireDatabase, requireOwner, async (req, res, next) => {
+app.patch("/api/solicitations/:id", requireDatabase, ownerOrSalesman, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { address, latitude, longitude, solicitedDate, outcome, followUpDate, notes } = req.body;
@@ -1766,7 +1784,7 @@ app.patch("/api/solicitations/:id", requireDatabase, requireOwner, async (req, r
   }
 });
 
-app.delete("/api/solicitations/:id", requireDatabase, requireOwner, async (req, res, next) => {
+app.delete("/api/solicitations/:id", requireDatabase, ownerOrSalesman, async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -2044,7 +2062,7 @@ app.patch("/api/employee/jobs/:id", requireDatabase, allowEmployeeOrOwner, async
       `update jobs set status = coalesce($2, status), notes = coalesce($3, notes),
        payment_status = case when coalesce($2, status) = 'completed' then 'paid' else 'unpaid' end,
        amount_paid = case when coalesce($2, status) = 'completed' then price else 0 end,
-       website_overrides = website_overrides || $4::jsonb, updated_at = now()
+       website_overrides = website_overrides || $4::jsonb, updated_at = clock_timestamp()
        where id = $1 and date between current_date - 7 and current_date + 7 returning *`,
       [req.params.id, status, notes, JSON.stringify({ ...(status !== undefined ? { status: true } : {}), ...(notes !== undefined ? { notes: true } : {}) })],
     );
@@ -2321,14 +2339,20 @@ app.post("/api/owner/earnings/:id/review", requireDatabase, requireOwner, async 
   try {
     const { decision, ownerNote = "" } = req.body;
     if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: "Choose approved or rejected." });
-    const current = await client.query(`${earningSelect} where es.id = $1`, [req.params.id]);
+    await client.query("begin");
+    const submission = await client.query("select job_id from earning_submissions where id=$1", [req.params.id]);
+    if (!submission.rows[0]) return res.status(404).json({ error: "Earnings submission was not found." });
+    await client.query("select id from jobs where id=$1 for update", [submission.rows[0].job_id]);
+    const current = await client.query(`${earningSelect} where es.id = $1 for update of es, ja`, [req.params.id]);
     if (!current.rows[0]) return res.status(404).json({ error: "Earnings submission was not found." });
-    if (decision === "approved" && current.rows[0].job_date && current.rows[0].status === "paid") return res.status(409).json({ error: "Paid earnings cannot be reviewed again." });
+    if (current.rows[0].status === "paid") return res.status(409).json({ error: "Paid earnings cannot be reviewed again." });
+    if (current.rows[0].status === "approved") return res.status(409).json({ error: "Approved earnings are locked. Use a payroll correction." });
     if (decision === "approved") {
       if (current.rows[0].job_status === "canceled") return res.status(409).json({ error: "Canceled jobs cannot have earnings approved." });
       if (current.rows[0].job_status !== "completed" && !current.rows[0].job_is_due) return res.status(409).json({ error: "Future jobs must be completed before approving their earnings." });
       if (current.rows[0].contract_submission_id && current.rows[0].contract_status !== "approved") return res.status(409).json({ error: "Approve the related contract before approving its bonus." });
-      const finalPrice = Number(current.rows[0].original_job_price) + Number(current.rows[0].upsell_amount);
+      const latestJob = await client.query("select price from jobs where id = $1 for update", [current.rows[0].job_id]);
+      const finalPrice = priceAfterUpsell(latestJob.rows[0].price, current.rows[0].applied_upsell_amount, current.rows[0].upsell_amount);
       const tipAmount = Number(current.rows[0].tip_amount);
       await runSheetAction("updateJob", {
         jobId: current.rows[0].job_id,
@@ -2338,10 +2362,11 @@ app.post("/api/owner/earnings/:id/review", requireDatabase, requireOwner, async 
         paymentStatus: "paid",
         amountPaid: finalPrice,
       });
+      await client.query("update earning_submissions set applied_upsell_amount = upsell_amount where id = $1", [req.params.id]);
       await client.query(
         `update jobs set status = 'completed', price = $2, tip_amount = $3,
          payment_status = 'paid', amount_paid = $2,
-         website_overrides = website_overrides || $4::jsonb, updated_at = now()
+         website_overrides = website_overrides || $4::jsonb, updated_at = clock_timestamp()
          where id = $1`,
         [current.rows[0].job_id, finalPrice, tipAmount, JSON.stringify({ status: true, price: true, tipAmount: true, paymentStatus: true, amountPaid: true })],
       );
@@ -2350,13 +2375,16 @@ app.post("/api/owner/earnings/:id/review", requireDatabase, requireOwner, async 
       "update earning_submissions set status = $2, owner_note = $3, reviewed_by = $4, reviewed_at = now(), updated_at = now() where id = $1",
       [req.params.id, decision, ownerNote, req.authUser.id],
     );
+    await client.query("commit");
     await audit(req.authUser.id, `earning_${decision}`, "earning", req.params.id, { ownerNote });
     const result = await client.query(`${earningSelect} where es.id = $1`, [req.params.id]);
     void sendPushToUsers([current.rows[0].employee_id], { title: `Earnings ${decision}`, body: ownerNote || `Your earnings submission was ${decision}.`, tag: `earning-review-${req.params.id}` }).catch(console.error);
     res.json(toEarning(result.rows[0]));
   } catch (error) {
+    await client.query("rollback").catch(() => undefined);
     next(error);
   } finally {
+    await client.query("rollback").catch(() => undefined);
     client.release();
   }
 });
@@ -2482,14 +2510,17 @@ app.post("/api/owner/payroll", requireDatabase, requireOwner, async (req, res, n
     await client.query("begin");
     const existing = await client.query("select id from payroll_runs where period_start = $1 and period_end = $2", [periodStart, periodEnd]);
     if (existing.rows[0]) { await client.query("rollback"); return res.status(409).json({ error: "A payroll run already exists for this period." }); }
+    await client.query(`select id from jobs where date <= $1 and status='completed' and
+      (exists(select 1 from sales_credits where job_id=jobs.id and status='approved') or
+       exists(select 1 from earning_submissions where job_id=jobs.id and status='approved')) order by id for update`, [periodEnd]);
     const eligible = await eligiblePayrollLines(client, periodEnd);
-    if (!eligible.lines.length) { await client.query("rollback"); return res.status(400).json({ error: "No unpaid completed-job earnings are available for this period." }); }
+    if (!eligible.lines.length && req.body.allowEmpty !== true) { await client.query("rollback"); return res.status(400).json({ error: "No unpaid completed-job earnings are available for this period." }); }
     const run = await client.query("insert into payroll_runs (period_start, period_end, payday, created_by) values ($1, $2, $3, $4) returning id", [periodStart, periodEnd, payday, req.authUser.id]);
     for (const line of eligible.lines) {
       await client.query(
-        `insert into payroll_run_lines (payroll_run_id, employee_id, job_id, earning_submission_id, source_key, line_type, description, customer_name, work_date, amount)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [run.rows[0].id, line.employeeId, line.jobId, line.earningSubmissionId, line.sourceKey, line.lineType, line.description, line.customerName, line.workDate, line.amount],
+        `insert into payroll_run_lines (payroll_run_id, employee_id, job_id, earning_submission_id, source_key, line_type, description, customer_name, work_date, amount, sales_credit_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [run.rows[0].id, line.employeeId, line.jobId, line.earningSubmissionId, line.sourceKey, line.lineType, line.description, line.customerName, line.workDate, line.amount, line.salesCreditId ?? null],
       );
     }
     await client.query("commit");
@@ -2500,39 +2531,48 @@ app.post("/api/owner/payroll", requireDatabase, requireOwner, async (req, res, n
 });
 
 app.post("/api/owner/payroll/:id/adjustments", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     const { employeeId, adjustmentType, category, description, amount } = req.body;
     const value = Number(amount);
     if (!employeeId || !["addition", "deduction"].includes(adjustmentType) || !["bonus", "reimbursement", "deduction", "correction", "other"].includes(category) || !description?.trim() || !Number.isFinite(value) || value <= 0) return res.status(400).json({ error: "Employee, adjustment details, and a positive amount are required." });
-    const run = await pool.query("select status from payroll_runs where id = $1", [req.params.id]);
+    await client.query("begin");
+    const run = await client.query("select status from payroll_runs where id = $1 for update", [req.params.id]);
     if (!run.rows[0]) return res.status(404).json({ error: "Payroll run not found." });
     if (run.rows[0].status !== "draft") return res.status(409).json({ error: "Finalized payroll runs are locked." });
-    const employee = await pool.query("select 1 from user_accounts where id = $1 and role = 'employee'", [employeeId]);
+    const employee = await client.query("select 1 from user_accounts where id = $1 and role in ('employee', 'salesman')", [employeeId]);
     if (!employee.rows[0]) return res.status(400).json({ error: "Employee not found." });
-    const result = await pool.query(
+    const result = await client.query(
       "insert into payroll_adjustments (payroll_run_id, employee_id, adjustment_type, category, description, amount, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id",
       [req.params.id, employeeId, adjustmentType, category, description.trim(), value, req.authUser.id],
     );
+    await client.query("commit");
     await audit(req.authUser.id, "add_payroll_adjustment", "payroll", req.params.id, { adjustmentId: result.rows[0].id, employeeId, adjustmentType, category, amount: value });
     const runs = await loadPayrollRuns(pool); res.status(201).json(runs.find((item) => item.id === req.params.id));
-  } catch (error) { next(error); }
+  } catch (error) { next(error); } finally { await client.query("rollback").catch(() => undefined); client.release(); }
 });
 
 app.delete("/api/owner/payroll/:runId/adjustments/:adjustmentId", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const run = await pool.query("select status from payroll_runs where id = $1", [req.params.runId]);
+    await client.query("begin");
+    const run = await client.query("select status from payroll_runs where id = $1 for update", [req.params.runId]);
     if (!run.rows[0]) return res.status(404).json({ error: "Payroll run not found." });
     if (run.rows[0].status !== "draft") return res.status(409).json({ error: "Finalized payroll runs are locked." });
-    const result = await pool.query("delete from payroll_adjustments where id = $1 and payroll_run_id = $2 returning id", [req.params.adjustmentId, req.params.runId]);
+    const result = await client.query("delete from payroll_adjustments where id = $1 and payroll_run_id = $2 returning id", [req.params.adjustmentId, req.params.runId]);
     if (!result.rows[0]) return res.status(404).json({ error: "Adjustment not found." });
+    await client.query("commit");
     await audit(req.authUser.id, "delete_payroll_adjustment", "payroll", req.params.runId, { adjustmentId: req.params.adjustmentId });
     const runs = await loadPayrollRuns(pool); res.json(runs.find((item) => item.id === req.params.runId));
-  } catch (error) { next(error); }
+  } catch (error) { next(error); } finally { await client.query("rollback").catch(() => undefined); client.release(); }
 });
 
 app.post("/api/owner/payroll/:id/finalize", requireDatabase, requireOwner, async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const runs = await loadPayrollRuns(pool); const run = runs.find((item) => item.id === req.params.id);
+    await client.query("begin");
+    await client.query("select id from payroll_runs where id=$1 for update", [req.params.id]);
+    const runs = await loadPayrollRuns(client); const run = runs.find((item) => item.id === req.params.id);
     if (!run) return res.status(404).json({ error: "Payroll run not found." });
     if (run.status !== "draft") return res.status(409).json({ error: "Only draft payroll can be finalized." });
     const employeeIds = new Set([...run.lines.map((line) => line.employeeId), ...run.adjustments.map((item) => item.employeeId)]);
@@ -2541,11 +2581,12 @@ app.post("/api/owner/payroll/:id/finalize", requireDatabase, requireOwner, async
       const totals = payrollTotals(run.lines.filter((line) => line.employeeId === employeeId), run.adjustments.filter((item) => item.employeeId === employeeId));
       if (totals.netPay < 0) return res.status(400).json({ error: "Deductions cannot make an employee payment negative." });
     }
-    await pool.query("update payroll_runs set status = 'finalized', finalized_by = $2, finalized_at = now(), updated_at = now() where id = $1", [req.params.id, req.authUser.id]);
+    await client.query("update payroll_runs set status = 'finalized', finalized_by = $2, finalized_at = now(), updated_at = now() where id = $1", [req.params.id, req.authUser.id]);
+    await client.query("commit");
     await audit(req.authUser.id, "finalize_payroll", "payroll", req.params.id, { netPay: run.netPay });
     void sendPushToUsers([...employeeIds], { title: "Weekly earnings statement ready", body: `Your statement for ${run.periodStart} through ${run.periodEnd} is ready.`, tag: `payroll-finalized-${req.params.id}` }).catch(console.error);
     const updated = await loadPayrollRuns(pool); res.json(updated.find((item) => item.id === req.params.id));
-  } catch (error) { next(error); }
+  } catch (error) { next(error); } finally { await client.query("rollback").catch(() => undefined); client.release(); }
 });
 
 app.post("/api/owner/payroll/:id/payments", requireDatabase, requireOwner, async (req, res, next) => {
@@ -2553,16 +2594,21 @@ app.post("/api/owner/payroll/:id/payments", requireDatabase, requireOwner, async
   try {
     const { employeeId, paymentMethod, reference = "", note = "", paidAt } = req.body;
     if (!employeeId || !["bank", "check"].includes(paymentMethod) || !paidAt) return res.status(400).json({ error: "Employee, payment method, and paid date are required." });
+    await client.query("begin");
+    await client.query("select id from payroll_runs where id=$1 for update", [req.params.id]);
     const runs = await loadPayrollRuns(client); const run = runs.find((item) => item.id === req.params.id);
     if (!run) return res.status(404).json({ error: "Payroll run not found." });
     if (run.status !== "finalized") return res.status(409).json({ error: "Payroll must be finalized before recording payments." });
     if (run.payments.some((payment) => payment.employeeId === employeeId)) return res.status(409).json({ error: "Payment is already recorded for this employee." });
     const totals = payrollTotals(run.lines.filter((line) => line.employeeId === employeeId), run.adjustments.filter((item) => item.employeeId === employeeId));
     if (totals.netPay < 0 || (!run.lines.some((line) => line.employeeId === employeeId) && !run.adjustments.some((item) => item.employeeId === employeeId))) return res.status(400).json({ error: "Employee is not included in this payroll." });
-    await client.query("begin");
     await client.query("insert into payroll_payments (payroll_run_id, employee_id, amount, payment_method, reference, note, paid_at, recorded_by) values ($1,$2,$3,$4,$5,$6,$7,$8)", [req.params.id, employeeId, totals.netPay, paymentMethod, String(reference).trim(), String(note).trim(), paidAt, req.authUser.id]);
     const earningIds = run.lines.filter((line) => line.employeeId === employeeId).map((line) => line.jobId).filter(Boolean);
     if (earningIds.length) await client.query("update earning_submissions set status = 'paid', paid_at = $2, updated_at = now() where employee_id = $1 and job_id = any($3::text[]) and status = 'approved'", [employeeId, paidAt, earningIds]);
+    if (earningIds.length) {
+      await client.query("update sales_credits set status = 'paid', paid_at = $2, updated_at = now() where salesman_id = $1 and job_id = any($3::text[]) and status = 'approved'", [employeeId, paidAt, earningIds]);
+    }
+    await client.query("insert into sales_notifications(user_id,title,detail) select id,'Payment recorded',$2 from user_accounts where id=$1 and role='salesman'", [employeeId, `$${totals.netPay.toFixed(2)} paid on ${paidAt}`]);
     const people = new Set([...run.lines.map((line) => line.employeeId), ...run.adjustments.map((item) => item.employeeId)]);
     const paymentCount = await client.query("select count(distinct employee_id)::int as count from payroll_payments where payroll_run_id = $1", [req.params.id]);
     if (paymentCount.rows[0].count >= people.size) await client.query("update payroll_runs set status = 'paid', updated_at = now() where id = $1", [req.params.id]);
@@ -2570,7 +2616,7 @@ app.post("/api/owner/payroll/:id/payments", requireDatabase, requireOwner, async
     await audit(req.authUser.id, "record_payroll_payment", "payroll", req.params.id, { employeeId, amount: totals.netPay, paymentMethod });
     void sendPushToUsers([employeeId], { title: "Payment recorded", body: `$${totals.netPay.toFixed(2)} was recorded as paid on ${paidAt}.`, tag: `payroll-payment-${req.params.id}-${employeeId}` }).catch(console.error);
     const updated = await loadPayrollRuns(pool); res.status(201).json(updated.find((item) => item.id === req.params.id));
-  } catch (error) { await client.query("rollback").catch(() => undefined); next(error); } finally { client.release(); }
+  } catch (error) { next(error); } finally { await client.query("rollback").catch(() => undefined); client.release(); }
 });
 
 function csvCell(value) { return `"${String(value ?? "").replaceAll('"', '""')}"`; }
@@ -2594,6 +2640,8 @@ app.get("/api/employee/payroll", requireDatabase, allowEmployeeOrOwner, async (r
     res.json({ statements: await loadPayrollRuns(pool, subject.id) });
   } catch (error) { next(error); }
 });
+
+installSalesRoutes(app, { pool, requireDatabase, requireOwner, runSheetAction, syncUrl, toJob, toCustomer, toLead, toSolicitation, audit, sendPushToRole, sendPushToUsers, refreshSheetsIfStale, loadPayrollRuns });
 
 app.use(express.static(distPath));
 app.get(/.*/, (_req, res) => {
@@ -2649,6 +2697,7 @@ async function sendTuesdayContractorPayReminder(now = new Date()) {
 
 async function startServer() {
   await ensureMapSchema();
+  await ensureSalesSchema(pool);
   app.listen(port, "0.0.0.0", () => {
     console.log(`The Powerwashing Pros dashboard listening on ${port}`);
   });

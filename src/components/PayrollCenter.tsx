@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, WalletCards } from "lucide-react";
-import { createPayrollRun, finalizePayrollRun, loadOwnerPayroll, recordPayrollPayment } from "../lib/api";
+import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, Plus, RefreshCw, Save, WalletCards } from "lucide-react";
+import { addPayrollAdjustment, createPayrollRun, finalizePayrollRun, loadOwnerPayroll, recordPayrollPayment } from "../lib/api";
+import { salesRequest } from "../lib/sales";
+import type { OwnerSales } from "../lib/sales";
 import type { OwnerPayrollSnapshot } from "../lib/api";
 import { currency, isoToday } from "../lib/calculations";
-import type { EmployeeProfile, PayrollLine, PayrollRun } from "../types/business";
+import type { EmployeeProfile, PayrollAdjustment, PayrollLine, PayrollRun } from "../types/business";
 
 type ContractorTotal = { employeeId: string; employeeName: string; lines: PayrollLine[]; total: number };
 
-function contractorTotals(lines: PayrollLine[]) {
+function contractorTotals(lines: PayrollLine[], adjustments: PayrollAdjustment[] = []) {
   const grouped = new Map<string, ContractorTotal>();
   for (const line of lines) {
     const current = grouped.get(line.employeeId) ?? { employeeId: line.employeeId, employeeName: line.employeeName, lines: [], total: 0 };
     current.lines.push(line);
     current.total += line.amount;
     grouped.set(line.employeeId, current);
+  }
+  for (const adjustment of adjustments) {
+    const current = grouped.get(adjustment.employeeId) ?? { employeeId: adjustment.employeeId, employeeName: adjustment.employeeName, lines: [], total: 0 };
+    current.total += adjustment.adjustmentType === "deduction" ? -adjustment.amount : adjustment.amount;
+    grouped.set(adjustment.employeeId, current);
   }
   return [...grouped.values()].sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 }
@@ -29,6 +36,13 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [salesmen, setSalesmen] = useState<OwnerSales["salesmen"]>([]);
+  const [correctionPerson, setCorrectionPerson] = useState("");
+  const [correctionAmount, setCorrectionAmount] = useState("");
+  const [correctionType, setCorrectionType] = useState<"addition" | "deduction">("addition");
+  const [correctionReason, setCorrectionReason] = useState("");
 
   async function reload(showLoader = false) {
     if (showLoader) setLoading(true);
@@ -42,10 +56,34 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
     } finally { setLoading(false); }
   }
   useEffect(() => { void reload(); }, []);
+  useEffect(() => { void salesRequest<OwnerSales>("/api/owner/sales").then(result => setSalesmen(result.salesmen)).catch(() => undefined); }, []);
 
-  const preview = snapshot?.preview;
-  const currentRun = snapshot?.runs.find((run) => run.periodStart === preview?.periodStart && run.periodEnd === preview?.periodEnd);
-  const totals = useMemo(() => contractorTotals(currentRun?.lines ?? preview?.eligibleLines ?? []), [currentRun?.lines, preview?.eligibleLines]);
+  async function addCorrection() {
+    if (!snapshot || !correctionPerson || !correctionReason.trim() || !(Number(correctionAmount) > 0)) return;
+    setWorking("correction"); setError("");
+    try {
+      let dates = { ...snapshot.preview };
+      let run = snapshot.runs.find(item => item.periodStart === dates.periodStart && item.periodEnd === dates.periodEnd);
+      const shift = (date:string, days:number) => { const next=new Date(`${date}T12:00:00Z`); next.setUTCDate(next.getUTCDate()+days); return next.toISOString().slice(0,10); };
+      while (run && run.status !== "draft") {
+        dates = { ...dates, periodStart:shift(dates.periodStart,7), periodEnd:shift(dates.periodEnd,7), payday:shift(dates.payday,7) };
+        run = snapshot.runs.find(item => item.periodStart === dates.periodStart && item.periodEnd === dates.periodEnd);
+      }
+      run ??= await createPayrollRun({periodStart:dates.periodStart,periodEnd:dates.periodEnd,payday:dates.payday,allowEmpty:true}) ?? undefined;
+      if (!run) throw new Error("Unable to prepare a correction payment week.");
+      const updated = await addPayrollAdjustment(run.id,{employeeId:correctionPerson,adjustmentType:correctionType,category:"correction",description:correctionReason.trim(),amount:Number(correctionAmount)});
+      if (!updated) throw new Error("Unable to save correction.");
+      setSelectedRunId(updated.id);
+      setMessage(`Correction added to the week of ${displayDate(updated.periodStart)}. Confirm that week's amounts before recording payment.`);
+      setCorrectionOpen(false);setCorrectionAmount("");setCorrectionReason("");await reload();
+    } catch(nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to save correction."); }
+    finally { setWorking(""); }
+  }
+
+  const defaultPreview = snapshot?.preview;
+  const currentRun = selectedRunId ? snapshot?.runs.find((run) => run.id === selectedRunId) : snapshot?.runs.find((run) => run.periodStart === defaultPreview?.periodStart && run.periodEnd === defaultPreview?.periodEnd);
+  const preview = currentRun ?? defaultPreview;
+  const totals = useMemo(() => contractorTotals(currentRun?.lines ?? defaultPreview?.eligibleLines ?? [], currentRun?.adjustments ?? []), [currentRun?.lines, currentRun?.adjustments, defaultPreview?.eligibleLines]);
   const weeklyTotal = currentRun?.netPay ?? totals.reduce((sum, person) => sum + person.total, 0);
   const paidIds = new Set(currentRun?.payments.map((payment) => payment.employeeId) ?? []);
 
@@ -80,17 +118,28 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon">Owner only</p><h2 className="text-2xl font-bold text-ink dark:text-white">Weekly contractor payments</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Approved job earnings automatically build this week’s 1099 contractor total.</p></div><button className="text-button gap-2" disabled={Boolean(working)} onClick={() => void reload(true)}><RefreshCw size={15} />Refresh totals</button></header>
     {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}
     {message && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">{message}</p>}
+    <div><button className="text-button gap-2" disabled={Boolean(working)} onClick={() => setCorrectionOpen(!correctionOpen)}><Plus size={16} />Payroll correction</button>{correctionOpen && <form className="settings-grid mt-4 rounded-lg border border-slate-200 p-4 dark:border-slate-700" onSubmit={event => {event.preventDefault();void addCorrection();}}>
+      <label>Contractor<select aria-label="Contractor" required value={correctionPerson} onChange={event=>setCorrectionPerson(event.target.value)}><option value="">Select contractor</option>{[...employees,...salesmen].map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
+      <label>Adjustment<select aria-label="Adjustment" value={correctionType} onChange={event=>setCorrectionType(event.target.value as "addition"|"deduction")}><option value="addition">Add to pay</option><option value="deduction">Deduct from pay</option></select></label>
+      <label>Amount<input required type="number" min="0.01" step="0.01" inputMode="decimal" value={correctionAmount} onChange={event=>setCorrectionAmount(event.target.value)}/></label>
+      <label>Reason<input required value={correctionReason} onChange={event=>setCorrectionReason(event.target.value)} placeholder="Job, original amount, and corrected amount"/></label>
+      <button className="primary-button gap-2 sm:col-span-2" disabled={Boolean(working)}><Save size={16}/>{working==="correction"?"Saving...":"Save correction"}</button>
+    </form>}</div>
+    <label className="block max-w-md text-sm font-semibold">Payment week<select aria-label="Payment week" className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 text-base dark:border-slate-700 dark:bg-slate-900" value={selectedRunId} onChange={event => setSelectedRunId(event.target.value)}><option value="">Current payment week</option>{snapshot?.runs.map(run => <option key={run.id} value={run.id}>{displayDate(run.periodStart)} - {run.status}</option>)}</select></label>
     {preview && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="bg-gradient-to-r from-lagoon to-cyan-600 p-5 text-white sm:p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-100">Week of {displayDate(preview.periodStart)}</p><p className="mt-2 text-4xl font-bold">{currency.format(weeklyTotal)}</p><p className="mt-1 text-sm text-cyan-50">{totals.length} contractor{totals.length === 1 ? "" : "s"} · through {displayDate(preview.periodEnd)}</p></div><div className="rounded-xl bg-white/15 px-4 py-3 backdrop-blur"><div className="flex items-center gap-2 text-cyan-50"><CalendarClock size={19} /><span className="text-xs font-bold uppercase tracking-wide">Pay by</span></div><p className="mt-1 text-xl font-bold">{displayDate(preview.payday)}</p></div></div></div>
       <div className="p-4 sm:p-6"><div className="space-y-3">{totals.map((person) => {
         const paid = paidIds.has(person.employeeId);
         const name = employees.find((item) => item.id === person.employeeId)?.name ?? person.employeeName;
-        const jobCount = person.lines.filter((line) => line.lineType === "commission").length;
-        return <article key={person.employeeId} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-ink dark:text-white">{name}</h3><p className="mt-1 text-sm text-slate-500">{jobCount} approved job{jobCount === 1 ? "" : "s"} plus approved tips, upsells, and reimbursements</p></div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className="text-xl text-ink dark:text-white">{currency.format(person.total)}</strong>{paid ? <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"><Check size={14} />Paid</span> : currentRun?.status === "finalized" ? <button className="primary-button" disabled={Boolean(working)} onClick={() => void markPaid(person.employeeId)}>{working === person.employeeId ? "Saving..." : "Mark paid"}</button> : null}</div></div><details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-lagoon">View earnings included</summary><div className="mt-2 space-y-2">{person.lines.map((line) => <div key={line.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span>{displayDate(line.workDate)} · {line.customerName} · {line.lineType.replaceAll("_", " ")}</span><strong>{currency.format(line.amount)}</strong></div>)}</div></details></article>;
+        const jobCount = person.lines.filter((line) => line.lineType === "commission" || line.lineType === "sales_commission").length;
+        return <article key={person.employeeId} className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-ink dark:text-white">{name}</h3><p className="mt-1 text-sm text-slate-500">{jobCount ? `${jobCount} approved job${jobCount === 1 ? "" : "s"} plus approved extras and adjustments` : "Payroll adjustments"}</p></div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className="text-xl text-ink dark:text-white">{currency.format(person.total)}</strong>{paid ? <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"><Check size={14} />Paid</span> : currentRun?.status === "finalized" ? <button className="primary-button" disabled={Boolean(working)} onClick={() => void markPaid(person.employeeId)}>{working === person.employeeId ? "Saving..." : "Mark paid"}</button> : null}</div></div>
+          <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-lagoon">View earnings included</summary><div className="mt-2 space-y-2">{person.lines.map((line) => <div key={line.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span>{displayDate(line.workDate)} · {line.customerName} · {line.lineType.replaceAll("_", " ")}</span><strong>{currency.format(line.amount)}</strong></div>)}{currentRun?.adjustments.filter(item => item.employeeId === person.employeeId).map(item => <div key={item.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span className="break-words">{item.description}</span><strong className="shrink-0">{item.adjustmentType === "deduction" ? "-" : "+"}{currency.format(item.amount)}</strong></div>)}</div></details>
+        </article>;
       })}</div>
         {!totals.length && <div className="py-10 text-center"><WalletCards className="mx-auto text-slate-300" size={34} /><p className="mt-3 font-semibold text-ink dark:text-white">No approved earnings yet</p><p className="mt-1 text-sm text-slate-500">Approve completed-job earnings in Team and they will appear here automatically.</p></div>}
         {totals.length > 0 && (!currentRun || currentRun.status === "draft") && <button className="primary-button mt-5 w-full gap-2" disabled={Boolean(working)} onClick={() => void prepareWeek()}><CheckCircle2 size={17} />{working === "prepare" ? "Confirming..." : "Confirm weekly amounts"}</button>}
-        {preview.missingApprovals > 0 && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{preview.missingApprovals} completed-job submission{preview.missingApprovals === 1 ? " is" : "s are"} still waiting for approval and not included yet.</p>}
+        {!selectedRunId && Boolean(defaultPreview?.missingApprovals) && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{defaultPreview?.missingApprovals} completed-job submission{defaultPreview?.missingApprovals === 1 ? " is" : "s are"} still waiting for approval and not included yet.</p>}
       </div>
     </section>}
     <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"><button className="flex w-full items-center justify-between p-4 text-left font-semibold text-ink dark:text-white" onClick={() => setHistoryOpen((value) => !value)}><span>Previous payment weeks</span>{historyOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>{historyOpen && <div className="border-t border-slate-200 p-4 dark:border-slate-800"><div className="space-y-2">{snapshot?.runs.filter((run) => run.id !== currentRun?.id).map((run) => <HistoryRow key={run.id} run={run} />)}{!snapshot?.runs.filter((run) => run.id !== currentRun?.id).length && <p className="text-sm text-slate-500">No previous weekly payment records.</p>}</div></div>}</section>

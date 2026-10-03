@@ -1,4 +1,4 @@
-const cacheName = "powerwashing-pros-shell-v2";
+const cacheName = "powerwashing-pros-shell-v3";
 const appShell = [
   "/",
   "/manifest.webmanifest",

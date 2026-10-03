@@ -79,6 +79,28 @@ select {
   background: #f1f5f9;
 }
 
+.sales-shell { display: grid; grid-template-columns: 250px minmax(0, 1fr); }
+.sales-shell .sidebar { padding: 20px; border-right: 1px solid #cbd5e1; background: #fff; }
+.dark .sales-shell .sidebar { background: #0f172a; border-color: #334155; }
+.sales-shell .brand-card { border-radius: 8px; background: #162431; padding: 16px; }
+.sales-shell .app-header { padding: 20px; border-bottom: 1px solid #cbd5e1; background: #fff; }
+.dark .sales-shell .app-header { background: #0f172a; border-color: #334155; }
+.sales-shell .metric-card { min-width: 0; overflow-wrap: anywhere; border-bottom: 2px solid #0891b2; padding: 16px 0; }
+.dark .sales-shell .metric-card p { color: #94a3b8; }
+.sales-modal { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: #0008; }
+.sales-dialog { width: 100%; max-width: 640px; max-height: 100%; min-width: 0; overflow-y: auto; border-radius: 8px; padding: 20px; background: white; }
+.dark .sales-dialog { background: #0f172a; color: #fff; }
+.sales-dialog .settings-grid input, .sales-dialog .settings-grid textarea { font-size: 16px; }
+.sales-inbox { position: fixed; z-index: 50; right: 16px; top: calc(90px + env(safe-area-inset-top)); width: min(400px, calc(100vw - 32px)); max-height: calc(100dvh - 130px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; box-shadow: 0 8px 24px #0003; }
+.dark .sales-inbox { background: #0f172a; border-color: #334155; }
+@media (max-width: 1023px) {
+  .sales-shell { display: block; }
+  .sales-shell .sidebar { display: none; }
+  .sales-shell .sidebar.mobile-open { display: block; position: fixed; z-index: 50; inset: 0 auto 0 0; width: min(300px, 85vw); overflow-y: auto; padding-top: calc(20px + env(safe-area-inset-top)); }
+  .sales-shell .app-header { padding: calc(16px + env(safe-area-inset-top)) 16px 16px; }
+  .sales-shell main { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+}
+
 @media (max-width: 1023px) {
   .app-header {
     padding-top: calc(1rem + env(safe-area-inset-top));

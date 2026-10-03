@@ -11,7 +11,7 @@ export async function completeJobAfterEarnings({ db, updateSheet, jobId }) {
   });
   await db.query(
     `update jobs set status = 'completed', payment_status = 'paid', amount_paid = price,
-     website_overrides = website_overrides || '{"status": true}'::jsonb, updated_at = now()
+     website_overrides = website_overrides || '{"status": true}'::jsonb, updated_at = clock_timestamp()
      where id = $1`,
     [jobId],
   );

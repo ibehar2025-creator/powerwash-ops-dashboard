@@ -298,7 +298,7 @@ export function loadOwnerPayroll(periodStart?: string) {
   return request<OwnerPayrollSnapshot>(`/api/owner/payroll${periodStart ? `?periodStart=${encodeURIComponent(periodStart)}` : ""}`);
 }
 
-export function createPayrollRun(input: { periodStart: string; periodEnd: string; payday: string }) {
+export function createPayrollRun(input: { periodStart: string; periodEnd: string; payday: string; allowEmpty?:boolean }) {
   return request<PayrollRun>("/api/owner/payroll", { method: "POST", body: JSON.stringify(input) });
 }
 

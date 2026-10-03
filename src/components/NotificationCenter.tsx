@@ -16,11 +16,13 @@ import { useEffect, useMemo, useState } from "react";
 import { loadManagerIssues, loadReadNotificationKeys, markNotificationsRead } from "../lib/api";
 import type { ManagerIssue } from "../lib/api";
 import { useAuth } from "../lib/authContext";
+import { salesRequest } from "../lib/sales";
+import type { OwnerSales } from "../lib/sales";
 import { followUpTiming } from "../lib/followUps";
 import type { ContractSubmission, Customer, EarningSubmission, Job, Lead, ServicePlan } from "../types/business";
 
 type NotificationTone = "urgent" | "today" | "upcoming";
-type NotificationKind = "lead" | "job" | "plan" | "contract" | "upsell" | "sync" | "issue";
+type NotificationKind = "lead" | "job" | "plan" | "contract" | "upsell" | "sync" | "issue" | "sales";
 
 type NotificationItem = {
   id: string;
@@ -111,6 +113,7 @@ export function NotificationCenter({
   const [readNotificationKeys, setReadNotificationKeys] = useState<Set<string>>(new Set());
   const [readStateLoaded, setReadStateLoaded] = useState(false);
   const [managerIssues, setManagerIssues] = useState<ManagerIssue[]>([]);
+  const [sales, setSales] = useState<OwnerSales>();
   const customerNames = useMemo(() => new Map(customers.map((customer) => [customer.id, customer.name])), [customers]);
 
   useEffect(() => {
@@ -139,8 +142,18 @@ export function NotificationCenter({
     return () => { active = false; window.clearInterval(interval); };
   }, [user.id]);
 
+  useEffect(() => {
+    let active = true;
+    const refresh = () => salesRequest<OwnerSales>("/api/owner/sales").then(result => { if (active) setSales(result); }).catch(() => undefined);
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [user.id]);
+
   const notifications = useMemo(() => {
     const items: NotificationItem[] = [];
+    sales?.notifications.forEach(event => items.push({ id: `sales-${event.id}`, tone: "upcoming", title: event.title, detail: event.detail, kind: "sales" }));
+    sales?.commissions.filter(c => c.status === "pending").forEach(c => items.push({ id: `sales-review-${c.id}`, tone: "urgent", title: `Sales commission: ${c.salesmanName}`, detail: `${c.customerName} - $${c.amount.toFixed(2)} awaiting approval`, kind: "sales" }));
     const tomorrow = addDays(currentDate, 1);
 
     leads.filter((lead) => !["scheduled", "won", "lost"].includes(lead.status)).forEach((lead) => {
@@ -286,7 +299,7 @@ export function NotificationCenter({
 
     const rank = { urgent: 0, today: 1, upcoming: 2 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
-  }, [contracts, customerNames, currentDate, earnings, jobs, leads, managerIssues, plans, syncStatus]);
+  }, [contracts, customerNames, currentDate, earnings, jobs, leads, managerIssues, plans, syncStatus, sales]);
 
   const attentionCount = readStateLoaded
     ? notifications.filter((item) => !readNotificationKeys.has(notificationSeenKey(item))).length
@@ -324,6 +337,7 @@ export function NotificationCenter({
     if (item.kind === "plan") onPlans();
     if (item.kind === "contract") onContracts?.();
     if (item.kind === "upsell") onTeam?.();
+    if (item.kind === "sales") onTeam?.();
     if (item.kind === "sync") onSync();
   }
 

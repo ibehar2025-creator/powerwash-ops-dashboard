@@ -145,7 +145,7 @@ export interface PayoutSummary {
 }
 
 export type PayrollStatus = "draft" | "finalized" | "paid";
-export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip" | "gas_reimbursement";
+export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip" | "gas_reimbursement" | "sales_commission";
 
 export interface PayrollLine {
   id: string;

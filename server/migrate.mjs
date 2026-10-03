@@ -21,6 +21,7 @@ try {
   const schemaPath = path.join(process.cwd(), "server", "schema.sql");
   const schema = fs.readFileSync(schemaPath, "utf8");
   await pool.query(schema);
+  await pool.query(fs.readFileSync(path.join(process.cwd(), "server", "sales-schema.sql"), "utf8"));
   console.log("Database schema is ready.");
 } finally {
   await pool.end();

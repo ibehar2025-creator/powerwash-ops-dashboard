@@ -8,9 +8,10 @@ import {
   useMapsLibrary,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
-import { Check, LocateFixed, MapPin, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, LocateFixed, MapPin, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { currency, isoToday } from "../lib/calculations";
-import type { Customer, Job, Solicitation, SolicitationOutcome } from "../types/business";
+import type { Solicitation, SolicitationOutcome } from "../types/business";
+import type { MapCustomer as Customer, MapJob as Job } from "../lib/sales";
 
 type Coordinates = { latitude: number; longitude: number };
 type MapFocusRequest = { id: number; points: google.maps.LatLngLiteral[]; zoom?: number };
@@ -37,6 +38,7 @@ type Props = {
   onCreateSolicitation: (solicitation: Omit<Solicitation, "id">) => Promise<void>;
   onUpdateSolicitation: (id: string, patch: Partial<Solicitation>) => Promise<void>;
   onDeleteSolicitation: (id: string) => Promise<void>;
+  onAddJob?: (property: Coordinates & {address:string}) => void;
 };
 
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
@@ -326,6 +328,7 @@ function GoogleBusinessMap({
   onCreateSolicitation,
   onUpdateSolicitation,
   onDeleteSolicitation,
+  onAddJob,
 }: Props) {
   const geocoding = useMapsLibrary("geocoding");
   const geocoder = useMemo(() => geocoding ? new geocoding.Geocoder() : null, [geocoding]);
@@ -589,6 +592,7 @@ function GoogleBusinessMap({
       const formattedAddress = response.results[0]?.formatted_address ?? `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
       setAddress(formattedAddress);
       setLocatedAddress(formattedAddress);
+      onAddJob?.({ address: formattedAddress, latitude: position.lat, longitude: position.lng });
       setFormStatus("Property selected. Choose the result and save it.");
     } catch {
       const coordinates = `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
@@ -596,7 +600,7 @@ function GoogleBusinessMap({
       setLocatedAddress(coordinates);
       setFormStatus("Pin selected. Add any identifying address details before saving.");
     }
-  }, [geocoder]);
+  }, [geocoder, onAddJob]);
 
   function handleMapClick(event: MapMouseEvent) {
     if (event.detail.latLng) void reverseGeocode(event.detail.latLng);
@@ -788,7 +792,7 @@ function GoogleBusinessMap({
                     <div className="mt-2 space-y-1">
                       <p>{selected.location.jobs.length} job{selected.location.jobs.length === 1 ? "" : "s"} at this property</p>
                       {selected.location.jobs.map((job) => (
-                        <p key={job.id} className="text-xs text-slate-600">{job.date}: {customerName(customers, job.customerId)} · {currency.format(job.price)}</p>
+                        <p key={job.id} className="text-xs text-slate-600">{job.date} {job.time}: {customerName(customers, job.customerId)} · {job.serviceType} · {job.status}{job.price !== undefined ? ` · ${currency.format(job.price)}` : ""}</p>
                       ))}
                     </div>
                   ) : (
@@ -798,6 +802,7 @@ function GoogleBusinessMap({
                       <button type="button" className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700" onClick={() => beginEditing(selected.location)}><Pencil size={13} />Edit solicitation</button>
                     </div>
                   )}
+                  {onAddJob && <button type="button" className="primary-button mt-3 gap-2" onClick={() => onAddJob({address:selected.location.address,latitude:selected.location.latitude,longitude:selected.location.longitude})}><Plus size={15} />Add job here</button>}
                 </div>
               </InfoWindow>
             )}
@@ -810,6 +815,7 @@ function GoogleBusinessMap({
               {mapSearchOpen && customerSuggestions.length > 0 && <div className="absolute left-0 right-0 top-12 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900">{customerSuggestions.map((customer) => <button key={customer.id} type="button" className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800" onClick={() => void focusCustomer(customer).catch(() => setMapSearchStatus("Customer address could not be located."))}><strong className="block break-words text-sm text-ink dark:text-white">{customer.name}</strong><span className="mt-0.5 block break-words text-xs leading-5 text-slate-500">{customer.address || "No address listed"}</span></button>)}</div>}
             </form>
             {mapSearchStatus && <p className="mt-2 w-fit max-w-full break-words rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium leading-5 text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
+            {onAddJob && mapSearchResult && <button type="button" className="primary-button mt-2 gap-2" onClick={() => onAddJob({address:mapSearchResult.label,latitude:mapSearchResult.position.lat,longitude:mapSearchResult.position.lng})}><Plus size={16} />Book at this address</button>}
           </div>
           <button type="button" className="absolute bottom-10 right-3 z-10 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft transition hover:border-blue-500 hover:text-blue-600 disabled:cursor-wait disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" aria-label="Show my location" title="Show my location" disabled={locatingUser} onClick={locateUser}><LocateFixed size={20} className={locatingUser ? "animate-pulse text-blue-600" : userLocation ? "text-blue-600" : ""} /></button>
           {locationStatus && <p className="absolute bottom-10 left-3 z-10 max-w-[calc(100%-76px)] rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{locationStatus}</p>}
@@ -823,6 +829,7 @@ function GoogleBusinessMap({
               <h3 className="font-semibold text-ink dark:text-white">Record a solicitation</h3>
             </div>
             <form className="mt-4 min-w-0 space-y-3" onSubmit={submitSolicitation}>
+              {onAddJob && <button type="button" className="primary-button w-full gap-2" disabled={!address || !draftCoordinates} onClick={() => {if(draftCoordinates) onAddJob({address,...draftCoordinates});}}><Plus size={17} />Add job at this property</button>}
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">
                 Address
                 <div className="mt-2 flex min-w-0 gap-2">

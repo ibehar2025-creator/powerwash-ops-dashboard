@@ -32,20 +32,12 @@ import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { ProfileMenu } from "./components/ProfileMenu";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { EmployeeWorkspace } from "./components/EmployeeWorkspace";
+import { SalesmanWorkspace } from "./components/SalesmanWorkspace";
+import { OwnerSalesPanel } from "./components/OwnerSalesPanel";
 import { OwnerContractsView, OwnerTeamView } from "./components/OwnerOperations";
 import { PayrollCenter } from "./components/PayrollCenter";
 import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
-import {
-  customers as importedCustomers,
-  expenses,
-  invoices as importedInvoices,
-  jobs as importedJobs,
-  leads as importedLeads,
-  servicePlans as importedServicePlans,
-  spreadsheetImportNotice,
-} from "./data/googleSheetData";
-import { reviews as importedReviews } from "./data/reviews";
 import {
   annualRecurringRevenue,
   businessMetrics,
@@ -255,6 +247,7 @@ export default function App() {
   const { user } = useAuth();
   const [employeePreview, setEmployeePreview] = useState(false);
   if (user.role === "employee") return <EmployeeWorkspace />;
+  if (user.role === "salesman") return <SalesmanWorkspace />;
   if (employeePreview) return <EmployeeWorkspace preview onExitPreview={() => setEmployeePreview(false)} />;
   return <OwnerDashboard onPreviewEmployee={() => setEmployeePreview(true)} />;
 }
@@ -263,13 +256,13 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [customers, setCustomers] = useState<Customer[]>(importedCustomers);
-  const [jobs, setJobs] = useState<Job[]>(importedJobs.map((job) => ({ ...job, crewIds: [] })));
-  const [leads, setLeads] = useState<Lead[]>(importedLeads);
-  const [invoices, setInvoices] = useState<Invoice[]>(importedInvoices);
-  const [savedExpenses, setSavedExpenses] = useState<Expense[]>(expenses);
-  const [plans, setPlans] = useState<ServicePlan[]>(normalizePlans(importedServicePlans));
-  const [reviews, setReviews] = useState<ReviewRow[]>(importedReviews);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [savedExpenses, setSavedExpenses] = useState<Expense[]>([]);
+  const [plans, setPlans] = useState<ServicePlan[]>([]);
+  const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [solicitations, setSolicitations] = useState<Solicitation[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [ownerOperations, setOwnerOperations] = useState<OwnerOperationsSnapshot>({ employees: [], assignments: [], earnings: [], contracts: [], payouts: [] });
@@ -281,15 +274,14 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const [createKind, setCreateKind] = useState<CreateKind | null>(null);
   const [themePreference, setThemePreference] = useState(() => loadThemePreference(user.id));
   const [darkMode, setDarkMode] = useState(() => themeIsDark(loadThemePreference(user.id)));
-  const [syncStatus, setSyncStatus] = useState("Using bundled Google Sheets snapshot.");
+  const [syncStatus, setSyncStatus] = useState("Loading saved dashboard records...");
   const [syncing, setSyncing] = useState(false);
   const [showCalendarSkeleton, setShowCalendarSkeleton] = useState(false);
   const calendarSkeletonShown = useRef(false);
   const calendarSkeletonTimer = useRef<number | null>(null);
   const [currentDate, setCurrentDate] = useState(() => isoToday());
-  const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
+  const metrics = businessMetrics(jobs, invoices, leads, savedExpenses, [], currentDate);
   const activeLabel = useMemo(() => tabs.find((tab) => tab.id === activeTab)?.label ?? "Dashboard", [activeTab]);
-  const syncEndpoint = import.meta.env.VITE_SHEETS_SYNC_URL as string | undefined;
 
   const refreshOwnerOperations = useCallback(async () => {
     const result = await loadOwnerOperations();
@@ -299,19 +291,14 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   const syncSheets = useCallback(async () => {
     const minimumManualSkeleton = new Promise<void>((resolve) => window.setTimeout(resolve, calendarSkeletonDurationMs));
     setSyncing(true);
-    setSyncStatus(syncEndpoint ? "Syncing Google Sheets..." : "Syncing through the database...");
+    setSyncStatus("Syncing Google Sheets...");
     if (calendarSkeletonTimer.current !== null) {
       window.clearTimeout(calendarSkeletonTimer.current);
       calendarSkeletonTimer.current = null;
     }
     setShowCalendarSkeleton(true);
     try {
-      let payload = await syncSheetsToDatabase() as SyncPayload | null;
-      if (!payload && syncEndpoint) {
-        const response = await fetch(syncEndpoint);
-        if (!response.ok) throw new Error(`Sync failed with ${response.status}`);
-        payload = (await response.json()) as SyncPayload;
-      }
+      const payload = await syncSheetsToDatabase() as SyncPayload | null;
       if (!payload) throw new Error("Live sync is not configured on this deployment.");
       if (payload.customers) setCustomers(mergeRecurringCustomers(payload.customers, payload.servicePlans ?? []));
       if (payload.jobs) setJobs(payload.jobs.map((job) => ({ ...job, crewIds: [] })));
@@ -330,7 +317,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
       setSyncing(false);
       setShowCalendarSkeleton(false);
     }
-  }, [syncEndpoint]);
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => setCurrentDate(isoToday()), 60_000);
@@ -609,7 +596,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
             </div>
           )}
           <div className="app-content min-h-0 min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6">
-            {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} plans={plans} reviews={reviews} currentDate={currentDate} />}
+            {activeTab === "dashboard" && <Dashboard jobs={jobs} leads={leads} invoices={invoices} expenses={savedExpenses} plans={plans} reviews={reviews} currentDate={currentDate} />}
             {activeTab === "customers" && <Customers customers={customers} jobs={jobs} currentDate={currentDate} onCustomerClick={setSelectedCustomer} onJobClick={setSelectedJob} />}
             {activeTab === "leads" && <Leads leads={leads} currentDate={currentDate} onLeadClick={setSelectedLead} />}
             {activeTab === "jobs" && <JobsSpreadsheet customers={customers} jobs={jobs} onAddJob={() => setCreateKind("job")} onEditJob={setSelectedJob} />}
@@ -617,7 +604,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
             {activeTab === "map" && <Suspense fallback={<TabLoader label="map" />}><BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} /></Suspense>}
             {activeTab === "analytics" && <Suspense fallback={<TabLoader label="analytics" />}><Analytics customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} expenses={savedExpenses} currentDate={currentDate} /></Suspense>}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanCreate={addPlan} onPlanUpdate={updatePlan} />}
-            {activeTab === "team" && <OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} />}
+            {activeTab === "team" && <><OwnerSalesPanel /><OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} /></>}
             {activeTab === "payroll" && <PayrollCenter employees={ownerOperations.employees} />}
             {activeTab === "contracts" && <OwnerContractsView operations={ownerOperations} onRefresh={async () => { await refreshOwnerOperations(); const snapshot = await loadDatabaseSnapshot(); if (snapshot?.servicePlans) setPlans(normalizePlans(snapshot.servicePlans)); }} />}
           </div>
@@ -632,7 +619,7 @@ function OwnerDashboard({ onPreviewEmployee }: { onPreviewEmployee: () => void }
   );
 }
 
-function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { jobs: Job[]; leads: Lead[]; invoices: Invoice[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string }) {
+function Dashboard({ jobs, leads, invoices, expenses, plans, reviews, currentDate }: { jobs: Job[]; leads: Lead[]; invoices: Invoice[]; expenses: Expense[]; plans: ServicePlan[]; reviews: ReviewRow[]; currentDate: string }) {
   const [revenueRange, setRevenueRange] = useState<"ytd" | "90d" | "12m" | "all">("ytd");
   const metrics = businessMetrics(jobs, invoices, leads, expenses, [], currentDate);
   const recurringRevenue = annualRecurringRevenue(plans);
@@ -677,7 +664,6 @@ function Dashboard({ jobs, leads, invoices, plans, reviews, currentDate }: { job
         <div className="h-72 min-h-72 w-full" aria-label="Interactive total revenue growth chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={visibleRevenue} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}><defs><linearGradient id="revenueGrowthFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#087f8c" stopOpacity={0.3} /><stop offset="100%" stopColor="#087f8c" stopOpacity={0.03} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#cbd5e1" opacity={0.5} /><XAxis dataKey="timestamp" type="number" scale="time" domain={["dataMin", "dataMax"]} tickCount={7} minTickGap={28} tickFormatter={(value) => new Date(Number(value)).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", timeZone: "UTC" })} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis width={48} tickFormatter={(value) => `$${Math.round(Number(value) / 1000)}k`} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [currency.format(Number(value)), "Total revenue"]} labelFormatter={(value) => new Date(Number(value)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} contentStyle={{ borderRadius: 6, borderColor: "#cbd5e1", fontSize: 12 }} /><Area type="stepAfter" dataKey="total" stroke="#087f8c" strokeWidth={3} fill="url(#revenueGrowthFill)" dot={{ r: 3, fill: "#087f8c", stroke: "#ffffff", strokeWidth: 1 }} activeDot={{ r: 6, strokeWidth: 2 }} /></AreaChart></ResponsiveContainer></div>
       </Section>
 
-      <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{spreadsheetImportNotice}</p>
     </div>
   );
 }
