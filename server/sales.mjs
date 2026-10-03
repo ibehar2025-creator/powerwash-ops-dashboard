@@ -52,6 +52,13 @@ function bookingInput(body) {
 export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSheetAction,syncUrl,toJob,toCustomer,toLead,toSolicitation,audit,sendPushToRole,sendPushToUsers,refreshSheetsIfStale,loadPayrollRuns}) {
   const route = fn => async(req,res,next)=>{try{await fn(req,res);}catch(error){if(error.status)res.status(error.status).json({error:error.message});else next(error);}};
   const notify = async(db,userId,jobId,title,detail)=>db.query('insert into sales_notifications(user_id,job_id,title,detail) values($1,$2,$3,$4)',[userId,jobId,title,detail]);
+  app.get('/api/owner/sales-preview/map',requireDatabase,requireOwner,route(async(_req,res)=>{
+    let syncError='';
+    try { await refreshSheetsIfStale(); } catch(error) { syncError=error.message; console.error('Sales preview sheet refresh failed',error); }
+    const jobs=await pool.query('select id,customer_id,date,time,address,service_type,status,latitude,longitude from jobs order by date desc,time,id');
+    const customers=await pool.query('select id,name,address from customers where id=any($1::text[])',[[...new Set(jobs.rows.map(row=>row.customer_id))]]);
+    res.json({mapJobs:jobs.rows.map(row=>mapProjection(row,false)),mapCustomers:customers.rows.map(row=>({id:row.id,name:row.name,address:row.address})),syncError});
+  }));
   app.get('/api/salesman/bootstrap',requireDatabase,salesmanOnly,route(async(req,res)=>{
     let syncError='';
     try { await refreshSheetsIfStale(); } catch(error) { syncError=error.message; console.error('Salesman sheet refresh failed',error); }

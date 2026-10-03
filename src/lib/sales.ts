@@ -1,6 +1,7 @@
 import type { Customer, Job, Lead, PayrollRun, Solicitation } from '../types/business';
 export type MapJob = Pick<Job,'id'|'date'|'time'|'customerId'|'address'|'serviceType'|'status'|'latitude'|'longitude'> & {price?:number};
 export type MapCustomer = Pick<Customer,'id'|'name'|'address'>;
+export interface SalesMapHistory {mapJobs:MapJob[];mapCustomers:MapCustomer[];syncError?:string}
 export interface SalesCredit {
   id:string; jobId:string; salesmanId:string; salesmanName:string; customerName:string; jobDate:string;
   servicePrice:number; currentServicePrice:number; rate:number; amount:number;

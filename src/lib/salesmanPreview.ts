@@ -1,5 +1,5 @@
 import type { Customer, Job, Lead, Solicitation } from '../types/business';
-import type { SalesBooking, SalesCredit, SalesWorkspace } from './sales';
+import type { SalesBooking, SalesCredit, SalesMapHistory, SalesWorkspace } from './sales';
 
 const salesmanId = 'preview-salesman';
 const salesmanName = 'Sample Salesman';
@@ -91,6 +91,17 @@ export function savePreviewSalesBooking(data: SalesWorkspace, input: SalesBookin
     mapCustomers: [{ id: customer.id, name: customer.name, address: customer.address }, ...data.mapCustomers.filter(item => item.id !== customerId)],
     commissions: [commission(job, customer.name), ...data.commissions.filter(item => item.jobId !== id)],
     leads: data.leads.map(item => item.id === input.leadId ? { ...item, status: 'won' } : item),
+  };
+}
+
+export function mergePreviewMapHistory(data: SalesWorkspace, history: SalesMapHistory): SalesWorkspace {
+  const practiceJobIds = new Set(data.jobs.map(job => job.id));
+  const practiceCustomerIds = new Set(data.customers.map(customer => customer.id));
+  return {
+    ...data,
+    mapJobs: [...history.mapJobs, ...data.mapJobs.filter(job => practiceJobIds.has(job.id))],
+    mapCustomers: [...history.mapCustomers, ...data.mapCustomers.filter(customer => practiceCustomerIds.has(customer.id))],
+    syncError: history.syncError,
   };
 }
 

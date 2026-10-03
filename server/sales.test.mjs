@@ -32,6 +32,26 @@ test('all salesman APIs are role guarded and never expose owner routing',()=>{
   for(const route of routes.filter(r=>r.path.startsWith('/api/salesman/')))assert.equal(route.handlers[1],salesmanOnly);
   assert.ok(routes.some(r=>r.path==='/api/owner/sales-commissions/:id/review'));
 });
+
+test('owner preview map returns every past and future job without private fields or sales credit',async()=>{
+  const routes=new Map(),queries=[];
+  const requireOwner=(req,res,next)=>req.authUser?.role==='owner'?next():res.status(403).json({error:'Owner access required.'});
+  const requireDatabase=(_req,_res,next)=>next();
+  const app=Object.fromEntries(['get','post','patch'].map(method=>[method,(path,...handlers)=>routes.set(`${method} ${path}`,handlers)]));
+  const jobs=Array.from({length:150},(_,index)=>({id:`job-${index}`,customer_id:'customer',date:index%2?'2020-01-01':'2099-01-01',time:'09:00',address:'123 Example',service_type:'Windows',status:index%2?'completed':'scheduled',price:450,notes:'private'}));
+  const pool={query:async(sql,args)=>{queries.push({sql,args});return {rows:sql.includes('from jobs')?jobs:[{id:'customer',name:'Customer',address:'123 Example',phone:'private',notes:'private'}]};}};
+  installSalesRoutes(app,{pool,requireOwner,requireDatabase,refreshSheetsIfStale:async()=>{}});
+  const handlers=routes.get('get /api/owner/sales-preview/map');
+  assert.equal(handlers[0],requireDatabase);assert.equal(handlers[1],requireOwner);
+  for(const role of ['employee','salesman',undefined]){let allowed=false;const res={status(code){assert.equal(code,403);return this;},json(){}};handlers[1]({authUser:{role}},res,()=>{allowed=true;});assert.equal(allowed,false);}
+  let result;await handlers.at(-1)({authUser:{role:'owner'}},{json(value){result=value;}},error=>{throw error;});
+  assert.equal(result.mapJobs.length,150);assert.equal(queries.length,2);
+  assert.ok(queries.every(({sql})=>sql.startsWith('select ')&&!/\blimit\b/i.test(sql)));
+  assert.deepEqual(queries[1].args,[['customer']]);
+  assert.equal(result.mapJobs[0].price,undefined);assert.equal(result.mapJobs[0].notes,undefined);
+  assert.deepEqual(result.mapCustomers,[{id:'customer',name:'Customer',address:'123 Example'}]);
+  assert.equal(result.jobs,undefined);assert.equal(result.commissions,undefined);
+});
 test('sales payroll uses its own source key and salesman recipient',async()=>{
   const db={query:async(sql)=>sql.includes('count(*)')?{rows:[{count:1}]}:{rows:[{id:'credit',job_id:'same-job',salesman_id:'salesman',salesman_name:'Sales Rep',customer_name:'Customer',date:'2026-10-01',amount:'90'}]}};
   const result=await salesPayrollLines(db,'2026-10-04');assert.equal(result.missingApprovals,1);

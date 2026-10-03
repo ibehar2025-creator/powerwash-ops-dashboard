@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSalesmanPreview, removePreviewSolicitation, savePreviewSalesBooking, savePreviewSalesLead, savePreviewSolicitation } from '../src/lib/salesmanPreview.ts';
+import { createSalesmanPreview, mergePreviewMapHistory, removePreviewSolicitation, savePreviewSalesBooking, savePreviewSalesLead, savePreviewSolicitation } from '../src/lib/salesmanPreview.ts';
 
 test('salesman preview contains only practice jobs and accurate 20% examples', () => {
   const data = createSalesmanPreview('2026-10-03');
@@ -48,4 +48,33 @@ test('practice map follow-ups and edits stay within the sample workspace', () =>
   data = removePreviewSolicitation(data, 'preview-test-solicitation');
   assert.equal(data.solicitations.length, 0);
   assert.equal(data.leads.length, 1);
+});
+
+test('full map history remains separate from practice earnings, jobs and customer editing', () => {
+  const original = createSalesmanPreview('2026-10-03');
+  const history = {
+    mapJobs: Array.from({ length: 150 }, (_, index) => ({ id: `real-job-${index}`, customerId: 'real-customer',
+      date: index % 2 ? '2020-01-01' : '2099-01-01', time: '09:00', address: '123 Example Avenue',
+      serviceType: 'Windows', status: index % 2 ? 'completed' : 'scheduled', latitude: 29.7174, longitude: -95.4307 })),
+    mapCustomers: [{ id: 'real-customer', name: 'Real History Customer', address: '123 Example Avenue' }],
+  };
+  let data = mergePreviewMapHistory(original, history);
+  assert.equal(data.mapJobs.length, 154);
+  assert.equal(data.mapJobs.some(job => job.id === 'preview-history-job'), false);
+  assert.equal(data.mapCustomers.length, 5);
+  for (const field of ['jobs', 'customers', 'commissions', 'leads', 'solicitations', 'notifications', 'statements']) assert.equal(data[field], original[field]);
+  const booking = { requestId: 'practice-map-booking', name: 'Practice at real property', phone: '', email: '',
+    address: history.mapJobs[0].address, serviceType: 'Driveway', date: '2099-10-05', time: '09:00',
+    price: 450, employeeInstructions: '', latitude: 29.7174, longitude: -95.4307 };
+  data = savePreviewSalesBooking(data, booking);
+  data = mergePreviewMapHistory(data, { ...history, syncError: 'Sheet unavailable' });
+  assert.equal(data.mapJobs.length, 155);
+  assert.equal(data.jobs.length, 5);
+  assert.equal(data.commissions[0].amount, 90);
+  assert.equal(data.syncError, 'Sheet unavailable');
+  data = mergePreviewMapHistory(data, { mapJobs: [], mapCustomers: [] });
+  assert.equal(data.mapJobs.length, 5);
+  assert.equal(data.mapCustomers.length, 5);
+  assert.equal(data.syncError, undefined);
+  assert.equal(history.mapJobs.length, 150);
 });

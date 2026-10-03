@@ -17,12 +17,16 @@ notifications, and contractor payments.
 ## Access
 
 Owners can open **Salesman preview** from their profile menu, alongside Employee
-preview. It uses practice jobs, map history, follow-ups, commission examples, and
-a sample paid statement. Booking, editing, map tracking, and inbox read states
+preview. The map loads the full real job history through an owner-only read
+endpoint, with no date or ownership cutoff. Other jobs expose only the same
+nonfinancial map fields available to salesmen. Practice jobs, follow-ups,
+commission examples, and a sample paid statement remain separate from history.
+Booking, editing, map tracking, and inbox read states
 stay in memory without writing to Sheets, Supabase, or the owner's notification
 state. Existing pending booking drafts are not read or changed. **Return to
 owner** discards the practice session; reopening starts with fresh sample data.
-Only owners can access either preview.
+Only owners can access either preview. Refresh and the 14-minute interval update
+the real map history without discarding practice edits or generating sales credit.
 
 Salesmen have Dashboard, Map, My Jobs, Leads, and My Earnings. Server-side checks
 block owner and employee APIs. Inactive accounts cannot sign in or use existing

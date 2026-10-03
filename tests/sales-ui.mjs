@@ -48,6 +48,7 @@ try{
     if(path==='/api/bootstrap'||path==='/api/sync-sheets')result={customers:[],jobs:[],leads:[],invoices:[],expenses:[],servicePlans:[],reviews:[],solicitations:[],calendarEvents:[]};
     if(path==='/api/owner/operations')result={employees:[],assignments:[],earnings:[],contracts:[],payouts:[]};
     if(path==='/api/owner/sales')result={salesmen:[person],commissions:[],notifications:[]};
+    if(path==='/api/owner/sales-preview/map')result={mapJobs:[{id:'real-history-job',customerId:'real-history-customer',date:'2020-01-01',time:'09:00',address:'123 Example Avenue',serviceType:'Windows',status:'completed',latitude:29.7174,longitude:-95.4307}],mapCustomers:[{id:'real-history-customer',name:'Real History Customer',address:'123 Example Avenue'}]};
     if(path==='/api/notifications/read')result={readKeys:[]};
     if(path==='/api/owner/payroll'){
       if(method==='POST'){const body=route.request().postDataJSON();assert.equal(body.allowEmpty,true);assert.equal(body.periodStart,'2026-10-05');result={...paidWeek,...body,id:'correction-run',status:'draft'};payroll.runs.push(result);}
@@ -67,6 +68,8 @@ try{
   assert.equal(await ownerPage.getByRole('button',{name:'Employee preview',exact:true}).count(),1);
   const previewStart=ownerRequests.length;
   await ownerPage.getByRole('button',{name:'Salesman preview',exact:true}).click();await ownerPage.getByRole('heading',{name:'Sales overview'}).waitFor();
+  await ownerPage.waitForLoadState('networkidle');
+  assert.deepEqual(ownerRequests.slice(previewStart),[{path:'/api/owner/sales-preview/map',method:'GET'}]);
   assert.ok((await ownerPage.locator('main').innerText()).includes('Sample Customer'));
   if(mobile)assert.ok((await ownerPage.getByRole('button',{name:'Return to owner'}).boundingBox()).y>=59);
   const previewWidth=await ownerPage.evaluate(()=>({client:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth}));assert.ok(previewWidth.scroll<=previewWidth.client);
@@ -111,14 +114,18 @@ try{
   await previewTab('Leads');await ownerPage.getByText('won',{exact:true}).waitFor();
   await previewTab('My Earnings');assert.ok((await ownerPage.locator('main').innerText()).includes('$100'));
   await ownerPage.getByRole('button',{name:'Refresh',exact:true}).click();
-  assert.deepEqual(ownerRequests.slice(previewStart),[]);
+  await ownerPage.waitForLoadState('networkidle');
+  assert.ok(ownerRequests.slice(previewStart).length>=5);
+  assert.ok(ownerRequests.slice(previewStart).every(request=>request.path==='/api/owner/sales-preview/map'&&request.method==='GET'));
+  await previewTab('My Jobs');await ownerPage.getByLabel('Search my jobs').fill('Real History Customer');assert.equal(await ownerPage.locator('article').count(),0);
+  await ownerPage.getByLabel('Search my jobs').fill('Practice New Customer');assert.equal(await ownerPage.locator('article').count(),1);
   assert.deepEqual(JSON.parse(await ownerPage.evaluate(key=>localStorage.getItem(key),pendingKey)),{requestId:'real-pending-owner-booking',name:'Real pending draft'});
   await ownerPage.getByRole('button',{name:'Return to owner'}).click();await ownerPage.getByRole('heading',{name:'Performance snapshot'}).waitFor();
   await ownerPage.waitForLoadState('networkidle');await ownerPage.getByRole('button',{name:'Open profile menu'}).click();
   await ownerPage.getByRole('button',{name:'Salesman preview',exact:true}).click();await ownerPage.getByRole('heading',{name:'Sales overview'}).waitFor();
   await previewTab('My Jobs');await ownerPage.getByLabel('Search my jobs').fill('Practice New Customer');assert.equal(await ownerPage.locator('article').count(),0);
   await ownerPage.getByRole('button',{name:'Return to owner'}).click();await ownerPage.getByRole('heading',{name:'Performance snapshot'}).waitFor();
-  console.log(`Owner salesman preview: ${viewport.width}px passed (owner-only menu, safe areas, booking/editing/leads/notifications without API calls, draft isolation, reset)`);
+  console.log(`Owner salesman preview: ${viewport.width}px passed (owner-only menu, safe areas, read-only real history, practice booking/editing/leads/notifications without writes, draft isolation, reset)`);
   if(mobile)await ownerPage.getByRole('button',{name:'Open navigation',exact:true}).click();
   await ownerPage.getByRole('button',{name:'Contractor Pay',exact:true}).click();await ownerPage.getByRole('heading',{name:'Weekly contractor payments'}).waitFor();
   await ownerPage.getByRole('button',{name:'Payroll correction',exact:true}).click();await ownerPage.getByLabel('Contractor',{exact:true}).selectOption(person.id);await ownerPage.getByLabel('Amount',{exact:true}).fill('10');await ownerPage.getByLabel('Reason',{exact:true}).fill('Corrected sales commission after payment');
