@@ -9,13 +9,15 @@ import { PushNotificationSettings } from "./PushNotificationSettings";
 type View = "profile" | "notifications" | "help" | "report" | "business" | "rates" | null;
 const profileFieldClass = "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-lagoon focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500";
 
-export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, onPreviewEmployee, preview = false, compact = false }: {
+export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, onPreviewEmployee, onPreviewSalesman, preview = false, previewRole = "employee", compact = false }: {
   theme: ThemePreference;
   onTheme: (theme: ThemePreference) => void;
   employee?: EmployeeProfile;
   onOwnerNavigate?: (tab: "team" | "payroll" | "contracts") => void;
   onPreviewEmployee?: () => void;
+  onPreviewSalesman?: () => void;
   preview?: boolean;
+  previewRole?: "employee" | "salesman";
   compact?: boolean;
 }) {
   const { user, updateProfile, signOut, deleteAccount } = useAuth();
@@ -65,18 +67,19 @@ export function ProfileMenu({ theme, onTheme, employee, onOwnerNavigate, onPrevi
   return <div className="relative" ref={menuRef}>
     <button type="button" className={compact ? "icon-button shrink-0" : "text-button min-w-0 gap-2 px-2"} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label="Open profile menu" title="Profile">
       {user.pictureUrl ? <img className="h-7 w-7 shrink-0 rounded-full object-cover" src={user.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-mist text-xs font-bold text-lagoon">{user.name.slice(0, 1).toUpperCase()}</span>}
-      {!compact && <><span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{preview ? "Employee preview" : user.role}</span></span><ChevronDown size={14} /></>}
+      {!compact && <><span className="hidden max-w-28 truncate text-left xl:block"><span className="block truncate text-xs font-semibold">{user.name}</span><span className="block text-[10px] capitalize text-slate-400">{preview ? `${previewRole} preview` : user.role}</span></span><ChevronDown size={14} /></>}
     </button>
     {open && <div className="absolute right-0 z-[80] mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
       <div className="border-b border-slate-100 px-3 py-2 dark:border-slate-800"><p className="truncate text-sm font-semibold text-ink dark:text-white">{user.name}</p><p className="truncate text-xs text-slate-500">{user.email}</p></div>
-      <MenuButton icon={UserRound} label="My profile" onClick={() => show("profile")} />
+      {!preview && <MenuButton icon={UserRound} label="My profile" onClick={() => show("profile")} />}
       <div className="my-1 border-t border-slate-100 pt-2 dark:border-slate-800"><p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Appearance</p><div className="mt-2 grid grid-cols-3 gap-1">{([{ id: "light", label: "Light", icon: Sun }, { id: "dark", label: "Dark", icon: Moon }, { id: "system", label: "System", icon: Monitor }] as const).map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => onTheme(id)} className={`rounded-lg border px-2 py-2 text-xs font-semibold ${theme === id ? "border-lagoon bg-mist text-lagoon dark:bg-cyan-500/15" : "border-transparent hover:bg-slate-100 dark:hover:bg-slate-800"}`}><Icon className="mx-auto mb-1" size={15} />{label}</button>)}</div></div>
       {user.role === "owner" && !preview && <MenuButton icon={Building2} label="Business settings" onClick={() => show("business")} />}
       {(employee || user.role === "employee") && <MenuButton icon={BadgePercent} label="My commission rates" onClick={() => show("rates")} />}
       {user.role === "owner" && !preview && onPreviewEmployee && <MenuButton icon={Monitor} label="Employee preview" onClick={() => { setOpen(false); onPreviewEmployee(); }} />}
+      {user.role === "owner" && !preview && onPreviewSalesman && <MenuButton icon={Monitor} label="Salesman preview" onClick={() => { setOpen(false); onPreviewSalesman(); }} />}
       {!preview && <MenuButton icon={BellRing} label="Phone notifications" onClick={() => show("notifications")} />}
       <MenuButton icon={CircleHelp} label="Help & instructions" onClick={() => show("help")} />
-      <MenuButton icon={Clipboard} label="Report a problem" onClick={() => show("report")} />
+      {!preview && <MenuButton icon={Clipboard} label="Report a problem" onClick={() => show("report")} />}
       {!preview && <button type="button" className="mt-1 flex w-full items-center gap-3 border-t border-slate-100 px-3 py-3 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50 dark:border-slate-800 dark:hover:bg-rose-500/10" onClick={() => void signOut()}><LogOut size={17} />Sign out</button>}
     </div>}
     {view && <div className="fixed inset-0 z-[100] grid place-items-center bg-ink/55 p-4" role="dialog" aria-modal="true"><section className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900"><div className="flex items-center justify-between"><h2 className="text-xl font-bold text-ink dark:text-white">{view === "profile" ? "My profile" : view === "notifications" ? "Phone notifications" : view === "business" ? "Business settings" : view === "rates" ? "My commission rates" : view === "help" ? "Help & instructions" : "Report a problem"}</h2><button className="icon-button" onClick={() => setView(null)} aria-label="Close"><X size={17} /></button></div>

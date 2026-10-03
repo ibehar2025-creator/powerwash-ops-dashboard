@@ -85,6 +85,10 @@ select {
 .sales-shell .brand-card { border-radius: 8px; background: #162431; padding: 16px; }
 .sales-shell .app-header { padding: 20px; border-bottom: 1px solid #cbd5e1; background: #fff; }
 .dark .sales-shell .app-header { background: #0f172a; border-color: #334155; }
+.sales-preview-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; background: #fef3c7; color: #78350f; font-size: 14px; font-weight: 600; }
+.sales-shell .sales-preview-banner .text-button { color: #78350f; background: #fff; border-color: #d97706; }
+.sales-shell .sales-preview-banner .text-button:hover { background: #fffbeb; }
+.sales-shell .sales-preview-banner + .app-header { padding-top: 16px; }
 .sales-shell .metric-card { min-width: 0; overflow-wrap: anywhere; border-bottom: 2px solid #0891b2; padding: 16px 0; }
 .dark .sales-shell .metric-card p { color: #94a3b8; }
 .sales-modal { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: #0008; }
