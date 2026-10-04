@@ -8,7 +8,7 @@ import {
   useMapsLibrary,
   type MapMouseEvent,
 } from "@vis.gl/react-google-maps";
-import { Check, LocateFixed, MapPin, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, MapPin, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { currency, isoToday } from "../lib/calculations";
 import type { Solicitation, SolicitationOutcome } from "../types/business";
 import type { MapCustomer as Customer, MapJob as Job } from "../lib/sales";
@@ -346,6 +346,10 @@ function GoogleBusinessMap({
   const [locatedAddress, setLocatedAddress] = useState("");
   const [formStatus, setFormStatus] = useState("Click a property on the map or search an address.");
   const [saving, setSaving] = useState(false);
+  const [propertyMenuOpen, setPropertyMenuOpen] = useState(false);
+  const [locatingProperty, setLocatingProperty] = useState(false);
+  const propertyRequest = useRef(0);
+  const propertyDialog = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<Solicitation | null>(null);
   const [editAddress, setEditAddress] = useState("");
   const [editDate, setEditDate] = useState(isoToday());
@@ -367,6 +371,24 @@ function GoogleBusinessMap({
   const [userHeading, setUserHeading] = useState<number | null>(null);
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
+
+  function closePropertyMenu() {
+    propertyRequest.current += 1;
+    setPropertyMenuOpen(false);
+    setLocatingProperty(false);
+  }
+
+  useEffect(() => {
+    if (!propertyMenuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = "hidden";
+    propertyDialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [propertyMenuOpen]);
 
   useEffect(() => {
     failedJobAddresses.current.clear();
@@ -522,7 +544,7 @@ function GoogleBusinessMap({
     const result = response.results[0];
     if (!result) throw new Error("Customer address not found");
     const position = { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() };
-    setMapSearchResult({ position, label: customer.name });
+    setMapSearchResult({ position, label: result.formatted_address });
     requestMapFocus([position], 18);
     setMapSearchStatus(`${customer.name} - ${result.formatted_address}`);
     setMapSearch(customer.name);
@@ -565,24 +587,53 @@ function GoogleBusinessMap({
   }, [requestMapFocus]);
 
   const reverseGeocode = useCallback(async (position: google.maps.LatLngLiteral) => {
+    const request = ++propertyRequest.current;
     setDraftCoordinates({ latitude: position.lat, longitude: position.lng });
     setSelected(null);
+    setMapSearchOpen(false);
+    setAddress("");
+    setLocatedAddress("");
+    setNotes("");
+    setOutcome("no answer");
+    setFollowUpDate("");
+    setSolicitedDate(isoToday());
+    setPropertyMenuOpen(true);
+    setLocatingProperty(true);
     setFormStatus("Looking up this property...");
-    if (!geocoder) return;
     try {
+      if (!geocoder) throw new Error("Geocoder unavailable");
       const response = await geocoder.geocode({ location: position });
+      if (request !== propertyRequest.current) return;
       const formattedAddress = response.results[0]?.formatted_address ?? `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
       setAddress(formattedAddress);
       setLocatedAddress(formattedAddress);
-      onAddJob?.({ address: formattedAddress, latitude: position.lat, longitude: position.lng });
-      setFormStatus("Property selected. Choose the result and save it.");
+      setFormStatus("");
     } catch {
+      if (request !== propertyRequest.current) return;
       const coordinates = `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
       setAddress(coordinates);
       setLocatedAddress(coordinates);
       setFormStatus("Pin selected. Add any identifying address details before saving.");
+    } finally {
+      if (request === propertyRequest.current) setLocatingProperty(false);
     }
-  }, [geocoder, onAddJob]);
+  }, [geocoder]);
+
+  function openPropertyMenu(property: Coordinates & { address: string }) {
+    propertyRequest.current += 1;
+    setLocatingProperty(false);
+    setSelected(null);
+    setMapSearchOpen(false);
+    setAddress(property.address);
+    setLocatedAddress(property.address);
+    setDraftCoordinates({ latitude: property.latitude, longitude: property.longitude });
+    setNotes("");
+    setOutcome("no answer");
+    setFollowUpDate("");
+    setSolicitedDate(isoToday());
+    setFormStatus("");
+    setPropertyMenuOpen(true);
+  }
 
   function handleMapClick(event: MapMouseEvent) {
     if (event.detail.latLng) void reverseGeocode(event.detail.latLng);
@@ -634,10 +685,29 @@ function GoogleBusinessMap({
       setOutcome("no answer");
       setFollowUpDate("");
       setFormStatus("Solicitation saved to the map.");
+      closePropertyMenu();
     } catch (error) {
       setFormStatus(error instanceof Error ? error.message : "Unable to save this location.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function bookSelectedProperty() {
+    if (!onAddJob || !address.trim() || !draftCoordinates) return;
+    const request = propertyRequest.current;
+    setLocatingProperty(true);
+    try {
+      const located = locatedAddress === address ? null : await locateTypedAddress();
+      if (request !== propertyRequest.current) return;
+      if (locatedAddress !== address && !located) throw new Error("Locate this address before adding a job.");
+      const property = { address: located?.formattedAddress ?? address.trim(), ...(located?.coordinates ?? draftCoordinates) };
+      closePropertyMenu();
+      onAddJob(property);
+    } catch {
+      setFormStatus("Address not found. Check the address and try again.");
+    } finally {
+      setLocatingProperty(false);
     }
   }
 
@@ -785,6 +855,7 @@ function GoogleBusinessMap({
                     </div>
                   )}
                   {onAddJob && <button type="button" className="primary-button mt-3 gap-2" onClick={() => onAddJob({address:selected.location.address,latitude:selected.location.latitude,longitude:selected.location.longitude})}><Plus size={15} />Add job here</button>}
+                  {!employeeView && <button type="button" className="text-button mt-2 gap-2" onClick={() => openPropertyMenu(selected.location)}><MapPin size={15} />Record solicitation</button>}
                 </div>
               </InfoWindow>
             )}
@@ -797,37 +868,48 @@ function GoogleBusinessMap({
               {mapSearchOpen && customerSuggestions.length > 0 && <div className="absolute left-0 right-0 top-12 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft dark:border-slate-700 dark:bg-slate-900">{customerSuggestions.map((customer) => <button key={customer.id} type="button" className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800" onClick={() => void focusCustomer(customer).catch(() => setMapSearchStatus("Customer address could not be located."))}><strong className="block break-words text-sm text-ink dark:text-white">{customer.name}</strong><span className="mt-0.5 block break-words text-xs leading-5 text-slate-500">{customer.address || "No address listed"}</span></button>)}</div>}
             </form>
             {mapSearchStatus && <p className="mt-2 w-fit max-w-full break-words rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium leading-5 text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
-            {onAddJob && mapSearchResult && <button type="button" className="primary-button mt-2 gap-2" onClick={() => onAddJob({address:mapSearchResult.label,latitude:mapSearchResult.position.lat,longitude:mapSearchResult.position.lng})}><Plus size={16} />Book at this address</button>}
+            {!employeeView && mapSearchResult && <button type="button" className="primary-button mt-2 gap-2" onClick={() => openPropertyMenu({address:mapSearchResult.label,latitude:mapSearchResult.position.lat,longitude:mapSearchResult.position.lng})}><MapPin size={16} />Select property</button>}
           </div>
           <MapLocationControl hasLocation={Boolean(userLocation)} onLocate={receiveLocation} />
           {geocodingProgress && <div className="absolute bottom-3 left-3 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow dark:bg-slate-900/95 dark:text-slate-200">{geocodingProgress}</div>}
         </div>
 
         {!employeeView && <aside className="min-h-0 min-w-0 space-y-4 xl:max-h-[calc(100vh-245px)] xl:overflow-y-auto xl:pr-1">
-          <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex items-center gap-2">
-              <LocateFixed size={18} className="text-lagoon dark:text-cyan-300" />
-              <h3 className="font-semibold text-ink dark:text-white">Record a solicitation</h3>
+          <button type="button" className="text-button w-full gap-2" onClick={() => { setSelected(null); setAddress(""); setLocatedAddress(""); setDraftCoordinates(null); setNotes(""); setOutcome("no answer"); setFollowUpDate(""); setSolicitedDate(isoToday()); setFormStatus(""); setPropertyMenuOpen(true); }}><MapPin size={17} />Record solicitation</button>
+          {propertyMenuOpen && <div className="sales-modal" onClick={(event) => { if (event.target === event.currentTarget && !saving) closePropertyMenu(); }}>
+          <div ref={propertyDialog} className="sales-dialog" role="dialog" aria-modal="true" aria-labelledby="property-menu-title" onKeyDown={(event) => {
+            if (event.key === "Escape" && !saving) closePropertyMenu();
+            if (event.key !== "Tab") return;
+            const controls = propertyDialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)');
+            if (!controls?.length) return;
+            const first = controls[0], last = controls[controls.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+          }}>
+            <div className="flex items-start justify-between gap-3">
+              <h3 id="property-menu-title" className="text-xl font-bold text-ink dark:text-white">Record at this property</h3>
+              <button type="button" className="icon-button shrink-0" aria-label="Close property menu" title="Close" disabled={saving} onClick={closePropertyMenu}><X size={18} /></button>
             </div>
             <form className="mt-4 min-w-0 space-y-3" onSubmit={submitSolicitation}>
-              {onAddJob && <button type="button" className="primary-button w-full gap-2" disabled={!address || !draftCoordinates} onClick={() => {if(draftCoordinates) onAddJob({address,...draftCoordinates});}}><Plus size={17} />Add job at this property</button>}
+              {onAddJob && <button type="button" className="primary-button w-full gap-2" disabled={saving || locatingProperty || !address.trim() || !draftCoordinates} onClick={() => void bookSelectedProperty()}><Plus size={17} />Add job</button>}
+              <h4 className="font-semibold text-ink dark:text-white">Record solicitation</h4>
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">
                 Address
                 <div className="mt-2 flex min-w-0 gap-2">
-                  <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Click map or enter address" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" />
+                  <input aria-label="Address" disabled={locatingProperty || saving} value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Click map or enter address" className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" />
                   <button type="button" className="icon-button shrink-0" title="Find address" aria-label="Find address" onClick={() => void locateTypedAddress().catch(() => setFormStatus("Address not found. Add the city or ZIP code and try again."))}><Search size={17} /></button>
                 </div>
               </label>
               <div className="grid min-w-0 gap-3 sm:grid-cols-2">
                 <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Date<input type="date" value={solicitedDate} onChange={(event) => setSolicitedDate(event.target.value)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
-                <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select value={outcome} onChange={(event) => setOutcome(event.target.value as SolicitationOutcome)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label className="block min-w-0 text-sm font-semibold text-slate-600 dark:text-slate-300">Result<select aria-label="Result" value={outcome} onChange={(event) => setOutcome(event.target.value as SolicitationOutcome)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal capitalize text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white">{outcomes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
               </div>
               {outcome === "follow up" && <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Follow-up date<input type="date" required value={followUpDate} onChange={(event) => setFollowUpDate(event.target.value)} className="mt-2 min-w-0 max-w-full w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>}
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Name, interest, follow-up details..." className="mt-2 min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal text-ink outline-none focus:border-lagoon dark:border-slate-700 dark:bg-slate-950 dark:text-white" /></label>
               <p className="min-h-8 text-xs leading-4 text-slate-500 dark:text-slate-400">{formStatus}</p>
-              <button className="primary-button w-full gap-2" disabled={saving}><MapPin size={17} />{saving ? "Saving..." : "Save solicitation"}</button>
+              <button className="primary-button w-full gap-2" disabled={saving || locatingProperty}><MapPin size={17} />{saving ? "Saving..." : "Save solicitation"}</button>
             </form>
-          </section>
+          </div></div>}
 
           <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
