@@ -12,6 +12,7 @@ import { Check, LocateFixed, MapPin, Pencil, Plus, Search, Trash2, X } from "luc
 import { currency, isoToday } from "../lib/calculations";
 import type { Solicitation, SolicitationOutcome } from "../types/business";
 import type { MapCustomer as Customer, MapJob as Job } from "../lib/sales";
+import { MapLocationControl } from "./MapLocationControl";
 
 type Coordinates = { latitude: number; longitude: number };
 type MapFocusRequest = { id: number; points: google.maps.LatLngLiteral[]; zoom?: number };
@@ -364,8 +365,6 @@ function GoogleBusinessMap({
   const [mapFocusRequest, setMapFocusRequest] = useState<MapFocusRequest | null>(null);
   const [userLocation, setUserLocation] = useState<google.maps.LatLngLiteral | null>(null);
   const [userHeading, setUserHeading] = useState<number | null>(null);
-  const [locationStatus, setLocationStatus] = useState("");
-  const [locatingUser, setLocatingUser] = useState(false);
   const failedJobAddresses = useRef(new Set<string>());
   const geocodingJobAddresses = useRef(new Set<string>());
 
@@ -558,28 +557,11 @@ function GoogleBusinessMap({
     }
   }
 
-  const locateUser = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocationStatus("Location is not supported by this browser.");
-      return;
-    }
-    setLocatingUser(true);
-    setLocationStatus("Finding your location...");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const current = { lat: position.coords.latitude, lng: position.coords.longitude };
-        setUserLocation(current);
-        setUserHeading(position.coords.heading != null && Number.isFinite(position.coords.heading) ? position.coords.heading : null);
-        setLocatingUser(false);
-        setLocationStatus("");
-        requestMapFocus([current], 18);
-      },
-      (error) => {
-        setLocatingUser(false);
-        setLocationStatus(error.code === error.PERMISSION_DENIED ? "Allow location access to show your position." : "Your location could not be determined.");
-      },
-      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
-    );
+  const receiveLocation = useCallback((position: GeolocationPosition) => {
+    const current = { lat: position.coords.latitude, lng: position.coords.longitude };
+    setUserLocation(current);
+    setUserHeading(position.coords.heading != null && Number.isFinite(position.coords.heading) ? position.coords.heading : null);
+    requestMapFocus([current], 18);
   }, [requestMapFocus]);
 
   const reverseGeocode = useCallback(async (position: google.maps.LatLngLiteral) => {
@@ -817,8 +799,7 @@ function GoogleBusinessMap({
             {mapSearchStatus && <p className="mt-2 w-fit max-w-full break-words rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium leading-5 text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{mapSearchStatus}</p>}
             {onAddJob && mapSearchResult && <button type="button" className="primary-button mt-2 gap-2" onClick={() => onAddJob({address:mapSearchResult.label,latitude:mapSearchResult.position.lat,longitude:mapSearchResult.position.lng})}><Plus size={16} />Book at this address</button>}
           </div>
-          <button type="button" className="absolute bottom-10 right-3 z-10 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft transition hover:border-blue-500 hover:text-blue-600 disabled:cursor-wait disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" aria-label="Show my location" title="Show my location" disabled={locatingUser} onClick={locateUser}><LocateFixed size={20} className={locatingUser ? "animate-pulse text-blue-600" : userLocation ? "text-blue-600" : ""} /></button>
-          {locationStatus && <p className="absolute bottom-10 left-3 z-10 max-w-[calc(100%-76px)] rounded-md bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow dark:bg-slate-900/95 dark:text-slate-300">{locationStatus}</p>}
+          <MapLocationControl hasLocation={Boolean(userLocation)} onLocate={receiveLocation} />
           {geocodingProgress && <div className="absolute bottom-3 left-3 rounded-md bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow dark:bg-slate-900/95 dark:text-slate-200">{geocodingProgress}</div>}
         </div>
 
