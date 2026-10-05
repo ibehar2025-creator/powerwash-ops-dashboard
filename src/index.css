@@ -97,7 +97,7 @@ select {
 .sales-dialog .settings-grid input, .sales-dialog .settings-grid textarea { font-size: 16px; }
 
 /* Safari's native date control otherwise keeps its intrinsic content width. */
-.reimbursement-date {
+.reimbursement-date, .recurring-date {
   display: block;
   appearance: none;
   -webkit-appearance: none;
@@ -106,20 +106,21 @@ select {
   max-width: 100%;
   min-height: 52px;
 }
-.reimbursement-date::-webkit-date-and-time-value { min-width: 0; text-align: left; }
-.reimbursement-date::-webkit-datetime-edit { min-width: 0; padding: 0; }
+.reimbursement-date::-webkit-date-and-time-value, .recurring-date::-webkit-date-and-time-value { min-width: 0; text-align: left; }
+.reimbursement-date::-webkit-datetime-edit, .recurring-date::-webkit-datetime-edit { min-width: 0; padding: 0; }
 
-.team-pay-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #cbd5e1; }
-.team-pay-tabs > button { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; min-height: 48px; min-width: 0; padding: 10px 4px; border-bottom: 2px solid transparent; color: #64748b; font-size: 13px; font-weight: 600; }
-.team-pay-tabs > button[aria-selected="true"] { border-bottom-color: #087f8c; color: #087f8c; }
-.team-pay-tabs > button:focus-visible { outline: 2px solid #0891b2; outline-offset: -2px; }
+.team-pay-tabs, .recurring-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #cbd5e1; }
+.recurring-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.team-pay-tabs > button, .recurring-tabs > button { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; min-height: 48px; min-width: 0; padding: 10px 4px; border-bottom: 2px solid transparent; color: #64748b; font-size: 13px; font-weight: 600; }
+.team-pay-tabs > button[aria-selected="true"], .recurring-tabs > button[aria-selected="true"] { border-bottom-color: #087f8c; color: #087f8c; }
+.team-pay-tabs > button:focus-visible, .recurring-tabs > button:focus-visible { outline: 2px solid #0891b2; outline-offset: -2px; }
 .team-pay-count { padding: 1px 5px; border-radius: 4px; background: #fef3c7; color: #92400e; font-size: 11px; }
-.dark .team-pay-tabs { border-color: #334155; }
-.dark .team-pay-tabs > button { color: #94a3b8; }
-.dark .team-pay-tabs > button[aria-selected="true"] { color: #67e8f9; border-bottom-color: #67e8f9; }
+.dark .team-pay-tabs, .dark .recurring-tabs { border-color: #334155; }
+.dark .team-pay-tabs > button, .dark .recurring-tabs > button { color: #94a3b8; }
+.dark .team-pay-tabs > button[aria-selected="true"], .dark .recurring-tabs > button[aria-selected="true"] { color: #67e8f9; border-bottom-color: #67e8f9; }
 @media (max-width: 420px) {
-  .team-pay-tabs > button { flex-direction: column; gap: 4px; position: relative; font-size: 12px; }
-  .team-pay-tabs .team-pay-count { position: absolute; top: 6px; right: 4px; }
+  .team-pay-tabs > button, .recurring-tabs > button { flex-direction: column; gap: 4px; position: relative; font-size: 12px; }
+  .team-pay-tabs .team-pay-count, .recurring-tabs .team-pay-count { position: absolute; top: 6px; right: 4px; }
 }
 @media (max-width: 340px) { .team-pay-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .sales-inbox { position: fixed; z-index: 50; right: 16px; top: calc(90px + env(safe-area-inset-top)); width: min(400px, calc(100vw - 32px)); max-height: calc(100dvh - 130px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; box-shadow: 0 8px 24px #0003; }
