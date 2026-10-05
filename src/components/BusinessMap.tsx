@@ -39,7 +39,7 @@ type Props = {
   onCreateSolicitation: (solicitation: Omit<Solicitation, "id">) => Promise<void>;
   onUpdateSolicitation: (id: string, patch: Partial<Solicitation>) => Promise<void>;
   onDeleteSolicitation: (id: string) => Promise<void>;
-  onAddJob?: (property: Coordinates & {address:string}) => void;
+  onAddJob?: (property: Partial<Coordinates> & {address?:string}) => void;
 };
 
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
@@ -694,14 +694,20 @@ function GoogleBusinessMap({
   }
 
   async function bookSelectedProperty() {
-    if (!onAddJob || !address.trim() || !draftCoordinates) return;
+    if (!onAddJob) return;
+    if (!address.trim()) {
+      closePropertyMenu();
+      onAddJob({});
+      return;
+    }
     const request = propertyRequest.current;
     setLocatingProperty(true);
     try {
-      const located = locatedAddress === address ? null : await locateTypedAddress();
+      const located = locatedAddress === address && draftCoordinates ? null : await locateTypedAddress();
       if (request !== propertyRequest.current) return;
-      if (locatedAddress !== address && !located) throw new Error("Locate this address before adding a job.");
-      const property = { address: located?.formattedAddress ?? address.trim(), ...(located?.coordinates ?? draftCoordinates) };
+      const coordinates = located?.coordinates ?? draftCoordinates;
+      if (!coordinates) throw new Error("Locate this address before adding a job.");
+      const property = { address: located?.formattedAddress ?? address.trim(), ...coordinates };
       closePropertyMenu();
       onAddJob(property);
     } catch {
@@ -891,7 +897,7 @@ function GoogleBusinessMap({
               <button type="button" className="icon-button shrink-0" aria-label="Close property menu" title="Close" disabled={saving} onClick={closePropertyMenu}><X size={18} /></button>
             </div>
             <form className="mt-4 min-w-0 space-y-3" onSubmit={submitSolicitation}>
-              {onAddJob && <button type="button" className="primary-button w-full gap-2" disabled={saving || locatingProperty || !address.trim() || !draftCoordinates} onClick={() => void bookSelectedProperty()}><Plus size={17} />Add job</button>}
+              {onAddJob && <button type="button" className="primary-button w-full gap-2" disabled={saving || locatingProperty} onClick={() => void bookSelectedProperty()}><Plus size={17} />Add job</button>}
               <h4 className="font-semibold text-ink dark:text-white">Record solicitation</h4>
               <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">
                 Address
