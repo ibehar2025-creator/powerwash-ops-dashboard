@@ -562,3 +562,18 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+.notification-permission-prompt {
+  position: fixed;
+  inset: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  margin: auto;
+  width: calc(100% - max(24px, env(safe-area-inset-left) + env(safe-area-inset-right)));
+  max-width: 420px;
+  max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+  border: 1px solid #e2e8f0;
+  color: #162331;
+  box-shadow: 0 20px 60px #0003;
+}
+
+.notification-permission-prompt::backdrop { background: #0008; }
+.dark .notification-permission-prompt { border-color: #334155; }

@@ -20,11 +20,12 @@ export function PushNotificationSettings() {
     let active = true;
     void loadPushConfig().then(async (config) => {
       if (!active || !config) return;
-      const registration = supported ? await navigator.serviceWorker.ready : null;
+      const registration = supported ? await navigator.serviceWorker.getRegistration() : null;
       const localSubscription = registration ? await registration.pushManager.getSubscription() : null;
+      if (!active) return;
       setConfigured(config.enabled);
       setPublicKey(config.publicKey);
-      setSubscribed(Boolean(localSubscription));
+      setSubscribed(Boolean(localSubscription) && Notification.permission === "granted");
     }).catch((error) => {
       if (active) setMessage(error instanceof Error ? error.message : "Unable to check notification settings.");
     }).finally(() => { if (active) setLoading(false); });
@@ -40,7 +41,8 @@ export function PushNotificationSettings() {
       if (permission !== "granted") throw new Error("Notification permission was not granted. Allow notifications in your phone settings and try again.");
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(publicKey) });
-      await savePushSubscription(subscription.toJSON());
+      const saved = await savePushSubscription(subscription.toJSON());
+      if (!saved) throw new Error("Unable to save notification settings. Please try again.");
       setSubscribed(true);
       setMessage("Notifications are enabled on this device.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to enable notifications."); }
@@ -78,6 +80,7 @@ export function PushNotificationSettings() {
     </div>
     {!supported && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">On iPhone, open Safari, tap Share → Add to Home Screen, then open the installed dashboard and return here.</p>}
     {!configured && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">The server notification keys still need to be configured.</p>}
+    {supported && Notification.permission === "denied" && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">Notifications are blocked. On iPhone, open Settings, then Notifications, then Powerwashing Pros and turn on Allow Notifications. In a browser, allow notifications in this site's permissions, then return here.</p>}
     <div className="grid gap-2 sm:grid-cols-2">{subscribed ? <button type="button" className="text-button gap-2" disabled={working} onClick={() => void disable()}><BellOff size={16} />Turn off</button> : <button type="button" className="primary-button gap-2" disabled={working || !configured} onClick={() => void enable()}><BellRing size={16} />Enable notifications</button>}{subscribed && <button type="button" className="primary-button gap-2" disabled={working} onClick={() => void test()}><Send size={16} />Send test</button>}</div>
     {message && <p className="rounded-lg bg-mist p-3 text-sm font-medium text-lagoon dark:bg-cyan-500/10 dark:text-cyan-200">{message}</p>}
   </div>;
