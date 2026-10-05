@@ -61,6 +61,12 @@ try {
     const standalone=page.getByRole('dialog',{name:'Request reimbursement'});await page.getByLabel('Reimbursement item 1',{exact:true}).fill('Insurance');await page.getByLabel('Reimbursement cost 1',{exact:true}).fill('75');
     await page.getByLabel('Notes',{exact:true}).fill('Monthly coverage');
     const standaloneBounds=await standalone.boundingBox();assert.ok(standaloneBounds.y>=59&&standaloneBounds.y+standaloneBounds.height<=viewport.height-34+1);
+    const dateInput=page.getByLabel('Expense date',{exact:true});
+    await dateInput.fill('2026-10-05');assert.equal(await dateInput.inputValue(),'2026-10-05');
+    const dateBounds=await dateInput.boundingBox(),notesBounds=await standalone.locator('textarea').boundingBox();
+    assert.ok(dateBounds.x>=standaloneBounds.x+19&&dateBounds.x+dateBounds.width<=standaloneBounds.x+standaloneBounds.width-19);
+    assert.ok(Math.abs(dateBounds.width-notesBounds.width)<=1);
+    assert.equal(await dateInput.evaluate(node=>getComputedStyle(node).appearance),'none');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     const inputFonts=await standalone.locator('input').evaluateAll(nodes=>nodes.map(node=>parseFloat(getComputedStyle(node).fontSize)));assert.ok(inputFonts.every(font=>font>=16));
     await page.screenshot({path:`artifacts/standalone-reimbursement-${viewport.width}.png`,fullPage:true});
