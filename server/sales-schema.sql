@@ -46,7 +46,7 @@ create index if not exists sales_notifications_person_idx on sales_notifications
 alter table payroll_run_lines add column if not exists sales_credit_id uuid references sales_credits(id) on delete restrict;
 create unique index if not exists payroll_sales_credit_idx on payroll_run_lines(sales_credit_id) where sales_credit_id is not null;
 alter table payroll_run_lines drop constraint if exists payroll_run_lines_line_type_check;
-alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission','upsell','contract_bonus','tip','gas_reimbursement','sales_commission'));
+alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission','upsell','contract_bonus','tip','gas_reimbursement','sales_commission','reimbursement'));
 alter table sales_bookings enable row level security;
 alter table sales_credits enable row level security;
 alter table sales_notifications enable row level security;

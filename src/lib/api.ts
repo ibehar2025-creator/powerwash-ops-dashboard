@@ -1,4 +1,5 @@
 import type { CalendarEvent, ContractSubmission, Customer, EarningSubmission, EmployeeProfile, Expense, Invoice, Job, JobAssignment, JobCreateInput, Lead, PayrollPreview, PayrollRun, PayoutSummary, Review, ServicePlan, ServicePlanCreateInput, Solicitation } from "../types/business";
+import type { ReimbursementItem, ReimbursementRequest } from "../types/business";
 
 export type DatabaseSnapshot = Partial<{
   customers: Customer[];
@@ -19,6 +20,7 @@ export interface SolicitationSaveResult {
 }
 
 export interface EmployeeWorkspaceSnapshot {
+  reimbursements?: ReimbursementRequest[];
   employee: EmployeeProfile;
   preview: boolean;
   customers: Customer[];
@@ -31,6 +33,7 @@ export interface EmployeeWorkspaceSnapshot {
 }
 
 export interface OwnerOperationsSnapshot {
+  reimbursements?: ReimbursementRequest[];
   employees: EmployeeProfile[];
   assignments: JobAssignment[];
   earnings: EarningSubmission[];
@@ -223,6 +226,7 @@ export function saveEmployeeJobPatch(jobId: string, patch: Pick<Partial<Job>, "s
 export function submitEmployeeEarnings(input: {
   jobId: string;
   gasCost?: number;
+  reimbursementItems?: ReimbursementItem[];
   tipAmount: number;
   contractSubmissionId?: string;
   employeeId?: string;
@@ -263,6 +267,14 @@ export function loadOwnerOperations() {
   return request<OwnerOperationsSnapshot>("/api/owner/operations");
 }
 
+export function submitReimbursement(input: { requestId: string; expenseDate: string; items: ReimbursementItem[]; notes: string }) {
+  return request<ReimbursementRequest>("/api/employee/reimbursements", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function reviewReimbursement(id: string, decision: "approved" | "rejected", ownerNote = "") {
+  return request<ReimbursementRequest>(`/api/owner/reimbursements/${id}/review`, { method: "POST", body: JSON.stringify({ decision, ownerNote }) });
+}
+
 export function saveEmployeeProfile(employeeId: string, patch: Partial<Pick<EmployeeProfile, "active" | "baseCommissionPct" | "upsellCommissionPct" | "contractBonusPct" | "tipSharePct">>) {
   return request<EmployeeProfile>(`/api/owner/employees/${employeeId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
@@ -290,8 +302,8 @@ export function reviewContract(contractId: string, decision: "approved" | "rejec
   return request<ContractSubmission>(`/api/owner/contracts/${contractId}/review`, { method: "POST", body: JSON.stringify({ decision, ownerNote }) });
 }
 
-export function createPayout(earningIds: string[]) {
-  return request<PayoutSummary>("/api/owner/payouts", { method: "POST", body: JSON.stringify({ earningIds }) });
+export function createPayout(earningIds: string[], reimbursementIds: string[] = []) {
+  return request<PayoutSummary>("/api/owner/payouts", { method: "POST", body: JSON.stringify({ earningIds, reimbursementIds }) });
 }
 
 export function loadOwnerPayroll(periodStart?: string) {

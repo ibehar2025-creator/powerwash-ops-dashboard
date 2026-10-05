@@ -9,6 +9,7 @@ import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
 import { previousWeeklyPayPeriod } from "./payday.mjs";
 import { ensureSalesSchema, installSalesRoutes, ownerOrSalesman, salesPayrollLines, priceAfterUpsell } from "./sales.mjs";
+import { ensureReimbursementSchema, installReimbursementRoutes, loadReimbursements, reimbursementPayrollLines, validateReimbursementItems } from "./reimbursements.mjs";
 
 const { Pool } = pg;
 
@@ -316,7 +317,7 @@ async function ensureMapSchema() {
       and not exists (select 1 from payroll_run_lines prl where prl.source_key = ja.job_id || ':upsell');
     alter table earning_submissions add column if not exists gas_cost numeric(12,2) not null default 0 check (gas_cost >= 0);
     alter table payroll_run_lines drop constraint if exists payroll_run_lines_line_type_check;
-    alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement', 'sales_commission'));
+    alter table payroll_run_lines add constraint payroll_run_lines_line_type_check check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement', 'sales_commission', 'reimbursement'));
     alter table payroll_runs enable row level security;
     alter table payroll_run_lines enable row level security;
     alter table payroll_adjustments enable row level security;
@@ -523,6 +524,7 @@ const toEarning = (row) => ({
   jobDate: row.job_date?.toISOString?.().slice(0, 10) ?? row.job_date,
   originalJobPrice: Number(row.original_job_price || 0),
   gasCost: Number(row.gas_cost || 0),
+  reimbursementItems: row.reimbursement_items?.length ? row.reimbursement_items : Number(row.gas_cost) > 0 ? [{ name: "Gas", cost: Number(row.gas_cost) }] : [],
   tipAmount: Number(row.tip_amount),
   upsellAmount: Number(row.upsell_amount),
   upsellDescription: row.upsell_description ?? "",
@@ -586,7 +588,7 @@ async function loadPayrollRuns(db, employeeId = null) {
   return runsResult.rows.map((run) => {
     const lines = linesResult.rows.filter((row) => row.payroll_run_id === run.id).map((row) => ({
       id: row.id, employeeId: row.employee_id, employeeName: payrollEmployeeName(row), jobId: row.job_id ?? undefined,
-      lineType: row.line_type, description: row.description, customerName: row.customer_name,
+      lineType: row.line_type, description: row.description, customerName: row.customer_name, reimbursementRequestId: row.reimbursement_request_id ?? undefined,
       workDate: isoDateValue(row.work_date), amount: Number(row.amount),
     }));
     const adjustments = adjustmentsResult.rows.filter((row) => row.payroll_run_id === run.id).map((row) => ({
@@ -610,7 +612,7 @@ async function eligiblePayrollLines(db, periodEnd) {
     `select j.id as job_id, j.date as work_date, j.status as job_status, c.name as customer_name,
       ja.employee_id, ua.name as employee_name, ja.original_job_price, ja.base_commission_pct,
       ja.upsell_commission_pct, ja.contract_bonus_pct, ja.tip_share_pct,
-      es.id as earning_id, es.status as earning_status, es.gas_cost, es.tip_amount, es.upsell_amount, es.contract_submission_id,
+      es.id as earning_id, es.status as earning_status, es.gas_cost, es.reimbursement_items, es.tip_amount, es.upsell_amount, es.contract_submission_id,
       cs.status as contract_status
      from job_assignments ja
      join jobs j on j.id = ja.job_id
@@ -637,7 +639,7 @@ async function eligiblePayrollLines(db, periodEnd) {
     if (Number(row.upsell_amount) > 0) candidates.push({ key: `${row.job_id}:upsell`, type: "upsell", description: "Approved upsell commission", amount: Number(row.upsell_amount) * Number(row.upsell_commission_pct) });
     if (row.contract_submission_id && row.contract_status === "approved") candidates.push({ key: `${row.job_id}:contract_bonus`, type: "contract_bonus", description: "Approved service contract bonus", amount: Number(row.original_job_price) * Number(row.contract_bonus_pct) });
     if (Number(row.tip_amount) > 0) candidates.push({ key: `${row.job_id}:tip`, type: "tip", description: "Tip share", amount: Number(row.tip_amount) * Number(row.tip_share_pct) });
-    if (Number(row.gas_cost) > 0) candidates.push({ key: `${row.job_id}:gas_reimbursement`, type: "gas_reimbursement", description: "Gas reimbursement", amount: Number(row.gas_cost) });
+    if (Number(row.gas_cost) > 0) candidates.push({ key: `${row.job_id}:gas_reimbursement`, type: "gas_reimbursement", description: row.reimbursement_items?.length ? `Reimbursement: ${row.reimbursement_items.map(item => `${item.name}: $${Number(item.cost).toFixed(2)}`).join('; ')}` : "Gas reimbursement", amount: Number(row.gas_cost) });
     for (const item of candidates.filter((item) => item.amount > 0)) {
       const used = await db.query("select 1 from payroll_run_lines where source_key = $1", [item.key]);
       if (used.rows[0]) continue;
@@ -649,7 +651,8 @@ async function eligiblePayrollLines(db, periodEnd) {
     }
   }
   const sales = await salesPayrollLines(db, periodEnd);
-  return { lines: [...lines, ...sales.lines], missingApprovals: missingApprovals + sales.missingApprovals };
+  const reimbursements = await reimbursementPayrollLines(db, periodEnd);
+  return { lines: [...lines, ...sales.lines, ...reimbursements.lines], missingApprovals: missingApprovals + sales.missingApprovals + reimbursements.missingApprovals };
 }
 
 const toCalendarEvent = (row) => ({
@@ -2017,6 +2020,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       jobs,
       assignments: assignmentsResult.rows.map(toAssignment),
       earnings: earningsResult.rows.map(toEarning),
+      reimbursements: await loadReimbursements(pool, subject.id),
       contracts: contractsResult.rows.map(toContract),
       solicitations: [],
       payouts: payoutsResult.rows.map((row) => ({
@@ -2081,8 +2085,12 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
       jobId, gasCost = 0, tipAmount = 0, contractSubmissionId = null, hasUpsell = false,
       upsellDescription = "", upsellOutcome = "", upsellQuotedAmount = 0, upsellNotes = "",
     } = req.body;
-    const gas = Number(gasCost);
-    if (!Number.isFinite(gas) || gas < 0 || gas > 999999.99 || Math.abs(gas * 100 - Math.round(gas * 100)) > 0.000001) return res.status(400).json({ error: "Enter a valid gas cost with at most two decimal places." });
+    let reimbursement;
+    try { reimbursement = validateReimbursementItems(req.body.reimbursementItems ?? (Number(gasCost) > 0 ? [{ name: "Gas", cost: gasCost }] : [])); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    // Preserve the old aggregate and payroll source key so existing gas payouts stay deduplicated.
+    const gas = req.body.reimbursementItems !== undefined ? reimbursement.amount : Number(gasCost);
+    if (!Number.isFinite(gas) || gas < 0 || gas > 999999.99 || Math.abs(gas * 100 - Math.round(gas * 100)) > 0.000001) return res.status(400).json({ error: "Enter a valid reimbursement total with at most two decimal places." });
     const tip = Number(tipAmount);
     const quote = Number(upsellQuotedAmount);
     const validOutcomes = ["accepted", "declined", "follow-up"];
@@ -2103,19 +2111,20 @@ app.post("/api/employee/earnings", requireDatabase, allowEmployeeOrOwner, async 
     const result = await pool.query(
       `insert into earning_submissions (
          job_id, employee_id, tip_amount, upsell_amount, contract_submission_id,
-         upsell_description, upsell_outcome, upsell_quoted_amount, upsell_notes, gas_cost, status, owner_note
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', '')
+         upsell_description, upsell_outcome, upsell_quoted_amount, upsell_notes, gas_cost, reimbursement_items, status, owner_note
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', '')
        on conflict (job_id, employee_id) do update set tip_amount = excluded.tip_amount, gas_cost = excluded.gas_cost,
          contract_submission_id = excluded.contract_submission_id,
          upsell_amount = excluded.upsell_amount, upsell_description = excluded.upsell_description,
          upsell_outcome = excluded.upsell_outcome, upsell_quoted_amount = excluded.upsell_quoted_amount,
          upsell_notes = excluded.upsell_notes,
+         reimbursement_items = excluded.reimbursement_items,
          status = 'pending', owner_note = '', reviewed_by = null, reviewed_at = null, updated_at = now()
        returning id`,
       [
         jobId, subject.id, tip, hasUpsell && upsellOutcome === "accepted" ? quote : 0, contractSubmissionId,
         hasUpsell ? upsellDescription.trim() : "", hasUpsell ? upsellOutcome : "",
-        hasUpsell ? quote : 0, hasUpsell ? String(upsellNotes).trim() : "", gas,
+        hasUpsell ? quote : 0, hasUpsell ? String(upsellNotes).trim() : "", gas, JSON.stringify(reimbursement.items),
       ],
     );
     await completeJobAfterEarnings({ db: pool, updateSheet: runSheetAction, jobId });
@@ -2234,6 +2243,7 @@ app.get("/api/owner/operations", requireDatabase, requireOwner, async (_req, res
       employees: employees.rows.map(toEmployeeProfile),
       assignments: assignments.rows.map(toAssignment),
       earnings: earnings.rows.map(toEarning),
+      reimbursements: await loadReimbursements(pool),
       contracts: contracts.rows.map(toContract),
       payouts: payouts.rows.map((row) => ({ id: row.id, employeeId: row.employee_id, employeeName: row.employee_name, amount: Number(row.amount), paidAt: row.paid_at?.toISOString?.() ?? row.paid_at, earningIds: row.earning_ids ?? [] })),
     });
@@ -2449,27 +2459,38 @@ app.post("/api/owner/payouts", requireDatabase, requireOwner, async (req, res, n
   const client = await pool.connect();
   try {
     const earningIds = [...new Set(Array.isArray(req.body.earningIds) ? req.body.earningIds : [])];
-    if (!earningIds.length) return res.status(400).json({ error: "Select approved earnings to pay." });
+    const reimbursementIds = [...new Set(Array.isArray(req.body.reimbursementIds) ? req.body.reimbursementIds : [])];
+    if (!earningIds.length && !reimbursementIds.length) return res.status(400).json({ error: "Select approved earnings or reimbursements to pay." });
+    if ([...earningIds,...reimbursementIds].some(id => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) return res.status(400).json({ error: "Invalid payment selection." });
+    await client.query("begin");
+    await client.query("select id from jobs where id in (select job_id from earning_submissions where id=any($1::uuid[])) order by id for update", [earningIds]);
+    await client.query("select id from earning_submissions where id=any($1::uuid[]) order by id for update", [earningIds]);
+    const requests = await client.query("select rr.*,ua.name as employee_name from reimbursement_requests rr join user_accounts ua on ua.id=rr.employee_id where rr.id=any($1::uuid[]) order by rr.id for update of rr", [reimbursementIds]);
+    if (requests.rows.length !== reimbursementIds.length || requests.rows.some(row => row.status !== 'approved')) return res.status(400).json({ error: "Every reimbursement must be approved and unpaid." });
+    const requestLinked = await client.query("select 1 from payroll_run_lines where reimbursement_request_id=any($1::uuid[]) limit 1", [reimbursementIds]);
+    if (requestLinked.rows[0]) return res.status(409).json({ error: "These reimbursements are included in weekly payroll. Record payment from Contractor Pay." });
     const payrollLinked = await client.query("select 1 from payroll_run_lines where earning_submission_id = any($1::uuid[]) limit 1", [earningIds]);
     if (payrollLinked.rows[0]) return res.status(409).json({ error: "These earnings are already included in weekly payroll. Record payment from the Payroll tab." });
     const rows = await client.query(`${earningSelect} where es.id = any($1::uuid[]) and es.status = 'approved'`, [earningIds]);
     if (rows.rows.length !== earningIds.length) return res.status(400).json({ error: "Every selected earning must be approved and unpaid." });
-    const employeeIds = new Set(rows.rows.map((row) => row.employee_id));
+    const employeeIds = new Set([...rows.rows,...requests.rows].map((row) => row.employee_id));
     if (employeeIds.size !== 1) return res.status(400).json({ error: "Create one payout per employee." });
-    const amount = rows.rows.reduce((sum, row) => sum + earningAmounts(row).totalEarnings, 0);
-    await client.query("begin");
+    const amount = Math.round((rows.rows.reduce((sum, row) => sum + earningAmounts(row).totalEarnings, 0) + requests.rows.reduce((sum,row) => sum + Number(row.amount),0)) * 100) / 100;
+    const recipient = rows.rows[0] ?? requests.rows[0];
     const payout = await client.query(
-      "insert into payouts (employee_id, amount, earning_ids, paid_by) values ($1, $2, $3, $4) returning *",
-      [rows.rows[0].employee_id, amount, earningIds, req.authUser.id],
+      "insert into payouts (employee_id, amount, earning_ids, paid_by, reimbursement_ids) values ($1, $2, $3, $4, $5) returning *",
+      [recipient.employee_id, amount, earningIds, req.authUser.id,reimbursementIds],
     );
     await client.query("update earning_submissions set status = 'paid', paid_at = now(), updated_at = now() where id = any($1::uuid[])", [earningIds]);
+    await client.query("update reimbursement_requests set status='paid',paid_at=now() where id=any($1::uuid[])", [reimbursementIds]);
     await client.query("commit");
     await audit(req.authUser.id, "create_payout", "payout", payout.rows[0].id, { earningIds, amount });
-    res.status(201).json({ id: payout.rows[0].id, employeeId: payout.rows[0].employee_id, employeeName: rows.rows[0].employee_name, amount, paidAt: payout.rows[0].paid_at.toISOString(), earningIds });
+    res.status(201).json({ id: payout.rows[0].id, employeeId: payout.rows[0].employee_id, employeeName: recipient.employee_name, amount, paidAt: payout.rows[0].paid_at.toISOString(), earningIds });
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     next(error);
   } finally {
+    await client.query("rollback").catch(() => undefined);
     client.release();
   }
 });
@@ -2513,14 +2534,15 @@ app.post("/api/owner/payroll", requireDatabase, requireOwner, async (req, res, n
     await client.query(`select id from jobs where date <= $1 and status='completed' and
       (exists(select 1 from sales_credits where job_id=jobs.id and status='approved') or
        exists(select 1 from earning_submissions where job_id=jobs.id and status='approved')) order by id for update`, [periodEnd]);
+    await client.query("select id from reimbursement_requests where status='approved' and expense_date <= $1 order by id for update", [periodEnd]);
     const eligible = await eligiblePayrollLines(client, periodEnd);
     if (!eligible.lines.length && req.body.allowEmpty !== true) { await client.query("rollback"); return res.status(400).json({ error: "No unpaid completed-job earnings are available for this period." }); }
     const run = await client.query("insert into payroll_runs (period_start, period_end, payday, created_by) values ($1, $2, $3, $4) returning id", [periodStart, periodEnd, payday, req.authUser.id]);
     for (const line of eligible.lines) {
       await client.query(
-        `insert into payroll_run_lines (payroll_run_id, employee_id, job_id, earning_submission_id, source_key, line_type, description, customer_name, work_date, amount, sales_credit_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [run.rows[0].id, line.employeeId, line.jobId, line.earningSubmissionId, line.sourceKey, line.lineType, line.description, line.customerName, line.workDate, line.amount, line.salesCreditId ?? null],
+        `insert into payroll_run_lines (payroll_run_id, employee_id, job_id, earning_submission_id, source_key, line_type, description, customer_name, work_date, amount, sales_credit_id, reimbursement_request_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [run.rows[0].id, line.employeeId, line.jobId, line.earningSubmissionId, line.sourceKey, line.lineType, line.description, line.customerName, line.workDate, line.amount, line.salesCreditId ?? null, line.reimbursementRequestId ?? null],
       );
     }
     await client.query("commit");
@@ -2604,6 +2626,8 @@ app.post("/api/owner/payroll/:id/payments", requireDatabase, requireOwner, async
     if (totals.netPay < 0 || (!run.lines.some((line) => line.employeeId === employeeId) && !run.adjustments.some((item) => item.employeeId === employeeId))) return res.status(400).json({ error: "Employee is not included in this payroll." });
     await client.query("insert into payroll_payments (payroll_run_id, employee_id, amount, payment_method, reference, note, paid_at, recorded_by) values ($1,$2,$3,$4,$5,$6,$7,$8)", [req.params.id, employeeId, totals.netPay, paymentMethod, String(reference).trim(), String(note).trim(), paidAt, req.authUser.id]);
     const earningIds = run.lines.filter((line) => line.employeeId === employeeId).map((line) => line.jobId).filter(Boolean);
+    const reimbursementIds = run.lines.filter((line) => line.employeeId === employeeId && line.reimbursementRequestId).map((line) => line.reimbursementRequestId);
+    if (reimbursementIds.length) await client.query("update reimbursement_requests set status='paid',paid_at=$2 where employee_id=$1 and id=any($3::uuid[]) and status='approved'", [employeeId,paidAt,reimbursementIds]);
     if (earningIds.length) await client.query("update earning_submissions set status = 'paid', paid_at = $2, updated_at = now() where employee_id = $1 and job_id = any($3::text[]) and status = 'approved'", [employeeId, paidAt, earningIds]);
     if (earningIds.length) {
       await client.query("update sales_credits set status = 'paid', paid_at = $2, updated_at = now() where salesman_id = $1 and job_id = any($3::text[]) and status = 'approved'", [employeeId, paidAt, earningIds]);
@@ -2642,6 +2666,7 @@ app.get("/api/employee/payroll", requireDatabase, allowEmployeeOrOwner, async (r
 });
 
 installSalesRoutes(app, { pool, requireDatabase, requireOwner, runSheetAction, syncUrl, toJob, toCustomer, toLead, toSolicitation, audit, sendPushToRole, sendPushToUsers, refreshSheetsIfStale, loadPayrollRuns });
+installReimbursementRoutes(app, { pool, requireDatabase, allowEmployeeOrOwner, requireOwner, employeeSubject, audit, sendPushToRole, sendPushToUsers });
 
 app.use(express.static(distPath));
 app.get(/.*/, (_req, res) => {
@@ -2698,6 +2723,7 @@ async function sendTuesdayContractorPayReminder(now = new Date()) {
 async function startServer() {
   await ensureMapSchema();
   await ensureSalesSchema(pool);
+  await ensureReimbursementSchema(pool);
   app.listen(port, "0.0.0.0", () => {
     console.log(`The Powerwashing Pros dashboard listening on ${port}`);
   });

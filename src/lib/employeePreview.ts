@@ -13,13 +13,13 @@ export function createEmployeePreview(today: string): EmployeeWorkspaceSnapshot 
 
 export async function previewEarnings(input: Parameters<typeof submitEmployeeEarnings>[0]): Promise<EarningSubmission> {
   const upsellAmount = input.hasUpsell && input.upsellOutcome === "accepted" ? input.upsellQuotedAmount ?? 0 : 0;
-  const gasCost = input.gasCost ?? 0;
+  const gasCost = input.reimbursementItems?.reduce((sum,item) => sum + item.cost,0) ?? input.gasCost ?? 0;
   const tipEarnings = input.tipAmount;
   const contractEarnings = input.contractSubmissionId ? 25 : 0;
   const upsellEarnings = upsellAmount * 0.3;
   return {
     id: "preview-earning", jobId: "preview-job", employeeId: "preview-employee", employeeName: "Sample Employee", customerName: "Sample Customer (practice)",
-    jobDate: new Date().toLocaleDateString("en-CA"), originalJobPrice: 250, tipAmount: input.tipAmount, gasCost, upsellAmount,
+    jobDate: new Date().toLocaleDateString("en-CA"), originalJobPrice: 250, tipAmount: input.tipAmount, gasCost, reimbursementItems: input.reimbursementItems ?? (gasCost ? [{ name:"Gas",cost:gasCost }] : []), upsellAmount,
     upsellDescription: input.hasUpsell ? input.upsellDescription ?? "" : "", upsellOutcome: input.hasUpsell ? input.upsellOutcome ?? "" : "",
     upsellQuotedAmount: input.hasUpsell ? input.upsellQuotedAmount ?? 0 : 0, upsellNotes: input.hasUpsell ? input.upsellNotes ?? "" : "",
     contractSold: Boolean(input.contractSubmissionId), contractSubmissionId: input.contractSubmissionId, status: "pending", ownerNote: "",

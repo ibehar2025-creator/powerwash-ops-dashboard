@@ -257,7 +257,7 @@ create table if not exists payroll_run_lines (
   job_id text references jobs(id) on delete restrict,
   earning_submission_id uuid references earning_submissions(id) on delete set null,
   source_key text not null unique,
-  line_type text not null check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement')),
+  line_type text not null check (line_type in ('commission', 'upsell', 'contract_bonus', 'tip', 'gas_reimbursement', 'sales_commission', 'reimbursement')),
   description text not null,
   customer_name text not null default '',
   work_date date not null,

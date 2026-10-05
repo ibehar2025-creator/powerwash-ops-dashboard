@@ -90,6 +90,7 @@ export interface EarningSubmission {
   jobDate: string;
   originalJobPrice: number;
   gasCost: number;
+  reimbursementItems?: ReimbursementItem[];
   tipAmount: number;
   upsellAmount: number;
   upsellDescription: string;
@@ -106,6 +107,22 @@ export interface EarningSubmission {
   tipEarnings: number;
   totalEarnings: number;
   submittedAt: string;
+  reviewedAt?: string;
+  paidAt?: string;
+}
+
+export interface ReimbursementItem { name: string; cost: number }
+export interface ReimbursementRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  expenseDate: string;
+  items: ReimbursementItem[];
+  amount: number;
+  notes: string;
+  status: "pending" | "approved" | "rejected" | "paid";
+  ownerNote: string;
+  createdAt: string;
   reviewedAt?: string;
   paidAt?: string;
 }
@@ -145,13 +162,14 @@ export interface PayoutSummary {
 }
 
 export type PayrollStatus = "draft" | "finalized" | "paid";
-export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip" | "gas_reimbursement" | "sales_commission";
+export type PayrollLineType = "commission" | "upsell" | "contract_bonus" | "tip" | "gas_reimbursement" | "sales_commission" | "reimbursement";
 
 export interface PayrollLine {
   id: string;
   employeeId: string;
   employeeName: string;
   jobId?: string;
+  reimbursementRequestId?: string;
   lineType: PayrollLineType;
   description: string;
   customerName: string;

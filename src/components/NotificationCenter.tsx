@@ -20,6 +20,7 @@ import { salesRequest } from "../lib/sales";
 import type { OwnerSales } from "../lib/sales";
 import { followUpTiming } from "../lib/followUps";
 import type { ContractSubmission, Customer, EarningSubmission, Job, Lead, ServicePlan } from "../types/business";
+import type { ReimbursementRequest } from "../types/business";
 
 type NotificationTone = "urgent" | "today" | "upcoming";
 type NotificationKind = "lead" | "job" | "plan" | "contract" | "upsell" | "sync" | "issue" | "sales";
@@ -90,6 +91,7 @@ export function NotificationCenter({
   contracts = [],
   onContracts,
   earnings = [],
+  reimbursements = [],
   onTeam,
 }: {
   customers: Customer[];
@@ -106,6 +108,7 @@ export function NotificationCenter({
   contracts?: ContractSubmission[];
   onContracts?: () => void;
   earnings?: EarningSubmission[];
+  reimbursements?: ReimbursementRequest[];
   onTeam?: () => void;
 }) {
   const { user } = useAuth();
@@ -276,6 +279,14 @@ export function NotificationCenter({
       });
     });
 
+    reimbursements.filter(item => item.status === "pending").forEach(item => items.push({
+      id:`reimbursement-${item.id}`,tone:"urgent",kind:"upsell",title:`Reimbursement: ${item.employeeName}`,
+      detail:`${item.items.map(expense => expense.name).join(", ")} · $${item.amount.toFixed(2)}`,
+    }));
+    earnings.filter(item => item.status === "pending" && item.gasCost > 0).forEach(item => items.push({
+      id:`job-reimbursement-${item.id}`,tone:"urgent",kind:"upsell",title:`Job reimbursement: ${item.employeeName}`,
+      detail:`${item.customerName} · $${item.gasCost.toFixed(2)}`,
+    }));
     managerIssues.forEach((issue) => {
       items.push({
         id: `manager-issue-${issue.id}`,
@@ -299,7 +310,7 @@ export function NotificationCenter({
 
     const rank = { urgent: 0, today: 1, upcoming: 2 };
     return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.detail.localeCompare(b.detail));
-  }, [contracts, customerNames, currentDate, earnings, jobs, leads, managerIssues, plans, syncStatus, sales]);
+  }, [contracts, customerNames, currentDate, earnings, jobs, leads, managerIssues, plans, syncStatus, sales, reimbursements]);
 
   const attentionCount = readStateLoaded
     ? notifications.filter((item) => !readNotificationKeys.has(notificationSeenKey(item))).length
