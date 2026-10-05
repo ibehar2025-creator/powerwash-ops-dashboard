@@ -19,7 +19,7 @@ try {
     const user={id:'00000000-0000-4000-8000-000000000001',name:'Test Employee',role:'employee',age:18,phone:'',email:'employee@example.invalid',pictureUrl:''};
     const job={id:'test-job',customerId:'customer',date:today,time:'09:00',address:'123 Test Street',serviceType:'Windows',status:'scheduled',price:250,amountPaid:0,tipAmount:0,paymentStatus:'unpaid',notes:'',employeeInstructions:'',source:'manual',crewIds:[]};
     const data={employee:{...user,active:true,baseCommissionPct:.22,upsellCommissionPct:.3,contractBonusPct:.1,tipSharePct:1},preview:false,jobs:[job],customers:[{id:'customer',name:'Test Customer',phone:'',email:'',address:job.address,notes:'',insights:[]}],assignments:[{jobId:job.id,employeeId:user.id,employeeName:user.name,originalJobPrice:250,baseCommissionPct:.22,upsellCommissionPct:.3,contractBonusPct:.1,tipSharePct:1}],earnings:[],contracts:[],solicitations:[],payouts:[],reimbursements:[]};
-    let role='employee',requestAttempts=0,firstAttempt;
+    let role='employee',requestAttempts=0,firstAttempt,paymentRun;
     await page.route('**/api/**',async route=>{
       const path=new URL(route.request().url()).pathname,method=route.request().method();let result={};
       if(path==='/api/auth/config')result={enabled:true,clientId:'test',state:'test',signupCodeRequired:true};
@@ -41,6 +41,14 @@ try {
       if(path==='/api/owner/operations')result={employees:[data.employee],assignments:[],earnings:data.earnings,contracts:[],payouts:[],reimbursements:data.reimbursements};
       if(path==='/api/owner/sales')result={salesmen:[],commissions:[],notifications:[]};
       if(path==='/api/owner/issues')result={issues:[]};
+      if(path==='/api/owner/payroll') {
+        const eligibleLines=data.reimbursements.filter(item=>item.status==='approved').map(item=>({id:'request-line',employeeId:user.id,employeeName:user.name,amount:item.amount,lineType:'reimbursement',workDate:item.expenseDate,customerName:'',description:'Insurance: $75.00'}));
+        const preview={periodStart:'2026-10-05',periodEnd:'2026-10-11',payday:'2026-10-13',eligibleLines,missingApprovals:0};
+        if(method==='POST'){paymentRun={id:'test-run',...preview,status:'draft',lines:eligibleLines,adjustments:[],payments:[],grossEarnings:75,totalAdditions:0,totalDeductions:0,netPay:75};result=paymentRun;}
+        else result={preview,runs:paymentRun?[paymentRun]:[]};
+      }
+      if(path==='/api/owner/payroll/test-run/finalize'){paymentRun.status='finalized';result=paymentRun;}
+      if(path==='/api/owner/payroll/test-run/payments'){assert.equal(route.request().postDataJSON().employeeId,user.id);data.reimbursements[0].status='paid';paymentRun.status='paid';paymentRun.payments=[{employeeId:user.id,amount:75}];result=paymentRun;}
       if(path.endsWith('/review')&&path.includes('/reimbursements/')){assert.equal(route.request().postDataJSON().decision,'approved');data.reimbursements[0].status='approved';result=data.reimbursements[0];}
       if(path==='/api/owner/payouts') {assert.deepEqual(route.request().postDataJSON(),{earningIds:[],reimbursementIds:[data.reimbursements[0].id]});data.reimbursements[0].status='paid';result={id:'payout',employeeId:user.id,employeeName:user.name,amount:75,paidAt:new Date().toISOString(),earningIds:[]};}
       await route.fulfill({json:result});
@@ -73,13 +81,16 @@ try {
     await page.getByRole('button',{name:'Submit reimbursement',exact:true}).click();await page.getByRole('alert').waitFor();await page.getByRole('button',{name:'Retry reimbursement',exact:true}).click();await standalone.waitFor({state:'detached'});
     assert.ok((await page.locator('main').innerText()).includes('$150'));
     role='owner';await page.reload();
-    if(viewport.width<1024)await page.getByRole('button',{name:'Open navigation',exact:true}).click();
-    await page.getByRole('button',{name:'Team',exact:true}).click();
+    await page.getByRole('button',{name:'Open notifications',exact:true}).click();
+    await page.getByRole('button',{name:/^Reimbursement: Test Employee/}).click();
+    assert.equal(await page.getByRole('tab',{name:/^Review/}).getAttribute('aria-selected'),'true');
     await page.getByRole('heading',{name:'Not tied to a job · 1 pending',exact:true}).waitFor();
     await page.screenshot({path:`artifacts/owner-reimbursement-review-${viewport.width}.png`,fullPage:true});
     const requestCard=page.locator('article').filter({hasText:'Monthly coverage'});await requestCard.getByRole('button',{name:'Approve',exact:true}).click();
-    await page.getByRole('button',{name:'Mark reimbursement paid',exact:true}).click();
-    await page.getByRole('heading',{name:'Approved reimbursements · $0.00',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Mark reimbursement paid',exact:true}).count(),0);
+    await page.getByRole('tab',{name:'Payments',exact:true}).click();await page.getByRole('heading',{name:'Weekly contractor payments'}).waitFor();
+    await page.getByText('View earnings included',{exact:true}).click();await page.getByText('Insurance: $75.00',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Confirm weekly amounts',exact:true}).click();await page.getByRole('button',{name:'Mark paid',exact:true}).click();await page.getByText('Payment marked as paid.',{exact:true}).waitFor();
     role='employee';await page.reload();await page.getByRole('button',{name:'Notifications',exact:true}).click();await page.getByText('Reimbursement paid',{exact:true}).waitFor();
     role='owner';await page.reload();await page.getByRole('button',{name:'Open profile menu',exact:true}).click();await page.getByRole('button',{name:'Employee preview',exact:true}).click();
     await page.getByRole('button',{name:'Request reimbursement',exact:true}).click();await page.getByLabel('Reimbursement item 1',{exact:true}).fill('Practice supplies');await page.getByLabel('Reimbursement cost 1',{exact:true}).fill('10');

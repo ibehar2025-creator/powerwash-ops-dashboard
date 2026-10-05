@@ -15,6 +15,10 @@ export const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
+export const payoutCurrency = new Intl.NumberFormat("en-US", {
+  style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2,
+});
+
 export function amountOwed(invoice: Invoice) {
   return Math.max(invoice.price - invoice.discount + invoice.tip - invoice.amountPaid, 0);
 }

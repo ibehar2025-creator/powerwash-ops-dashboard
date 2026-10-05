@@ -127,7 +127,7 @@ try{
   await ownerPage.getByRole('button',{name:'Return to owner'}).click();await ownerPage.getByRole('heading',{name:'Performance snapshot'}).waitFor();
   console.log(`Owner salesman preview: ${viewport.width}px passed (owner-only menu, safe areas, read-only real history, practice booking/editing/leads/notifications without writes, draft isolation, reset)`);
   if(mobile)await ownerPage.getByRole('button',{name:'Open navigation',exact:true}).click();
-  await ownerPage.getByRole('button',{name:'Contractor Pay',exact:true}).click();await ownerPage.getByRole('heading',{name:'Weekly contractor payments'}).waitFor();
+  await ownerPage.getByRole('button',{name:'Team & Pay',exact:true}).click();await ownerPage.getByRole('tab',{name:'Payments',exact:true}).click();await ownerPage.getByRole('heading',{name:'Weekly contractor payments'}).waitFor();
   await ownerPage.getByRole('button',{name:'Payroll correction',exact:true}).click();await ownerPage.getByLabel('Contractor',{exact:true}).selectOption(person.id);await ownerPage.getByLabel('Amount',{exact:true}).fill('10');await ownerPage.getByLabel('Reason',{exact:true}).fill('Corrected sales commission after payment');
   await ownerPage.getByRole('button',{name:'Save correction',exact:true}).click();await ownerPage.getByText('Payroll adjustments',{exact:true}).waitFor();assert.equal(await ownerPage.getByLabel('Payment week',{exact:true}).inputValue(),'correction-run');
   await ownerPage.getByRole('button',{name:'Confirm weekly amounts',exact:true}).click();await ownerPage.getByRole('button',{name:'Mark paid',exact:true}).click();await ownerPage.getByText('Payment marked as paid.',{exact:true}).waitFor();

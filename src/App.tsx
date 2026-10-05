@@ -24,7 +24,6 @@ import {
   Trash2,
   UserRoundCog,
   X,
-  WalletCards,
 } from "lucide-react";
 import { useAuth } from "./lib/authContext";
 import { loadThemePreference, saveThemePreference, themeIsDark } from "./lib/themePreference";
@@ -32,11 +31,10 @@ import { JobsSpreadsheet } from "./components/JobsSpreadsheet";
 import { ProfileMenu } from "./components/ProfileMenu";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { EmployeeWorkspace } from "./components/EmployeeWorkspace";
-import { OwnerReimbursements } from "./components/Reimbursements";
 import { SalesmanWorkspace } from "./components/SalesmanWorkspace";
-import { OwnerSalesPanel } from "./components/OwnerSalesPanel";
-import { OwnerContractsView, OwnerTeamView } from "./components/OwnerOperations";
-import { PayrollCenter } from "./components/PayrollCenter";
+import { OwnerContractsView } from "./components/OwnerOperations";
+import { TeamPayWorkspace } from "./components/TeamPayWorkspace";
+import type { TeamPaySection } from "./components/TeamPayWorkspace";
 import { CreateRecordModal, CustomerEditorModal, CustomerProfile, GlobalSearch } from "./components/OperationsUi";
 import type { CreateKind } from "./components/OperationsUi";
 import {
@@ -68,8 +66,7 @@ const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean 
   { id: "map", label: "Map", icon: MapPinned },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "plans", label: "Service Plans", icon: ClipboardList },
-  { id: "team", label: "Team", icon: UserRoundCog },
-  { id: "payroll", label: "Contractor Pay", icon: WalletCards },
+  { id: "team", label: "Team & Pay", icon: UserRoundCog },
   { id: "contracts", label: "Contracts", icon: FileSignature },
 ];
 
@@ -257,6 +254,7 @@ export default function App() {
 function OwnerDashboard({ onPreviewEmployee, onPreviewSalesman }: { onPreviewEmployee: () => void; onPreviewSalesman: () => void }) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const [teamPaySection, setTeamPaySection] = useState<TeamPaySection>("people");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -542,6 +540,7 @@ function OwnerDashboard({ onPreviewEmployee, onPreviewSalesman }: { onPreviewEmp
   }, []);
 
   function chooseTab(tabId: TabId) {
+    if (tabId === "payroll") { setTeamPaySection("payments"); tabId = "team"; }
     if (tabId === "calendar" && !calendarSkeletonShown.current) {
       calendarSkeletonShown.current = true;
       setShowCalendarSkeleton(true);
@@ -580,7 +579,7 @@ function OwnerDashboard({ onPreviewEmployee, onPreviewSalesman }: { onPreviewEmp
                 <button className="icon-button shrink-0 lg:hidden" onClick={() => setMobileMenuOpen(true)} title="Open navigation" aria-label="Open navigation"><Menu size={18} /></button>
                 <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-wide text-lagoon dark:text-cyan-300 sm:text-xs">{fullDateFormatter.format(dateFromIso(currentDate))}</p><h1 className="break-words text-lg font-bold leading-9 text-ink dark:text-white sm:text-2xl">{activeLabel}</h1></div>
               </div>
-              <div className="owner-header-actions flex shrink-0 items-center gap-1 sm:gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 xl:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} reimbursements={ownerOperations.reimbursements} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => chooseTab("team")} onSync={() => void syncSheets()} /><button className="icon-button shrink-0" title={syncing ? "Syncing sheets" : "Sync sheets"} aria-label={syncing ? "Syncing sheets" : "Sync sheets"} disabled={syncing} onClick={() => void syncSheets()}><RefreshCw size={18} className={syncing ? "animate-spin" : ""} /></button><ProfileMenu onPreviewEmployee={onPreviewEmployee} onPreviewSalesman={onPreviewSalesman} compact theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
+              <div className="owner-header-actions flex shrink-0 items-center gap-1 sm:gap-2"><span className="hidden rounded-lg bg-mist px-3 py-2 text-sm font-semibold text-lagoon dark:bg-cyan-500/15 dark:text-cyan-200 xl:inline-flex">{currency.format(metrics.dailyRevenue)} job value today</span><NotificationCenter customers={customers} leads={leads} jobs={jobs} plans={plans} contracts={ownerOperations.contracts} earnings={ownerOperations.earnings} reimbursements={ownerOperations.reimbursements} currentDate={currentDate} syncStatus={syncStatus} syncing={syncing} onLead={setSelectedLead} onJob={setSelectedJob} onPlans={() => chooseTab("plans")} onContracts={() => chooseTab("contracts")} onTeam={() => { setTeamPaySection("review"); chooseTab("team"); }} onSync={() => void syncSheets()} /><button className="icon-button shrink-0" title={syncing ? "Syncing sheets" : "Sync sheets"} aria-label={syncing ? "Syncing sheets" : "Sync sheets"} disabled={syncing} onClick={() => void syncSheets()}><RefreshCw size={18} className={syncing ? "animate-spin" : ""} /></button><ProfileMenu onPreviewEmployee={onPreviewEmployee} onPreviewSalesman={onPreviewSalesman} compact theme={themePreference} onTheme={setThemePreference} onOwnerNavigate={chooseTab} /></div>
             </div>
             <p className="mt-2 break-words text-xs text-slate-500 dark:text-slate-400">{syncStatus}</p>
           </header>
@@ -606,8 +605,8 @@ function OwnerDashboard({ onPreviewEmployee, onPreviewSalesman }: { onPreviewEmp
             {activeTab === "map" && <Suspense fallback={<TabLoader label="map" />}><BusinessMap customers={customers} jobs={jobs} solicitations={solicitations} jobFocusRequest={mapJobFocus} onSaveJobCoordinates={saveMapJobCoordinates} onCreateSolicitation={addSolicitation} onUpdateSolicitation={updateSolicitation} onDeleteSolicitation={removeSolicitation} /></Suspense>}
             {activeTab === "analytics" && <Suspense fallback={<TabLoader label="analytics" />}><Analytics customers={customers} jobs={jobs} leads={leads} invoices={invoices} plans={plans} expenses={savedExpenses} currentDate={currentDate} /></Suspense>}
             {activeTab === "plans" && <Plans customers={customers} plans={plans} onPlanCreate={addPlan} onPlanUpdate={updatePlan} />}
-            {activeTab === "team" && <><OwnerSalesPanel /><OwnerReimbursements requests={ownerOperations.reimbursements} earnings={ownerOperations.earnings} onRefresh={refreshOwnerOperations} /><OwnerTeamView operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map((customer) => [customer.id, customer.name]))} onRefresh={refreshOwnerOperations} /></>}
-            {activeTab === "payroll" && <PayrollCenter employees={ownerOperations.employees} />}
+            {activeTab === "team" && <TeamPayWorkspace operations={ownerOperations} jobs={jobs} customerNames={new Map(customers.map(customer => [customer.id, customer.name]))} section={teamPaySection} onSection={setTeamPaySection} onRefresh={refreshOwnerOperations} />}
+
             {activeTab === "contracts" && <OwnerContractsView operations={ownerOperations} onRefresh={async () => { await refreshOwnerOperations(); const snapshot = await loadDatabaseSnapshot(); if (snapshot?.servicePlans) setPlans(normalizePlans(snapshot.servicePlans)); }} />}
           </div>
         </main>

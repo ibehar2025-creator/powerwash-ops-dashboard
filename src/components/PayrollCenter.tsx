@@ -4,7 +4,7 @@ import { addPayrollAdjustment, createPayrollRun, finalizePayrollRun, loadOwnerPa
 import { salesRequest } from "../lib/sales";
 import type { OwnerSales } from "../lib/sales";
 import type { OwnerPayrollSnapshot } from "../lib/api";
-import { currency, isoToday } from "../lib/calculations";
+import { payoutCurrency as currency, isoToday } from "../lib/calculations";
 import type { EmployeeProfile, PayrollAdjustment, PayrollLine, PayrollRun } from "../types/business";
 
 type ContractorTotal = { employeeId: string; employeeName: string; lines: PayrollLine[]; total: number };
@@ -29,7 +29,7 @@ function displayDate(value: string) {
   return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
+export function PayrollCenter({ employees, onChanged }: { employees: EmployeeProfile[]; onChanged?: () => Promise<void> }) {
   const [snapshot, setSnapshot] = useState<OwnerPayrollSnapshot>();
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
@@ -75,7 +75,7 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
       if (!updated) throw new Error("Unable to save correction.");
       setSelectedRunId(updated.id);
       setMessage(`Correction added to the week of ${displayDate(updated.periodStart)}. Confirm that week's amounts before recording payment.`);
-      setCorrectionOpen(false);setCorrectionAmount("");setCorrectionReason("");await reload();
+      setCorrectionOpen(false);setCorrectionAmount("");setCorrectionReason("");await reload();await onChanged?.();
     } catch(nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to save correction."); }
     finally { setWorking(""); }
   }
@@ -97,6 +97,7 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
       if (!ready) throw new Error("The weekly payment list could not be confirmed.");
       setMessage(`Amounts confirmed. Pay contractors by ${displayDate(ready.payday)}.`);
       await reload();
+      await onChanged?.();
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to confirm this week."); }
     finally { setWorking(""); }
   }
@@ -109,13 +110,14 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
       if (!updated) throw new Error("The payment could not be recorded.");
       setMessage("Payment marked as paid.");
       await reload();
+      await onChanged?.();
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to mark the payment paid."); }
     finally { setWorking(""); }
   }
 
   if (loading) return <div className="grid min-h-[360px] place-items-center text-sm font-semibold text-slate-500"><span className="text-center"><RefreshCw className="mx-auto mb-3 animate-spin" />Loading contractor payments...</span></div>;
   return <div className="mx-auto max-w-5xl space-y-5">
-    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-lagoon">Owner only</p><h2 className="text-2xl font-bold text-ink dark:text-white">Weekly contractor payments</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Approved job earnings automatically build this week’s 1099 contractor total.</p></div><button className="text-button gap-2" disabled={Boolean(working)} onClick={() => void reload(true)}><RefreshCw size={15} />Refresh totals</button></header>
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-xl font-bold text-ink dark:text-white">Weekly contractor payments</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Approved earnings and reimbursements.</p></div><button className="text-button gap-2" disabled={Boolean(working)} onClick={() => void reload(true)}><RefreshCw size={15} />Refresh totals</button></header>
     {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">{error}</p>}
     {message && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">{message}</p>}
     <div><button className="text-button gap-2" disabled={Boolean(working)} onClick={() => setCorrectionOpen(!correctionOpen)}><Plus size={16} />Payroll correction</button>{correctionOpen && <form className="settings-grid mt-4 rounded-lg border border-slate-200 p-4 dark:border-slate-700" onSubmit={event => {event.preventDefault();void addCorrection();}}>
@@ -126,18 +128,18 @@ export function PayrollCenter({ employees }: { employees: EmployeeProfile[] }) {
       <button className="primary-button gap-2 sm:col-span-2" disabled={Boolean(working)}><Save size={16}/>{working==="correction"?"Saving...":"Save correction"}</button>
     </form>}</div>
     <label className="block max-w-md text-sm font-semibold">Payment week<select aria-label="Payment week" className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 text-base dark:border-slate-700 dark:bg-slate-900" value={selectedRunId} onChange={event => setSelectedRunId(event.target.value)}><option value="">Current payment week</option>{snapshot?.runs.map(run => <option key={run.id} value={run.id}>{displayDate(run.periodStart)} - {run.status}</option>)}</select></label>
-    {preview && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="bg-gradient-to-r from-lagoon to-cyan-600 p-5 text-white sm:p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-100">Week of {displayDate(preview.periodStart)}</p><p className="mt-2 text-4xl font-bold">{currency.format(weeklyTotal)}</p><p className="mt-1 text-sm text-cyan-50">{totals.length} contractor{totals.length === 1 ? "" : "s"} · through {displayDate(preview.periodEnd)}</p></div><div className="rounded-xl bg-white/15 px-4 py-3 backdrop-blur"><div className="flex items-center gap-2 text-cyan-50"><CalendarClock size={19} /><span className="text-xs font-bold uppercase tracking-wide">Pay by</span></div><p className="mt-1 text-xl font-bold">{displayDate(preview.payday)}</p></div></div></div>
+    {preview && <section className="min-w-0 border-y border-slate-200 dark:border-slate-800">
+      <div className="grid gap-4 border-b border-slate-200 py-5 dark:border-slate-800 sm:grid-cols-[minmax(0,1fr)_auto]"><div className="min-w-0"><p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Week of {displayDate(preview.periodStart)}</p><p className="mt-1 break-all text-3xl font-bold text-ink dark:text-white">{currency.format(weeklyTotal)}</p><p className="mt-1 text-sm text-slate-500">{totals.length} contractor{totals.length === 1 ? "" : "s"} · through {displayDate(preview.periodEnd)}</p></div><div className="flex items-center gap-3"><CalendarClock size={20} className="shrink-0 text-lagoon" /><div><p className="text-xs font-semibold text-slate-500">Pay by</p><p className="mt-1 font-bold">{displayDate(preview.payday)}</p></div></div></div>
       <div className="p-4 sm:p-6"><div className="space-y-3">{totals.map((person) => {
         const paid = paidIds.has(person.employeeId);
         const name = employees.find((item) => item.id === person.employeeId)?.name ?? person.employeeName;
         const jobCount = person.lines.filter((line) => line.lineType === "commission" || line.lineType === "sales_commission").length;
         return <article key={person.employeeId} className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-ink dark:text-white">{name}</h3><p className="mt-1 text-sm text-slate-500">{jobCount ? `${jobCount} approved job${jobCount === 1 ? "" : "s"} plus approved extras and adjustments` : "Payroll adjustments"}</p></div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className="text-xl text-ink dark:text-white">{currency.format(person.total)}</strong>{paid ? <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"><Check size={14} />Paid</span> : currentRun?.status === "finalized" ? <button className="primary-button" disabled={Boolean(working)} onClick={() => void markPaid(person.employeeId)}>{working === person.employeeId ? "Saving..." : "Mark paid"}</button> : null}</div></div>
-          <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-lagoon">View earnings included</summary><div className="mt-2 space-y-2">{person.lines.map((line) => <div key={line.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span>{displayDate(line.workDate)} · {line.customerName} · {line.lineType.replaceAll("_", " ")}</span><strong>{currency.format(line.amount)}</strong></div>)}{currentRun?.adjustments.filter(item => item.employeeId === person.employeeId).map(item => <div key={item.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span className="break-words">{item.description}</span><strong className="shrink-0">{item.adjustmentType === "deduction" ? "-" : "+"}{currency.format(item.amount)}</strong></div>)}</div></details>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-ink dark:text-white">{name}</h3><p className="mt-1 text-sm text-slate-500">{jobCount ? `${jobCount} approved job${jobCount === 1 ? "" : "s"} plus approved extras and adjustments` : person.lines.some(line => line.lineType.endsWith("reimbursement")) ? "Approved reimbursements" : "Payroll adjustments"}</p></div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong className="text-xl text-ink dark:text-white">{currency.format(person.total)}</strong>{paid ? <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"><Check size={14} />Paid</span> : currentRun?.status === "finalized" ? <button className="primary-button" disabled={Boolean(working)} onClick={() => void markPaid(person.employeeId)}>{working === person.employeeId ? "Saving..." : "Mark paid"}</button> : null}</div></div>
+          <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-lagoon">View earnings included</summary><div className="mt-2 space-y-2">{person.lines.map((line) => <div key={line.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span className="min-w-0 break-words">{displayDate(line.workDate)}{line.customerName ? ` · ${line.customerName}` : ""} · {line.lineType.replaceAll("_", " ")}{line.lineType.endsWith("reimbursement") && line.description && <span className="mt-1 block text-slate-500 dark:text-slate-400">{line.description}</span>}</span><strong className="shrink-0">{currency.format(line.amount)}</strong></div>)}{currentRun?.adjustments.filter(item => item.employeeId === person.employeeId).map(item => <div key={item.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800"><span className="break-words">{item.description}</span><strong className="shrink-0">{item.adjustmentType === "deduction" ? "-" : "+"}{currency.format(item.amount)}</strong></div>)}</div></details>
         </article>;
       })}</div>
-        {!totals.length && <div className="py-10 text-center"><WalletCards className="mx-auto text-slate-300" size={34} /><p className="mt-3 font-semibold text-ink dark:text-white">No approved earnings yet</p><p className="mt-1 text-sm text-slate-500">Approve completed-job earnings in Team and they will appear here automatically.</p></div>}
+        {!totals.length && <div className="py-10 text-center"><WalletCards className="mx-auto text-slate-300" size={34} /><p className="mt-3 font-semibold text-ink dark:text-white">No approved earnings yet</p><p className="mt-1 text-sm text-slate-500">No approved earnings or reimbursements for this payment week.</p></div>}
         {totals.length > 0 && (!currentRun || currentRun.status === "draft") && <button className="primary-button mt-5 w-full gap-2" disabled={Boolean(working)} onClick={() => void prepareWeek()}><CheckCircle2 size={17} />{working === "prepare" ? "Confirming..." : "Confirm weekly amounts"}</button>}
         {!selectedRunId && Boolean(defaultPreview?.missingApprovals) && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{defaultPreview?.missingApprovals} completed-job submission{defaultPreview?.missingApprovals === 1 ? " is" : "s are"} still waiting for approval and not included yet.</p>}
       </div>
