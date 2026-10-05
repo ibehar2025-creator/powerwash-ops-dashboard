@@ -76,7 +76,9 @@ try {
     await page.getByRole('tab',{name:'Review',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),0);
     await page.getByRole('tab',{name:'People',exact:true}).click();await page.getByRole('button',{name:'Refresh team and pay'}).click();
     await page.waitForFunction(()=>!document.querySelector('button[aria-label="Refresh team and pay"]').disabled);
-    await page.evaluate(()=>{document.documentElement.classList.remove('dark');document.body.style.background='#f1f5f9';});await page.screenshot({path:`artifacts/team-pay-people-light-${viewport.width}.png`,fullPage:true});assert.deepEqual(errors,[]);
+    await page.evaluate(()=>{document.documentElement.classList.remove('dark');document.body.style.background='#f1f5f9';});
+    await page.waitForFunction(()=>getComputedStyle(document.querySelector('.text-button')).color==='rgb(71, 85, 105)');
+    await page.screenshot({path:`artifacts/team-pay-people-light-${viewport.width}.png`,fullPage:true});assert.deepEqual(errors,[]);
     console.log(`Team & Pay ${viewport.width}: accounts, activation, assignments, per-job rates, keyboard tabs, three approvals, itemized reimbursements, two payouts, refreshed summaries, no overflow passed`);await context.close();
   }
 } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
