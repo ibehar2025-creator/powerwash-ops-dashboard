@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 export async function ensureSalesSchema(pool) {
   if (pool) await pool.query(await readFile(new URL('./sales-schema.sql', import.meta.url), 'utf8'));
 }
-export const commissionAmount = (price, appliedUpsell = 0, canceled = false) => canceled ? 0 : Math.round(Math.max(0, Number(price) - Number(appliedUpsell)) * 20) / 100;
+export const commissionAmount = (price, appliedUpsell = 0, canceled = false, rate = 0.20) => canceled ? 0 : Math.round(Math.max(0, Number(price) - Number(appliedUpsell)) * Number(rate) * 100) / 100;
 export const priceAfterUpsell = (currentPrice, applied, upsell) => Math.round((Number(currentPrice) - Number(applied) + Number(upsell)) * 100) / 100;
 export function salesmanOnly(req, res, next) {
   if (req.authUser?.role !== 'salesman') return res.status(403).json({ error: 'Salesman access required.' });
@@ -34,7 +34,7 @@ export async function salesPayrollLines(db, periodEnd) {
   const missing = await db.query(`select count(*)::int as count from sales_credits sc join jobs j on j.id=sc.job_id where j.status='completed' and j.date <= $1 and sc.status='pending'`, [periodEnd]);
   return { missingApprovals:missing.rows[0].count, lines:rows.rows.filter(row=>Number(row.amount)>0).map(row=>({
     id:`${row.job_id}:sales_commission`,sourceKey:`${row.job_id}:sales_commission`,salesCreditId:row.id,employeeId:row.salesman_id,employeeName:row.salesman_name,
-    jobId:row.job_id,earningSubmissionId:null,lineType:'sales_commission',description:'Sales commission (20%)',customerName:row.customer_name,
+    jobId:row.job_id,earningSubmissionId:null,lineType:'sales_commission',description:`Sales commission (${Math.round(Number(row.rate)*10000)/100}%)`,customerName:row.customer_name,
     workDate:row.date?.toISOString?.().slice(0,10) ?? row.date,amount:Number(row.amount) })) };
 }
 function bookingInput(body) {
@@ -108,7 +108,9 @@ export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSh
       await client.query(`insert into jobs(id,customer_id,date,time,address,service_type,status,price,payment_status,notes,employee_instructions,source,latitude,longitude,geocoded_address)
         values($1,$2,$3,$4,$5,$6,'scheduled',$7,'unpaid','',$8,'manual',$9,$10,
         case when $9::double precision is not null and $10::double precision is not null then $5 else null end) on conflict(id) do nothing`,[jobId,customerId,data.date,data.time,data.address,data.serviceType,data.price,data.employeeInstructions,data.latitude,data.longitude]);
-      await client.query('insert into sales_credits(job_id,salesman_id) values($1,$2) on conflict(job_id) do nothing',[jobId,id]);
+      await client.query(`insert into sales_credits(job_id,salesman_id,rate)
+        select $1,id,sales_commission_pct from user_accounts where id=$2 and role='salesman'
+        on conflict(job_id) do nothing`,[jobId,id]);
       await client.query('select refresh_sales_credit($1)',[jobId]);
       if(data.leadId)await client.query("update leads set status='won',converted_job_id=$3,updated_at=now() where id=$1 and created_by=$2",[data.leadId,id,jobId]);
       await client.query('update sales_bookings set saved=true,customer_synced=true,job_synced=true where request_id=$1',[requestId]);
@@ -158,15 +160,17 @@ export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSh
     res.json(toLead(result.rows[0]));
   }));
   app.get('/api/owner/sales',requireDatabase,requireOwner,route(async(_req,res)=>{
-    const [people,credits,events]=await Promise.all([pool.query("select id,name,email,picture_url,active from user_accounts where role='salesman' and google_sub not like 'deleted:%' order by name"),pool.query(`${creditQuery} order by j.date desc`),pool.query('select * from sales_notifications where user_id is null order by created_at desc limit 100')]);
-    res.json({salesmen:people.rows.map(row=>({...row,pictureUrl:row.picture_url})),commissions:credits.rows.map(toCredit),notifications:events.rows});
+    const [people,credits,events]=await Promise.all([pool.query("select id,name,email,picture_url,active,sales_commission_pct from user_accounts where role='salesman' and google_sub not like 'deleted:%' order by name"),pool.query(`${creditQuery} order by j.date desc`),pool.query('select * from sales_notifications where user_id is null order by created_at desc limit 100')]);
+    res.json({salesmen:people.rows.map(row=>({...row,pictureUrl:row.picture_url,commissionPct:Number(row.sales_commission_pct)})),commissions:credits.rows.map(toCredit),notifications:events.rows});
   }));
   app.patch('/api/owner/salesmen/:id',requireDatabase,requireOwner,route(async(req,res)=>{
-    if(typeof req.body.active!=='boolean')return res.status(400).json({error:'Choose an active status.'});
-    const result=await pool.query("update user_accounts set active=$2,updated_at=now() where id=$1 and role='salesman' returning id",[req.params.id,req.body.active]);
+    if(!Object.hasOwn(req.body,'active')&&!Object.hasOwn(req.body,'commissionPct'))return res.status(400).json({error:'Choose an active status or commission percentage.'});
+    if(Object.hasOwn(req.body,'active')&&typeof req.body.active!=='boolean')return res.status(400).json({error:'Choose an active status.'});
+    if(Object.hasOwn(req.body,'commissionPct')&&(!Number.isFinite(Number(req.body.commissionPct))||Number(req.body.commissionPct)<0||Number(req.body.commissionPct)>1))return res.status(400).json({error:'Commission percentage must be between 0% and 100%.'});
+    const result=await pool.query("update user_accounts set active=coalesce($2,active),sales_commission_pct=coalesce($3,sales_commission_pct),updated_at=now() where id=$1 and role='salesman' returning id",[req.params.id,req.body.active,req.body.commissionPct]);
     if(!result.rows[0])return res.status(404).json({error:'Salesman not found.'});
-    if(!req.body.active)await pool.query('delete from auth_sessions where user_id=$1',[req.params.id]);
-    await audit(req.authUser.id,'salesman_activation','account',req.params.id,{active:req.body.active});res.json({saved:true});
+    if(req.body.active===false)await pool.query('delete from auth_sessions where user_id=$1',[req.params.id]);
+    await audit(req.authUser.id,'salesman_settings','account',req.params.id,{active:req.body.active,commissionPct:req.body.commissionPct});res.json({saved:true});
   }));
   app.post('/api/owner/sales-commissions/:id/review',requireDatabase,requireOwner,route(async(req,res)=>{
     const client=await pool.connect();

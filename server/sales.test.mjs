@@ -8,6 +8,7 @@ test('20% uses corrected service price, not upsells, tips or gas',()=>{
   assert.equal(commissionAmount(500),100);
   assert.equal(commissionAmount(450,0,true),0);
   assert.equal(commissionAmount(0),0);
+  assert.equal(commissionAmount(450,0,false,0.15),67.5);
 });
 test('worker approval preserves latest price and applies upsell only once',()=>{
   assert.equal(priceAfterUpsell(450,0,100),550);

@@ -9,7 +9,7 @@ export interface SalesCredit {
   workerPending:boolean; payrollLinked:boolean; reviewedAt?:string; paidAt?:string;
 }
 export interface SalesNotification {id:string;title:string;detail:string;job_id?:string;created_at:string}
-export interface SalesmanProfile {id:string;name:string;email:string;active:boolean;pictureUrl:string}
+export interface SalesmanProfile {id:string;name:string;email:string;active:boolean;pictureUrl:string;commissionPct:number}
 export interface SalesWorkspace {
   jobs:Job[]; mapJobs:MapJob[]; customers:Customer[]; mapCustomers:MapCustomer[];
   commissions:SalesCredit[];leads:Lead[];solicitations:Solicitation[];notifications:SalesNotification[];statements:PayrollRun[];syncError?:string;

@@ -1,5 +1,6 @@
 alter table user_accounts drop constraint if exists user_accounts_role_check;
 alter table user_accounts add constraint user_accounts_role_check check (role in ('owner','employee','salesman'));
+alter table user_accounts add column if not exists sales_commission_pct numeric(5,4) not null default 0.20 check (sales_commission_pct between 0 and 1);
 alter table leads add column if not exists created_by uuid references user_accounts(id);
 alter table leads add column if not exists converted_job_id text;
 alter table earning_submissions add column if not exists applied_upsell_amount numeric(12,2) not null default 0;
@@ -30,6 +31,8 @@ create table if not exists sales_credits (
   paid_at timestamptz,
   updated_at timestamptz not null default now()
 );
+alter table sales_credits drop constraint if exists sales_credits_rate_check;
+alter table sales_credits add constraint sales_credits_rate_check check (rate between 0 and 1);
 create table if not exists sales_notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references user_accounts(id),

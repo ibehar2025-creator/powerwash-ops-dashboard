@@ -37,7 +37,7 @@ try{
   await page.screenshot({path:`artifacts/salesman-earnings-${viewport.width}.png`,fullPage:true});assert.deepEqual(errors,[]);await context.close();console.log(`Salesman UI: ${viewport.width}px passed (safe areas, notifications, booking, zero deletion, search, earnings)`);
   const ownerContext=await browser.newContext({viewport,isMobile:mobile,hasTouch:mobile});const ownerPage=await ownerContext.newPage();const ownerErrors=[];const ownerRequests=[];ownerPage.on('pageerror',e=>ownerErrors.push(e.message));
   if(mobile)await ownerPage.route(/\.css$/,async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replaceAll('env(safe-area-inset-top)','59px').replaceAll('env(safe-area-inset-bottom)','34px')});});
-  const person={id:'test-salesman',name:'Test Salesman',email:'sales@example.invalid',active:true,pictureUrl:''};
+  const person={id:'test-salesman',name:'Test Salesman',email:'sales@example.invalid',active:true,pictureUrl:'',commissionPct:0.20};
   const paidWeek={id:'old-run',periodStart:'2026-09-28',periodEnd:'2026-10-04',payday:'2026-10-06',status:'paid',lines:[],adjustments:[],payments:[],grossEarnings:0,totalAdditions:0,totalDeductions:0,netPay:0,createdAt:'2026-10-03'};
   const payroll={preview:{periodStart:paidWeek.periodStart,periodEnd:paidWeek.periodEnd,payday:paidWeek.payday,eligibleLines:[],missingApprovals:0},runs:[paidWeek]};
   await ownerPage.route('**/api/**',async route=>{
@@ -48,6 +48,7 @@ try{
     if(path==='/api/bootstrap'||path==='/api/sync-sheets')result={customers:[],jobs:[],leads:[],invoices:[],expenses:[],servicePlans:[],reviews:[],solicitations:[],calendarEvents:[]};
     if(path==='/api/owner/operations')result={employees:[],assignments:[],earnings:[],contracts:[],payouts:[]};
     if(path==='/api/owner/sales')result={salesmen:[person],commissions:[],notifications:[]};
+    if(path===`/api/owner/salesmen/${person.id}`&&method==='PATCH'){const body=route.request().postDataJSON();assert.equal(body.commissionPct,0.15);person.commissionPct=body.commissionPct;result={saved:true};}
     if(path==='/api/owner/sales-preview/map')result={mapJobs:[{id:'real-history-job',customerId:'real-history-customer',date:'2020-01-01',time:'09:00',address:'123 Example Avenue',serviceType:'Windows',status:'completed',latitude:29.7174,longitude:-95.4307}],mapCustomers:[{id:'real-history-customer',name:'Real History Customer',address:'123 Example Avenue'}]};
     if(path==='/api/notifications/read')result={readKeys:[]};
     if(path==='/api/owner/payroll'){
@@ -127,7 +128,7 @@ try{
   await ownerPage.getByRole('button',{name:'Return to owner'}).click();await ownerPage.getByRole('heading',{name:'Performance snapshot'}).waitFor();
   console.log(`Owner salesman preview: ${viewport.width}px passed (owner-only menu, safe areas, read-only real history, practice booking/editing/leads/notifications without writes, draft isolation, reset)`);
   if(mobile)await ownerPage.getByRole('button',{name:'Open navigation',exact:true}).click();
-  await ownerPage.getByRole('button',{name:'Team & Pay',exact:true}).click();await ownerPage.getByRole('tab',{name:'Payments',exact:true}).click();await ownerPage.getByRole('heading',{name:'Weekly contractor payments'}).waitFor();
+  await ownerPage.getByRole('button',{name:'Team & Pay',exact:true}).click();await ownerPage.getByRole('heading',{name:'Sales accounts',exact:true}).waitFor();await ownerPage.getByLabel('Test Salesman sales commission percentage',{exact:true}).fill('15');await ownerPage.getByRole('button',{name:'Save percentage',exact:true}).click();await ownerPage.getByText('15% sales commission · Active',{exact:true}).waitFor();await ownerPage.getByRole('tab',{name:'Payments',exact:true}).click();await ownerPage.getByRole('heading',{name:'Weekly contractor payments'}).waitFor();
   await ownerPage.getByRole('button',{name:'Payroll correction',exact:true}).click();await ownerPage.getByLabel('Contractor',{exact:true}).selectOption(person.id);await ownerPage.getByLabel('Amount',{exact:true}).fill('10');await ownerPage.getByLabel('Reason',{exact:true}).fill('Corrected sales commission after payment');
   await ownerPage.getByRole('button',{name:'Save correction',exact:true}).click();await ownerPage.getByText('Payroll adjustments',{exact:true}).waitFor();assert.equal(await ownerPage.getByLabel('Payment week',{exact:true}).inputValue(),'correction-run');
   await ownerPage.getByRole('button',{name:'Confirm weekly amounts',exact:true}).click();await ownerPage.getByRole('button',{name:'Mark paid',exact:true}).click();await ownerPage.getByText('Payment marked as paid.',{exact:true}).waitFor();

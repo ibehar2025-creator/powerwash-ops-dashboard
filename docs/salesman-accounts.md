@@ -64,7 +64,8 @@ independently for each account.
 ## Commission And Payments
 
 - Sales credit belongs to the authenticated creator, independently of the worker.
-- Commission is 20% of the corrected service price: $450 earns $90.
+- Each salesman has an owner-managed commission percentage, defaulting to 20%.
+- New bookings snapshot the salesman's current percentage; changing the profile never rewrites an existing commission.
 - Applied worker upsells, tips, and gas reimbursements are excluded.
 - Owner-created jobs and automatically generated recurring visits earn no sales
   commission. No historical jobs are backfilled with sales credit.
