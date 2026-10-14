@@ -155,6 +155,8 @@ create table if not exists user_accounts (
   role text not null check (role in ('owner', 'employee')),
   active boolean not null default true,
   base_commission_pct numeric(6,4) not null default 0.20,
+  pressure_washing_commission_pct numeric(6,4) not null default 0.20,
+  window_washing_commission_pct numeric(6,4) not null default 0.20,
   upsell_commission_pct numeric(6,4) not null default 0.30,
   contract_bonus_pct numeric(6,4) not null default 0.10,
   tip_share_pct numeric(6,4) not null default 1.00,
@@ -174,6 +176,7 @@ create table if not exists job_assignments (
   upsell_commission_pct numeric(6,4) not null,
   contract_bonus_pct numeric(6,4) not null,
   tip_share_pct numeric(6,4) not null,
+  commission_rate_source text not null default 'service' check (commission_rate_source in ('service', 'manual')),
   assigned_at timestamptz not null default now()
 );
 

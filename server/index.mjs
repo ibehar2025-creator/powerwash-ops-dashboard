@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
+import { commissionRateForService } from "./commission-rates.mjs";
 import { previousWeeklyPayPeriod } from "./payday.mjs";
 import { ensureSalesSchema, installSalesRoutes, ownerOrSalesman, salesPayrollLines, priceAfterUpsell } from "./sales.mjs";
 import { ensureReimbursementSchema, installReimbursementRoutes, loadReimbursements, reimbursementPayrollLines, validateReimbursementItems } from "./reimbursements.mjs";
@@ -196,6 +197,18 @@ async function ensureMapSchema() {
     alter table user_accounts add column if not exists phone text not null default '';
     alter table user_accounts add column if not exists profile_overrides jsonb not null default '{}'::jsonb;
     alter table user_accounts add column if not exists base_commission_pct numeric(6,4) not null default 0.20;
+    alter table user_accounts add column if not exists pressure_washing_commission_pct numeric(6,4);
+    alter table user_accounts add column if not exists window_washing_commission_pct numeric(6,4);
+    update user_accounts
+      set pressure_washing_commission_pct = case when lower(name) like '%darnell%' then 0.31 else base_commission_pct end
+      where pressure_washing_commission_pct is null;
+    update user_accounts
+      set window_washing_commission_pct = case when lower(name) like '%darnell%' then 0.22 else base_commission_pct end
+      where window_washing_commission_pct is null;
+    alter table user_accounts alter column pressure_washing_commission_pct set default 0.20;
+    alter table user_accounts alter column pressure_washing_commission_pct set not null;
+    alter table user_accounts alter column window_washing_commission_pct set default 0.20;
+    alter table user_accounts alter column window_washing_commission_pct set not null;
     alter table user_accounts add column if not exists upsell_commission_pct numeric(6,4) not null default 0.30;
     alter table user_accounts add column if not exists contract_bonus_pct numeric(6,4) not null default 0.10;
     alter table user_accounts add column if not exists tip_share_pct numeric(6,4) not null default 1.00;
@@ -213,6 +226,18 @@ async function ensureMapSchema() {
       tip_share_pct numeric(6,4) not null,
       assigned_at timestamptz not null default now()
     );
+    alter table job_assignments add column if not exists commission_rate_source text;
+    update job_assignments ja
+      set commission_rate_source = case
+        when abs(ja.base_commission_pct - ua.base_commission_pct) > 0.000001 then 'manual'
+        else 'service'
+      end
+      from user_accounts ua
+      where ja.employee_id = ua.id and ja.commission_rate_source is null;
+    alter table job_assignments alter column commission_rate_source set default 'service';
+    alter table job_assignments alter column commission_rate_source set not null;
+    alter table job_assignments drop constraint if exists job_assignments_commission_rate_source_check;
+    alter table job_assignments add constraint job_assignments_commission_rate_source_check check (commission_rate_source in ('service', 'manual'));
 
     create table if not exists contract_submissions (
       id uuid primary key default gen_random_uuid(),
@@ -486,6 +511,8 @@ const toEmployeeProfile = (row) => ({
   pictureUrl: row.picture_url,
   active: row.active,
   baseCommissionPct: Number(row.base_commission_pct),
+  pressureWashingCommissionPct: Number(row.pressure_washing_commission_pct ?? row.base_commission_pct),
+  windowWashingCommissionPct: Number(row.window_washing_commission_pct ?? row.base_commission_pct),
   upsellCommissionPct: Number(row.upsell_commission_pct),
   contractBonusPct: Number(row.contract_bonus_pct),
   tipSharePct: Number(row.tip_share_pct),
@@ -497,11 +524,38 @@ const toAssignment = (row) => ({
   employeeName: row.employee_name ?? "Employee",
   originalJobPrice: Number(row.original_job_price),
   baseCommissionPct: Number(row.base_commission_pct),
+  commissionRateSource: row.commission_rate_source ?? "service",
   upsellCommissionPct: Number(row.upsell_commission_pct),
   contractBonusPct: Number(row.contract_bonus_pct),
   tipSharePct: Number(row.tip_share_pct),
   assignedAt: row.assigned_at?.toISOString?.() ?? row.assigned_at,
 });
+
+async function refreshServiceCommissionRates(db, { jobId = null, employeeId = null } = {}) {
+  const params = [];
+  const filters = [
+    "ja.commission_rate_source = 'service'",
+    "not exists (select 1 from earning_submissions es where es.job_id = ja.job_id and es.status in ('approved', 'paid'))",
+    "not exists (select 1 from payroll_run_lines prl where prl.job_id = ja.job_id)",
+  ];
+  if (jobId) { params.push(jobId); filters.push(`ja.job_id = $${params.length}`); }
+  if (employeeId) { params.push(employeeId); filters.push(`ja.employee_id = $${params.length}`); }
+  const assignments = await db.query(
+    `select ja.job_id, j.service_type, ua.base_commission_pct,
+       ua.pressure_washing_commission_pct, ua.window_washing_commission_pct
+     from job_assignments ja
+     join jobs j on j.id = ja.job_id
+     join user_accounts ua on ua.id = ja.employee_id
+     where ${filters.join(" and ")}`,
+    params,
+  );
+  for (const assignment of assignments.rows) {
+    await db.query(
+      "update job_assignments set base_commission_pct = $2 where job_id = $1 and commission_rate_source = 'service'",
+      [assignment.job_id, commissionRateForService(assignment.service_type, assignment)],
+    );
+  }
+}
 
 function earningAmounts(row) {
   const original = Number(row.original_job_price || 0);
@@ -942,6 +996,7 @@ async function upsertJobs(client, jobs = [], snapshotStartedAt = new Date()) {
        where jobs.updated_at <= $2::timestamptz`,
       [JSON.stringify(rows), snapshotStartedAt],
     );
+  await refreshServiceCommissionRates(client);
 }
 
 async function upsertInvoices(client, invoices = []) {
@@ -1712,6 +1767,7 @@ app.patch("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next)
        returning *`,
       [req.params.id, date, time, customerId, address, serviceType, status, effectivePaymentStatus, effectiveAmountPaid, tipAmount, price, paymentMethod, notes, latitude, longitude, JSON.stringify(overrides), employeeInstructions],
     );
+    if (Object.hasOwn(req.body, "serviceType")) await refreshServiceCommissionRates(client, { jobId: req.params.id });
     await client.query("commit");
     res.json(toJob(result.rows[0]));
   } catch (error) {
@@ -2254,7 +2310,7 @@ app.get("/api/owner/operations", requireDatabase, requireOwner, async (_req, res
 
 app.patch("/api/owner/employees/:id", requireDatabase, requireOwner, async (req, res, next) => {
   try {
-    const fields = ["active", "baseCommissionPct", "contractBonusPct", "tipSharePct"];
+    const fields = ["active", "pressureWashingCommissionPct", "windowWashingCommissionPct", "contractBonusPct", "tipSharePct"];
     if (!fields.some((field) => Object.hasOwn(req.body, field))) return res.status(400).json({ error: "No employee settings were provided." });
     for (const field of fields.slice(1)) {
       if (Object.hasOwn(req.body, field) && (!Number.isFinite(Number(req.body[field])) || Number(req.body[field]) < 0 || Number(req.body[field]) > 1)) {
@@ -2262,13 +2318,16 @@ app.patch("/api/owner/employees/:id", requireDatabase, requireOwner, async (req,
       }
     }
     const result = await pool.query(
-      `update user_accounts set active = coalesce($2, active), base_commission_pct = coalesce($3, base_commission_pct),
-       upsell_commission_pct = coalesce($4, upsell_commission_pct), contract_bonus_pct = coalesce($5, contract_bonus_pct),
-       tip_share_pct = coalesce($6, tip_share_pct), updated_at = now()
+      `update user_accounts set active = coalesce($2, active),
+       pressure_washing_commission_pct = coalesce($3, pressure_washing_commission_pct),
+       window_washing_commission_pct = coalesce($4, window_washing_commission_pct),
+       upsell_commission_pct = coalesce($5, upsell_commission_pct), contract_bonus_pct = coalesce($6, contract_bonus_pct),
+       tip_share_pct = coalesce($7, tip_share_pct), updated_at = now()
        where id = $1 and role = 'employee' returning *`,
-      [req.params.id, req.body.active, req.body.baseCommissionPct, standardUpsellCommissionPct, req.body.contractBonusPct, req.body.tipSharePct],
+      [req.params.id, req.body.active, req.body.pressureWashingCommissionPct, req.body.windowWashingCommissionPct, standardUpsellCommissionPct, req.body.contractBonusPct, req.body.tipSharePct],
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Employee was not found." });
+    await refreshServiceCommissionRates(pool, { employeeId: req.params.id });
     if (req.body.active === false) await pool.query("delete from auth_sessions where user_id = $1", [req.params.id]);
     await audit(req.authUser.id, "update_employee", "employee", req.params.id, req.body);
     res.json(toEmployeeProfile(result.rows[0]));
@@ -2284,14 +2343,15 @@ app.post("/api/owner/assignments", requireDatabase, requireOwner, async (req, re
     const job = await pool.query("select * from jobs where id = $1", [jobId]);
     if (!employee.rows[0] || !job.rows[0]) return res.status(400).json({ error: "Choose an active employee and valid job." });
     const profile = employee.rows[0];
+    const serviceCommissionPct = commissionRateForService(job.rows[0].service_type, profile);
     const result = await pool.query(
-      `insert into job_assignments (job_id, employee_id, assigned_by, original_job_price, base_commission_pct, upsell_commission_pct, contract_bonus_pct, tip_share_pct)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
+      `insert into job_assignments (job_id, employee_id, assigned_by, original_job_price, base_commission_pct, upsell_commission_pct, contract_bonus_pct, tip_share_pct, commission_rate_source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'service')
        on conflict (job_id) do update set employee_id = excluded.employee_id, assigned_by = excluded.assigned_by,
          original_job_price = excluded.original_job_price, base_commission_pct = excluded.base_commission_pct,
          upsell_commission_pct = excluded.upsell_commission_pct, contract_bonus_pct = excluded.contract_bonus_pct,
-         tip_share_pct = excluded.tip_share_pct, assigned_at = now() returning *`,
-      [jobId, employeeId, req.authUser.id, job.rows[0].price, profile.base_commission_pct, standardUpsellCommissionPct, profile.contract_bonus_pct, profile.tip_share_pct],
+          tip_share_pct = excluded.tip_share_pct, commission_rate_source = 'service', assigned_at = now() returning *`,
+      [jobId, employeeId, req.authUser.id, job.rows[0].price, serviceCommissionPct, standardUpsellCommissionPct, profile.contract_bonus_pct, profile.tip_share_pct],
     );
     await audit(req.authUser.id, "assign_job", "job", jobId, { employeeId });
     void sendPushToUsers([employeeId], { title: "New job assigned", body: `${job.rows[0].date} at ${job.rows[0].time} · ${job.rows[0].address}`, tag: `assignment-${jobId}` }).catch(console.error);
@@ -2308,7 +2368,7 @@ app.patch("/api/owner/assignments/:jobId/commission", requireDatabase, requireOw
       return res.status(400).json({ error: "Enter a commission between 0% and 100%, with at most two decimal places." });
     }
     const result = await pool.query(
-      `update job_assignments ja set base_commission_pct = $2
+      `update job_assignments ja set base_commission_pct = $2, commission_rate_source = 'manual'
        where ja.job_id = $1
          and not exists (
            select 1 from earning_submissions es
@@ -2724,6 +2784,7 @@ async function startServer() {
   await ensureMapSchema();
   await ensureSalesSchema(pool);
   await ensureReimbursementSchema(pool);
+  await refreshServiceCommissionRates(pool);
   app.listen(port, "0.0.0.0", () => {
     console.log(`The Powerwashing Pros dashboard listening on ${port}`);
   });

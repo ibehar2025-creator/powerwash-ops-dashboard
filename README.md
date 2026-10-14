@@ -134,7 +134,7 @@ AUTH_EMPLOYEE_CODE=your-private-employee-code
 
 `AUTH_SIGNUP_CODE` remains a backwards-compatible fallback when a role-specific code is not configured. Returning users only use Google sign-in. The Google client ID is public by design; never expose `DATABASE_URL` or other server secrets in a `VITE_` variable.
 
-Commission defaults are 20% base, 30% of approved upsells, a one-time 10% contract bonus, and 100% of tips. Owners configure these rates per employee. Assignments snapshot the rates so later changes do not alter existing job compensation.
+Employee commission can be configured separately by service type. Darnell's configured defaults are 31% for pressure washing and 22% for window washing, while approved upsells remain 30%, the one-time contract bonus defaults to 10%, and tips default to a 100% share. New assignments use the rate matching the job's `serviceType`; open service-based assignments refresh when the sheet or employee rates change. Manual per-job overrides remain fixed, and approved or paid compensation is never rewritten.
 
 Owners can enter the employee interface without changing their account by selecting **Preview employee** in the desktop sidebar or mobile menu. Preview mode is for interface testing; real employee accounts still exercise the employee-only API permissions.
 

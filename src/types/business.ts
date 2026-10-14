@@ -64,6 +64,8 @@ export interface EmployeeProfile {
   pictureUrl: string;
   active: boolean;
   baseCommissionPct: number;
+  pressureWashingCommissionPct: number;
+  windowWashingCommissionPct: number;
   upsellCommissionPct: number;
   contractBonusPct: number;
   tipSharePct: number;
@@ -75,6 +77,7 @@ export interface JobAssignment {
   employeeName: string;
   originalJobPrice: number;
   baseCommissionPct: number;
+  commissionRateSource: "service" | "manual";
   upsellCommissionPct: number;
   contractBonusPct: number;
   tipSharePct: number;

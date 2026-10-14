@@ -275,7 +275,7 @@ export function reviewReimbursement(id: string, decision: "approved" | "rejected
   return request<ReimbursementRequest>(`/api/owner/reimbursements/${id}/review`, { method: "POST", body: JSON.stringify({ decision, ownerNote }) });
 }
 
-export function saveEmployeeProfile(employeeId: string, patch: Partial<Pick<EmployeeProfile, "active" | "baseCommissionPct" | "upsellCommissionPct" | "contractBonusPct" | "tipSharePct">>) {
+export function saveEmployeeProfile(employeeId: string, patch: Partial<Pick<EmployeeProfile, "active" | "pressureWashingCommissionPct" | "windowWashingCommissionPct" | "contractBonusPct" | "tipSharePct">>) {
   return request<EmployeeProfile>(`/api/owner/employees/${employeeId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 

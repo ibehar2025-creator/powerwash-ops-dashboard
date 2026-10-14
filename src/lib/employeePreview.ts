@@ -2,12 +2,12 @@ import type { EmployeeWorkspaceSnapshot, submitEmployeeContract, submitEmployeeE
 import type { ContractSubmission, EarningSubmission } from "../types/business";
 
 export function createEmployeePreview(today: string): EmployeeWorkspaceSnapshot {
-  const employee = { id: "preview-employee", name: "Sample Employee", email: "", pictureUrl: "", active: true, baseCommissionPct: 0.22, upsellCommissionPct: 0.3, contractBonusPct: 0.1, tipSharePct: 1 };
+  const employee = { id: "preview-employee", name: "Darnell", email: "", pictureUrl: "", active: true, baseCommissionPct: 0.22, pressureWashingCommissionPct: 0.31, windowWashingCommissionPct: 0.22, upsellCommissionPct: 0.3, contractBonusPct: 0.1, tipSharePct: 1 };
   return {
     employee, preview: true, earnings: [], contracts: [], solicitations: [], payouts: [],
     customers: [{ id: "preview-customer", name: "Sample Customer (practice)", phone: "", email: "", address: "Sample property", notes: "Preview only", insights: [] }],
     jobs: [{ id: "preview-job", customerId: "preview-customer", date: today, time: "09:00", address: "Sample property", serviceType: "Practice job - driveway cleaning", status: "scheduled", price: 250, amountPaid: 0, tipAmount: 0, paymentStatus: "unpaid", crewIds: [], notes: "Sample job for testing completion, gas reimbursement, and contracts.", source: "mock" }],
-    assignments: [{ jobId: "preview-job", employeeId: employee.id, employeeName: employee.name, originalJobPrice: 250, baseCommissionPct: 0.22, upsellCommissionPct: 0.3, contractBonusPct: 0.1, tipSharePct: 1, assignedAt: today }],
+    assignments: [{ jobId: "preview-job", employeeId: employee.id, employeeName: employee.name, originalJobPrice: 250, baseCommissionPct: 0.31, commissionRateSource: "service" as const, upsellCommissionPct: 0.3, contractBonusPct: 0.1, tipSharePct: 1, assignedAt: today }],
   };
 }
 

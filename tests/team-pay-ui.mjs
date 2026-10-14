@@ -16,9 +16,9 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));await mkdir('ar
 const browser=await chromium.launch({channel:'chrome',headless:true});
 try {
   for(const viewport of [{width:320,height:740},{width:390,height:844},{width:1440,height:1000}]) {
-    const employee={id:'worker',name:'Test Employee',email:'worker@example.invalid',active:true,pictureUrl:'',baseCommissionPct:.22,upsellCommissionPct:.3,contractBonusPct:.1,tipSharePct:1};
+    const employee={id:'worker',name:'Test Employee',email:'worker@example.invalid',active:true,pictureUrl:'',baseCommissionPct:.22,pressureWashingCommissionPct:.31,windowWashingCommissionPct:.22,upsellCommissionPct:.3,contractBonusPct:.1,tipSharePct:1};
     const jobs=[{id:'completed-job',customerId:'customer',date:'2026-10-04',time:'09:00',address:'123 Example Street',serviceType:'Windows',status:'completed',price:250},{id:'future-job',customerId:'future-customer',date:'2099-10-11',time:'10:00',address:'456 Example Street',serviceType:'Windows',status:'scheduled',price:450}];
-    const operations={employees:[employee],assignments:[{jobId:'future-job',employeeId:employee.id,employeeName:employee.name,originalJobPrice:450,baseCommissionPct:.22}],contracts:[],payouts:[],earnings:[{id:'earning',jobId:'completed-job',employeeId:employee.id,employeeName:employee.name,customerName:'Test Customer',jobDate:'2026-10-04',status:'pending',baseEarnings:55,upsellEarnings:0,tipEarnings:0,contractEarnings:0,gasCost:19.85,reimbursementItems:[{name:'Gas',cost:12.75},{name:'Supplies',cost:7.10}],totalEarnings:74.85}],reimbursements:[{id:'request',employeeId:employee.id,employeeName:employee.name,expenseDate:'2026-10-04',items:[{name:'Insurance',cost:75}],amount:75,notes:'Monthly coverage',status:'pending'}]};
+    const operations={employees:[employee],assignments:[{jobId:'future-job',employeeId:employee.id,employeeName:employee.name,originalJobPrice:450,baseCommissionPct:.22,commissionRateSource:'service'}],contracts:[],payouts:[],earnings:[{id:'earning',jobId:'completed-job',employeeId:employee.id,employeeName:employee.name,customerName:'Test Customer',jobDate:'2026-10-04',status:'pending',baseEarnings:55,upsellEarnings:0,tipEarnings:0,contractEarnings:0,gasCost:19.85,reimbursementItems:[{name:'Gas',cost:12.75},{name:'Supplies',cost:7.10}],totalEarnings:74.85}],reimbursements:[{id:'request',employeeId:employee.id,employeeName:employee.name,expenseDate:'2026-10-04',items:[{name:'Insurance',cost:75}],amount:75,notes:'Monthly coverage',status:'pending'}]};
     const sales={salesmen:[{id:'sales',name:'Test Salesman',email:'sales@example.invalid',active:true,pictureUrl:'',commissionPct:0.20}],commissions:[{id:'credit',jobId:'completed-job',salesmanId:'sales',salesmanName:'Test Salesman',customerName:'Test Customer',jobDate:'2026-10-04',status:'pending',servicePrice:450,currentServicePrice:450,rate:0.20,amount:90,workerPending:true}],notifications:[]};
     let run,profileSaved=false,assigned=false,commissionSaved=false,payments=0;
     const context=await browser.newContext({viewport}),page=await context.newPage(),errors=[];
@@ -28,7 +28,7 @@ try {
       const path=new URL(route.request().url()).pathname,method=route.request().method(),body=method==='GET'?null:route.request().postDataJSON();let result={};
       if(path==='/api/owner/operations')result=operations;
       if(path==='/api/owner/sales')result=sales;
-      if(path==='/api/owner/employees/worker'){assert.equal(body.baseCommissionPct,.25);Object.assign(employee,body);profileSaved=true;result=employee;}
+      if(path==='/api/owner/employees/worker'){assert.equal(body.pressureWashingCommissionPct,.25);assert.equal(body.windowWashingCommissionPct,.22);Object.assign(employee,body);profileSaved=true;result=employee;}
       if(path==='/api/owner/salesmen/sales'){sales.salesmen[0].active=body.active;result=sales.salesmen[0];}
       if(path==='/api/owner/assignments'){assert.equal(body.jobId,'future-job');assert.equal(body.employeeId,'worker');assigned=true;result=operations.assignments[0];}
       if(path==='/api/owner/assignments/future-job/commission'){assert.equal(body.baseCommissionPct,.4);operations.assignments[0].baseCommissionPct=.4;commissionSaved=true;result=operations.assignments[0];}
@@ -49,11 +49,11 @@ try {
       assert.notEqual(path,'/api/owner/payouts');await route.fulfill({json:result});
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);await page.getByText('Test Salesman',{exact:true}).waitFor();
-    const person=page.locator('article').filter({hasText:'worker@example.invalid'});await person.getByLabel('Base %',{exact:true}).fill('25');await person.getByRole('button',{name:'Save employee settings'}).click();
+    const person=page.locator('article').filter({hasText:'worker@example.invalid'});await person.getByLabel('Pressure washing',{exact:true}).fill('25');await person.getByRole('button',{name:'Save employee settings'}).click();
     await page.getByRole('button',{name:'Deactivate',exact:true}).click();await page.getByRole('button',{name:'Activate',exact:true}).waitFor();await page.getByRole('button',{name:'Activate',exact:true}).click();
     await page.screenshot({path:`artifacts/team-pay-people-${viewport.width}.png`,fullPage:true});
     await page.getByRole('tab',{name:'Assignments',exact:true}).click();await page.getByLabel('Assigned employee').selectOption('worker');
-    await page.getByLabel('Search assigned jobs').fill('Future Customer');await page.getByLabel('Base %',{exact:true}).fill('40');await page.getByRole('button',{name:'Save rate'}).click();await page.getByText('40% base',{exact:true}).waitFor();
+    await page.getByLabel('Search assigned jobs').fill('Future Customer');await page.getByLabel('Commission %',{exact:true}).fill('40');await page.getByRole('button',{name:'Save rate'}).click();await page.getByText('40% custom',{exact:true}).waitFor();
     await page.screenshot({path:`artifacts/team-pay-assignments-${viewport.width}.png`,fullPage:true});
     await page.getByRole('tab',{name:'Assignments',exact:true}).focus();await page.keyboard.press('ArrowRight');await page.getByRole('heading',{name:'Pending earnings · 1',exact:true}).waitFor();
     const earning=page.locator('section').filter({has:page.getByRole('heading',{name:'Pending earnings · 1',exact:true})});
