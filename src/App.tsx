@@ -7,8 +7,6 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ClipboardList,
   ExternalLink,
   LayoutDashboard,
@@ -33,6 +31,9 @@ import { EmployeeWorkspace } from "./components/EmployeeWorkspace";
 import { SalesmanWorkspace } from "./components/SalesmanWorkspace";
 import { RecurringWorkspace } from "./components/RecurringWorkspace";
 import { OwnerOpeningButton, OwnerOpeningEditor } from "./components/SalesOpenings";
+import { CalendarNavigation } from "./components/CalendarNavigation";
+import { calendarDays, calendarLabel, dateFromIso, fullDateFormatter, isoFromDate, moveCalendarDate } from "./lib/calendar";
+import type { CalendarMode } from "./lib/calendar";
 import { centralToday, ownerOpeningsPath, useSalesOpenings } from "./lib/salesOpenings";
 import type { OwnerSalesOpening } from "./lib/sales";
 import type { RecurringSection } from "./components/RecurringWorkspace";
@@ -59,7 +60,6 @@ import type { CalendarEvent, CalendarEventType, Customer, Expense, Invoice, Job,
 type ReviewRow = { id: string; submittedAt: string; name: string; rating: number; review: string; source: string };
 type TabId = "dashboard" | "customers" | "leads" | "jobs" | "calendar" | "map" | "analytics" | "plans" | "team" | "payroll" | "contracts";
 type SyncPayload = Partial<{ customers: Customer[]; jobs: Job[]; leads: Lead[]; invoices: Invoice[]; servicePlans: ServicePlan[]; reviews: ReviewRow[]; expenses: Expense[]; solicitations: Solicitation[]; calendarEvents: CalendarEvent[] }>;
-type CalendarDay = { label: string; date: string };
 
 const tabs: { id: TabId; label: string; icon: ElementType; mobileOnly?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -77,9 +77,6 @@ const leadStatuses: LeadStatus[] = ["new", "contacted", "quoted", "scheduled", "
 const jobStatuses: Job["status"][] = ["scheduled", "in progress", "completed", "canceled", "past due"];
 const calendarEventTypes: CalendarEventType[] = ["meeting", "soliciting", "estimate", "reminder", "other"];
 const upcomingJobsSheetUrl = "https://docs.google.com/spreadsheets/d/19LNiR-1HTfT8wwdAZtGnqXlCJh6y-HbxeuqZuo95p2Q/edit";
-const dayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short" });
-const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
-const fullDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 const calendarSkeletonDurationMs = 1_500;
 const BusinessMap = lazy(() => import("./components/BusinessMap").then((module) => ({ default: module.BusinessMap })));
 const Analytics = lazy(() => import("./components/Analytics").then((module) => ({ default: module.Analytics })));
@@ -94,60 +91,6 @@ function cx(...classes: Array<string | false | undefined>) {
 
 function findCustomer(customers: Customer[], customerId: string) {
   return customers.find((customer) => customer.id === customerId) ?? customers[0];
-}
-
-function dateFromIso(isoDate: string) {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function isoFromDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function addMonths(date: Date, months: number) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months, 1);
-  return next;
-}
-
-function startOfWeek(date: Date) {
-  const dayIndex = date.getDay();
-  return addDays(date, dayIndex === 0 ? -6 : 1 - dayIndex);
-}
-
-function daysInMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-}
-
-function calendarLabel(date: Date, mode: "day" | "week" | "month") {
-  if (mode === "day") return fullDateFormatter.format(date);
-  if (mode === "month") return monthFormatter.format(date);
-  const weekStart = startOfWeek(date);
-  const weekEnd = addDays(weekStart, 6);
-  return `${fullDateFormatter.format(weekStart)} - ${fullDateFormatter.format(weekEnd)}`;
-}
-
-function calendarDays(anchorDate: Date, mode: "day" | "week" | "month"): CalendarDay[] {
-  if (mode === "day") return [{ label: dayFormatter.format(anchorDate), date: isoFromDate(anchorDate) }];
-  if (mode === "week") {
-    const weekStart = startOfWeek(anchorDate);
-    return Array.from({ length: 7 }, (_, index) => {
-      const date = addDays(weekStart, index);
-      return { label: `${dayFormatter.format(date)} ${date.getDate()}`, date: isoFromDate(date) };
-    });
-  }
-  const monthStart = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
-  return Array.from({ length: daysInMonth(monthStart) }, (_, index) => {
-    const date = addDays(monthStart, index);
-    return { label: `${dayFormatter.format(date)} ${date.getDate()}`, date: isoFromDate(date) };
-  });
 }
 
 function recurringCustomerName(plan: ServicePlan) {
@@ -708,30 +651,27 @@ function Leads({ leads, currentDate, onLeadClick }: { leads: Lead[]; currentDate
 }
 
 function Calendar({ customers, jobs, events, currentDate, loading, onJobClick, onCreateEvent, onUpdateEvent, onDeleteEvent }: { customers: Customer[]; jobs: Job[]; events: CalendarEvent[]; currentDate: string; loading: boolean; onJobClick: (job: Job) => void; onCreateEvent: (event: Omit<CalendarEvent, "id">) => Promise<CalendarEvent>; onUpdateEvent: (eventId: string, patch: Partial<CalendarEvent>) => Promise<CalendarEvent>; onDeleteEvent: (eventId: string) => Promise<void> }) {
-  const [mode, setMode] = useState<"day" | "week" | "month">("week");
+  const [mode, setMode] = useState<CalendarMode>("week");
   const [anchorIso, setAnchorIso] = useState(currentDate);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [selectedOpening, setSelectedOpening] = useState<OwnerSalesOpening | null>(null);
   const { openings, error: openingsError, refresh: refreshOpenings } = useSalesOpenings<OwnerSalesOpening>(ownerOpeningsPath);
   const anchorDate = dateFromIso(anchorIso);
   const days = calendarDays(anchorDate, mode);
-  const moveCalendar = (direction: -1 | 1) => {
-    const next = mode === "month" ? addMonths(anchorDate, direction) : addDays(anchorDate, direction * (mode === "week" ? 7 : 1));
-    setAnchorIso(isoFromDate(next));
-  };
+  const navigation = <CalendarNavigation mode={mode} onMode={setMode} onMove={direction => setAnchorIso(date => moveCalendarDate(date, mode, direction))} onToday={() => setAnchorIso(currentDate)} />;
   if (loading) {
     return (
       <Section
         title="Scheduling calendar"
         kicker="Date-matched spreadsheet schedule"
-        action={<div className="flex flex-wrap items-center justify-end gap-2"><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>}
+        action={<div className="flex flex-wrap items-center justify-end gap-2">{navigation}</div>}
       >
         <div className="space-y-4" role="status" aria-live="polite" aria-label="Syncing calendar">
           <div className="flex items-center justify-between gap-4">
             <div className="skeleton-shimmer h-6 w-48 rounded" />
             <div className="skeleton-shimmer h-4 w-24 rounded" />
           </div>
-          <div className={cx("calendar-grid", mode === "month" && "month-mode")}>
+          <div className={`calendar-grid ${mode}-mode`}>
             {days.map((day, index) => (
               <div key={day.date} className="calendar-day" aria-hidden="true">
                 <div className="mb-4 flex items-center justify-between gap-3">
@@ -755,9 +695,9 @@ function Calendar({ customers, jobs, events, currentDate, loading, onJobClick, o
   const newEvent = (): CalendarEvent => ({ id: "", title: "", type: "meeting", date: anchorIso, startTime: "09:00", endTime: "10:00", location: "", notes: "" });
   const openingToday = centralToday();
   const openNew = (date: string) => setSelectedOpening({ id: "", date, startTime: "09:00", endTime: "11:00", status: "open" });
-  const actions = <div className="flex flex-wrap items-center justify-end gap-2"><button type="button" className="primary-button gap-2" onClick={() => setSelectedEvent(newEvent())}><Plus size={16} />Add event</button><button type="button" className="text-button gap-2" onClick={() => openNew(anchorIso >= openingToday ? anchorIso : openingToday)}><Plus size={16} />Add opening</button><button className="icon-button" onClick={() => moveCalendar(-1)} title={`Previous ${mode}`} aria-label={`Previous ${mode}`}><ChevronLeft size={18} /></button><button className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-lagoon hover:text-lagoon dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" onClick={() => setAnchorIso(currentDate)}>Today</button><button className="icon-button" onClick={() => moveCalendar(1)} title={`Next ${mode}`} aria-label={`Next ${mode}`}><ChevronRight size={18} /></button><div className="segmented">{(["day", "week", "month"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={cx(mode === item && "active")}>{item}</button>)}</div></div>;
+  const actions = <div className="flex flex-wrap items-center justify-end gap-2"><button type="button" className="primary-button gap-2" onClick={() => setSelectedEvent(newEvent())}><Plus size={16} />Add event</button><button type="button" className="text-button gap-2" onClick={() => openNew(anchorIso >= openingToday ? anchorIso : openingToday)}><Plus size={16} />Add opening</button>{navigation}</div>;
 
-  return <><Section title="Scheduling calendar" kicker="Jobs and business events" action={actions}><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{visibleJobCount} jobs · {visibleEventCount} events</p></div>{openingsError && <p role="status" className="mb-4 text-sm text-amber-700 dark:text-amber-300">Couldn’t load sales openings. <button type="button" className="underline" onClick={() => void refreshOpenings()}>Retry</button></p>}<div className={cx("calendar-grid", mode === "month" && "month-mode")}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); const dayEvents = events.filter((event) => event.date === day.date).sort((a, b) => a.startTime.localeCompare(b.startTime)); const dayOpenings = openings.filter(opening => opening.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && dayEvents.length === 0 && dayOpenings.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">Nothing scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}{dayEvents.map((event) => <button key={event.id} type="button" onClick={() => setSelectedEvent(event)} className="calendar-event"><span className="text-xs font-semibold">{event.startTime}{event.endTime ? ` - ${event.endTime}` : ""}</span><span className="font-semibold text-ink dark:text-white">{event.title}</span><span className="text-xs capitalize text-lagoon dark:text-cyan-300">{event.type}</span>{event.location && <span className="truncate text-xs">{event.location}</span>}</button>)}{dayOpenings.map(opening => <OwnerOpeningButton key={opening.id} opening={opening} onClick={() => setSelectedOpening(opening)} />)}{day.date >= openingToday && <button type="button" className="mt-2 flex min-h-9 w-full items-center justify-center gap-1 rounded-md border border-dashed border-emerald-300 px-1 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/50" aria-label={`Add opening on ${day.date}`} onClick={() => openNew(day.date)}><Plus size={14} className="shrink-0" />Add opening</button>}</div>; })}</div></Section>{selectedEvent && <CalendarEventModal key={selectedEvent.id || "new-event"} event={selectedEvent} onCreate={onCreateEvent} onUpdate={onUpdateEvent} onDelete={onDeleteEvent} onClose={() => setSelectedEvent(null)} />}{selectedOpening && <OwnerOpeningEditor key={selectedOpening.id || selectedOpening.date} opening={selectedOpening} onClose={() => setSelectedOpening(null)} onSaved={refreshOpenings} />}</>;
+  return <><Section title="Scheduling calendar" kicker="Jobs and business events" action={actions}><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><p className="text-lg font-semibold text-ink dark:text-white">{calendarLabel(anchorDate, mode)}</p><p className="text-sm text-slate-500 dark:text-slate-400">{visibleJobCount} jobs · {visibleEventCount} events</p></div>{openingsError && <p role="status" className="mb-4 text-sm text-amber-700 dark:text-amber-300">Couldn’t load sales openings. <button type="button" className="underline" onClick={() => void refreshOpenings()}>Retry</button></p>}<div className={`calendar-grid ${mode}-mode`}>{days.map((day) => { const dayJobs = jobs.filter((job) => job.date === day.date); const dayEvents = events.filter((event) => event.date === day.date).sort((a, b) => a.startTime.localeCompare(b.startTime)); const dayOpenings = openings.filter(opening => opening.date === day.date); return <div key={day.date} className="calendar-day"><div className="mb-3 flex items-center justify-between"><p className="font-semibold text-ink dark:text-white">{day.label}</p><span className="text-xs text-slate-500 dark:text-slate-400">{day.date.slice(5)}</span></div>{dayJobs.length === 0 && dayEvents.length === 0 && dayOpenings.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">Nothing scheduled</p>}{dayJobs.map((job) => <button key={job.id} onClick={() => onJobClick(job)} className="calendar-job"><span className="text-xs font-semibold">{job.time}</span><span className="font-semibold">{findCustomer(customers, job.customerId).name}</span><span className="text-xs">{job.address}</span><span className="text-xs">Unassigned</span><Badge status={jobDisplayStatus(job, currentDate)} /></button>)}{dayEvents.map((event) => <button key={event.id} type="button" onClick={() => setSelectedEvent(event)} className="calendar-event"><span className="text-xs font-semibold">{event.startTime}{event.endTime ? ` - ${event.endTime}` : ""}</span><span className="font-semibold text-ink dark:text-white">{event.title}</span><span className="text-xs capitalize text-lagoon dark:text-cyan-300">{event.type}</span>{event.location && <span className="truncate text-xs">{event.location}</span>}</button>)}{dayOpenings.map(opening => <OwnerOpeningButton key={opening.id} opening={opening} onClick={() => setSelectedOpening(opening)} />)}{day.date >= openingToday && <button type="button" className="mt-2 flex min-h-9 w-full items-center justify-center gap-1 rounded-md border border-dashed border-emerald-300 px-1 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/50" aria-label={`Add opening on ${day.date}`} onClick={() => openNew(day.date)}><Plus size={14} className="shrink-0" />Add opening</button>}</div>; })}</div></Section>{selectedEvent && <CalendarEventModal key={selectedEvent.id || "new-event"} event={selectedEvent} onCreate={onCreateEvent} onUpdate={onUpdateEvent} onDelete={onDeleteEvent} onClose={() => setSelectedEvent(null)} />}{selectedOpening && <OwnerOpeningEditor key={selectedOpening.id || selectedOpening.date} opening={selectedOpening} onClose={() => setSelectedOpening(null)} onSaved={refreshOpenings} />}</>;
 }
 
 function CalendarEventModal({ event, onCreate, onUpdate, onDelete, onClose }: { event: CalendarEvent; onCreate: (event: Omit<CalendarEvent, "id">) => Promise<CalendarEvent>; onUpdate: (eventId: string, patch: Partial<CalendarEvent>) => Promise<CalendarEvent>; onDelete: (eventId: string) => Promise<void>; onClose: () => void }) {

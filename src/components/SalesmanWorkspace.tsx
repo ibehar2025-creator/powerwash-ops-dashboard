@@ -7,7 +7,8 @@ import { createSolicitation,deleteSolicitation,loadReadNotificationKeys,markNoti
 import { salesRequest } from '../lib/sales';
 import { createSalesmanPreview, mergePreviewMapHistory, removePreviewSolicitation, savePreviewSalesBooking, savePreviewSalesLead, savePreviewSolicitation } from '../lib/salesmanPreview';
 import type { SalesBooking,SalesMapHistory,SalesNotification,SalesOpening,SalesWorkspace } from '../lib/sales';
-import { NextSalesOpening, SalesOpeningCalendar } from './SalesOpenings';
+import { NextSalesOpening } from './SalesOpenings';
+import { SalesCalendar } from './SalesCalendar';
 import { centralToday, openingHours, sampleOpenings, useSalesOpenings } from '../lib/salesOpenings';
 import type { Job,Lead } from '../types/business';
 import { ProfileMenu } from './ProfileMenu';
@@ -29,6 +30,7 @@ export function SalesmanWorkspace({preview=false,onExitPreview}:{preview?:boolea
   const [search,setSearch]=useState('');const [status,setStatus]=useState('all');
   const [booking,setBooking]=useState<Partial<SalesBooking>|null>(null);const [editing,setEditing]=useState<Job|null>(null);
   const [usedSampleOpenings,setUsedSampleOpenings]=useState<string[]>([]);
+  const [calendarAnchor,setCalendarAnchor]=useState('');
   const {openings,loading:openingsLoading,error:openingsError,refresh:refreshOpenings}=useSalesOpenings<SalesOpening>(isPreview?null:'/api/salesman/openings');
   const calendarToday=centralToday();
   const published=isPreview?sampleOpenings(calendarToday).filter(item=>!usedSampleOpenings.includes(item.id)):openings;
@@ -39,11 +41,15 @@ export function SalesmanWorkspace({preview=false,onExitPreview}:{preview?:boolea
   useEffect(()=>{saveThemePreference(user.id,theme);document.documentElement.classList.toggle('dark',themeIsDark(theme));},[theme,user.id]);
   const today=isoToday();const due=data?.leads.filter(item=>item.followUpDate&&item.followUpDate<=today&&!['won','lost'].includes(item.status))??[];
   const events=useMemo(()=>{const end=new Date(`${today}T12:00:00Z`);end.setUTCDate(end.getUTCDate()+7);return [...(data?.notifications??[]),...(data?.leads??[]).filter(item=>item.followUpDate&&item.followUpDate<=end.toISOString().slice(0,10)&&!['won','lost'].includes(item.status)).map(item=>({id:`followup-${item.id}-${item.followUpDate}`,title:`${item.followUpDate<today?'Overdue follow-up':item.followUpDate===today?'Follow up today':'Upcoming follow-up'}: ${item.name}`,detail:`${item.followUpDate} - ${item.address}`,created_at:item.followUpDate}))];},[data,today]);
-  const choose=(next:Tab)=>{setTab(next);setMenu(false);if(next==='calendar')void refreshOpenings();};
+  const choose=(next:Tab)=>{setTab(next);setMenu(false);if(next==='calendar'||next==='dashboard')void refreshOpenings();};
   const find=(job:Job)=>{setFocus({jobId:job.id,requestId:Date.now()});choose('map');};
   const newJob=(seed:Partial<SalesBooking>={})=>{setEditing(null);setBooking(seed);};
   const bookOpening=(opening:SalesOpening)=>newJob({openingId:opening.id,date:opening.date,time:opening.startTime});
   const customer=(job:Job)=>data?.customers.find(item=>item.id===job.customerId);
+  const openCalendarJob=(job:Job)=>{
+    if(canEdit(job)){setEditing(job);setBooking({});return;}
+    setStatus('all');setSearch(customer(job)?.name??job.address);choose('jobs');
+  };
   const filtered=data?.jobs.filter(job=>(status==='all'||job.status===status)&&`${customer(job)?.name} ${job.address} ${job.serviceType}`.toLowerCase().includes(search.toLowerCase()))??[];
   const upcoming=data?.jobs.filter(job=>job.date>=today&&!['completed','canceled'].includes(job.status)).sort((a,b)=>`${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))??[];
   const total=(states:string[])=>data?.commissions.filter(c=>states.includes(c.status)).reduce((sum,c)=>sum+c.amount,0)??0;
@@ -53,11 +59,14 @@ export function SalesmanWorkspace({preview=false,onExitPreview}:{preview?:boolea
     <aside className={`sidebar ${menu?'mobile-open':''}`}><div className="brand-card"><span className="text-sm text-cyan-200">The</span><h2 className="text-xl font-bold text-white">Powerwashing Pros</h2><p className="mt-2 text-sm text-slate-300">Salesman workspace</p></div><nav className="mt-5 space-y-1">{tabs.map(item=><button key={item.id} onClick={()=>choose(item.id)} className={`nav-item ${tab===item.id?'active':''}`}><item.icon size={19}/>{item.name}</button>)}</nav></aside>
     <div className="min-w-0">{isPreview&&<div className="sales-preview-banner"><span>Salesman preview - changes are not saved</span><button className="text-button shrink-0" onClick={onExitPreview}>Return to owner</button></div>}<header className="app-header"><div className="flex min-w-0 items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-3"><button className="icon-button shrink-0 lg:hidden" title="Open menu" aria-label="Open menu" onClick={()=>setMenu(true)}><Menu size={19}/></button><div className="min-w-0"><p className="text-xs font-semibold uppercase text-lagoon">Salesman workspace</p><h1 className="text-xl font-bold text-ink dark:text-white">{tabs.find(item=>item.id===tab)?.name}</h1></div></div><div className="flex shrink-0 items-center gap-1"><SalesInbox events={events} preview={isPreview}/><button className="icon-button" title="Refresh" aria-label="Refresh" disabled={busy} onClick={()=>{void refresh();void refreshOpenings();}}><RefreshCw size={18} className={busy?'animate-spin':''}/></button><ProfileMenu compact theme={theme} onTheme={setTheme} preview={isPreview} previewRole="salesman"/></div></div><p className="mt-2 text-sm text-slate-500">{isPreview?'Sample Salesman':user.name}</p></header>
     <main className="min-w-0 space-y-5 p-4 sm:p-6">{error&&<p role="alert" className="rounded-lg bg-rose-100 p-3 text-rose-700">{error}</p>}{data?.syncError&&<p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">Spreadsheet refresh unavailable. Showing the last saved records.</p>}{!data&&<p>{busy?'Loading your workspace...':'Workspace unavailable.'}</p>}
-      {data&&tab==='dashboard'&&<><div className="flex items-center justify-between"><h2 className="text-xl font-bold">Sales overview</h2><button className="primary-button gap-2" onClick={()=>newJob()}><Plus size={17}/>Book job</button></div><NextSalesOpening opening={published[0]} loading={openingsLoading} error={openingsError} onCalendar={()=>choose('calendar')} onBook={bookOpening}/><div className="grid grid-cols-2 gap-4 xl:grid-cols-3">{[
+      {data&&tab==='dashboard'&&<><NextSalesOpening opening={published[0]} loading={openingsLoading} error={openingsError} onCalendar={()=>{setCalendarAnchor(published[0]?.date??calendarToday);choose('calendar');}} onBook={bookOpening}/><div className="flex items-center justify-between"><h2 className="text-xl font-bold">Sales overview</h2><button className="primary-button gap-2" onClick={()=>newJob()}><Plus size={17}/>Book job</button></div><div className="grid grid-cols-2 gap-4 xl:grid-cols-3">{[
         ['Booked jobs',data.jobs.filter(j=>j.status!=='canceled').length],['Upcoming jobs',upcoming.length],['Follow-ups due',due.length],
         ['Estimated commission',currency.format(total(['estimated','pending']))],['Approved commission',currency.format(total(['approved']))],['Paid earnings',currency.format(paidTotal)],
       ].map(([name,value])=><div key={name} className="metric-card"><p className="text-sm text-slate-500">{name}</p><strong className="mt-2 block text-2xl">{value}</strong></div>)}</div><h3 className="text-lg font-semibold">Upcoming jobs</h3>{upcoming.map(job=><JobRow key={job.id} job={job} name={customer(job)?.name??'Customer'} onEdit={()=>{setEditing(job);setBooking({});}} onFind={()=>find(job)}/>)}{!upcoming.length&&<p className="text-slate-500">No upcoming jobs.</p>}</>}
-      {data&&tab==='calendar'&&(openingsError?<p role="status" className="text-sm text-amber-700 dark:text-amber-300">Couldn’t load openings. <button type="button" className="underline" onClick={()=>void refreshOpenings()}>Retry</button></p>:openingsLoading?<p>Checking openings...</p>:<SalesOpeningCalendar openings={published} today={calendarToday} onBook={bookOpening}/>)}
+      {data&&tab==='calendar'&&<>
+        {openingsError?<p role="status" className="text-sm text-amber-700 dark:text-amber-300">Couldn’t load openings. <button type="button" className="underline" onClick={()=>void refreshOpenings()}>Retry</button></p>:openingsLoading?<p role="status">Checking openings...</p>:null}
+        <SalesCalendar openings={openingsError?[]:published} ownJobs={data.jobs} busyJobs={data.mapJobs} customerName={job=>customer(job)?.name??'Customer'} today={calendarToday} initialDate={calendarAnchor||calendarToday} onBook={bookOpening} onOpenJob={openCalendarJob}/>
+      </>}
       {data&&tab==='map'&&<Suspense fallback={<p>Loading map...</p>}><BusinessMap customers={data.mapCustomers} jobs={data.mapJobs} solicitations={data.solicitations} jobFocusRequest={focus}
         onAddJob={property=>newJob(property)} onSaveJobCoordinates={async()=>{}} onCreateSolicitation={async item=>{if(isPreview){setData(current=>current?savePreviewSolicitation(current,item):current);return;}await createSolicitation(item);await refresh();}}
         onUpdateSolicitation={async(id,patch)=>{if(isPreview){setData(current=>{const item=current?.solicitations.find(s=>s.id===id);return current&&item?savePreviewSolicitation(current,{...item,...patch},id):current;});return;}await saveSolicitationPatch(id,patch);await refresh();}} onDeleteSolicitation={async id=>{if(isPreview){setData(current=>current?removePreviewSolicitation(current,id):current);return;}await deleteSolicitation(id);await refresh();}}/></Suspense>}
