@@ -100,6 +100,45 @@ try {
       await editor.waitFor({ state: 'detached' });
     };
     await page.getByRole('button', { name: `Add opening on ${today}`, exact: true }).waitFor();
+    const toolbar = page.locator('.calendar-owner-header');
+    const addMenu = toolbar.getByRole('button', { name: 'Add to calendar', exact: true });
+    const addEvent = toolbar.getByRole('button', { name: 'Add event', exact: true });
+    const addOpening = toolbar.getByRole('button', { name: 'Add opening', exact: true });
+    assert.equal(await toolbar.getByRole('button', { name: 'Today', exact: true }).count(), 1);
+    if (viewport.width < 640) {
+      assert.equal(await addEvent.count(), 0);
+      assert.equal(await addOpening.count(), 0);
+      const [plus, prev, next, views, todayButton] = await Promise.all([
+        addMenu.boundingBox(),
+        toolbar.getByRole('button', { name: 'Previous week', exact: true }).boundingBox(),
+        toolbar.getByRole('button', { name: 'Next week', exact: true }).boundingBox(),
+        toolbar.getByRole('group', { name: 'Calendar view', exact: true }).boundingBox(),
+        toolbar.getByRole('button', { name: 'Today', exact: true }).boundingBox(),
+      ]);
+      assert.ok(plus.y + plus.height <= prev.y);
+      assert.ok(Math.abs(prev.y - next.y) <= 1 && prev.x < next.x);
+      assert.ok(views.y > prev.y && Math.abs(views.y + views.height / 2 - todayButton.y - todayButton.height / 2) <= 1);
+      assert.ok(todayButton.x + todayButton.width <= viewport.width);
+      await toolbar.screenshot({ path: `artifacts/calendar-phone-toolbar-${viewport.width}.png` });
+      await addMenu.click();
+      await addEvent.waitFor();
+      await toolbar.getByRole('heading', { name: 'Scheduling calendar', exact: true }).click();
+      assert.equal(await addMenu.getAttribute('aria-expanded'), 'false');
+      await addMenu.click();
+      await page.keyboard.press('Escape');
+      assert.equal(await addMenu.getAttribute('aria-expanded'), 'false');
+      await addMenu.click();
+      await addEvent.click();
+      const closeEvent = page.getByRole('button', { name: 'Close calendar event editor', exact: true });
+      await closeEvent.click();
+      await addMenu.click();
+      await addOpening.click();
+      const openingEditor = page.getByRole('dialog', { name: 'Add opening', exact: true });
+      await openingEditor.getByRole('button', { name: 'Close opening', exact: true }).click();
+    } else {
+      assert.equal(await addMenu.count(), 0);
+      assert.ok(await addEvent.isVisible() && await addOpening.isVisible());
+    }
     await add(tomorrow, '09:00', '11:00');
     await page.getByRole('button', { name: /9:00 AM.*11:00 AM.*Available to sales/ }).click();
     const existing = page.getByRole('dialog', { name: 'Calendar opening', exact: true });

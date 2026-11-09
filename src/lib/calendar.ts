@@ -4,6 +4,7 @@ type CalendarDay = { label: string; date: string };
 const dayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
 export const fullDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+const shortDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
 export function dateFromIso(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);
@@ -35,11 +36,15 @@ function daysInMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
 }
 
-export function calendarLabel(date: Date, mode: CalendarMode) {
+export function calendarLabel(date: Date, mode: CalendarMode, compact = false) {
   if (mode === "day") return fullDateFormatter.format(date);
   if (mode === "month") return monthFormatter.format(date);
   const weekStart = startOfWeek(date);
   const weekEnd = addDays(weekStart, 6);
+  if (compact && weekStart.getFullYear() === weekEnd.getFullYear()) {
+    const end = weekStart.getMonth() === weekEnd.getMonth() ? weekEnd.getDate() : shortDateFormatter.format(weekEnd);
+    return `${shortDateFormatter.format(weekStart)} - ${end}, ${weekEnd.getFullYear()}`;
+  }
   return `${fullDateFormatter.format(weekStart)} - ${fullDateFormatter.format(weekEnd)}`;
 }
 
