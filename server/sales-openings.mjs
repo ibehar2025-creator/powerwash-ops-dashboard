@@ -34,7 +34,7 @@ const openingQuery = source => `select o.id, o.date::text as date, left(o.start_
   case when b.saved then 'booked'
     when b.request_id is not null then 'pending'
     when o.date + o.start_time <= ${chicagoNow} then 'past'
-    when exists (select 1 from jobs j where j.date=o.date and j.status <> 'canceled'
+    when exists (select 1 from jobs j where j.date=o.date and j.status <> 'canceled' and not j.retained_for_payroll
       and left(j.time,5) >= left(o.start_time::text,5) and left(j.time,5) < left(o.end_time::text,5)) then 'busy'
     else 'open' end as status
   from ${source} o left join sales_bookings b on b.opening_id=o.id`;

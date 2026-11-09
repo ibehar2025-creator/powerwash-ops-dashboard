@@ -27,7 +27,7 @@ test('Postgres persists openings, blocks conflicts, and keeps retries tied to on
   try {
     await db.exec(`create role anon; create role authenticated;
       create table user_accounts(id uuid primary key);
-      create table jobs(date date not null,time text not null,status text not null);`);
+      create table jobs(date date not null,time text not null,status text not null,retained_for_payroll boolean not null default false);`);
     const schema = await readFile(new URL('./sales-schema.sql', import.meta.url), 'utf8');
     await db.exec(schema.slice(schema.indexOf('create table if not exists sales_bookings'), schema.indexOf('create table if not exists sales_credits')));
     const dbQuery = db.query.bind(db);

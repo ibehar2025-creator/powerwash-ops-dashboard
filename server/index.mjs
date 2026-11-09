@@ -88,6 +88,7 @@ async function ensureMapSchema() {
     alter table jobs add column if not exists longitude double precision;
     alter table jobs add column if not exists geocoded_address text;
     alter table jobs add column if not exists website_overrides jsonb not null default '{}'::jsonb;
+    alter table jobs add column if not exists retained_for_payroll boolean not null default false;
     alter table leads add column if not exists website_overrides jsonb not null default '{}'::jsonb;
     alter table customers add column if not exists website_overrides jsonb not null default '{}'::jsonb;
 
@@ -847,7 +848,7 @@ async function loadSnapshot() {
   const [customers, leads, jobs, invoices, servicePlans, reviews, expenses, solicitations, calendarEvents] = await Promise.all([
     tableRows("customers", "name asc"),
     tableRows("leads", "follow_up_date asc nulls last, created_at asc"),
-    tableRows("jobs", "date asc, time asc"),
+    pool.query("select * from jobs where not retained_for_payroll order by date asc, time asc").then(result => result.rows),
     tableRows("invoices", "issued_date desc nulls last, created_at desc"),
     tableRows("service_plans", "renewal_date asc nulls last"),
     tableRows("reviews", "submitted_at desc"),
@@ -993,6 +994,7 @@ async function upsertJobs(client, jobs = [], snapshotStartedAt = new Date()) {
          longitude = case when jobs.address is distinct from excluded.address then null else jobs.longitude end,
          geocoded_address = case when jobs.address is distinct from excluded.address then null else jobs.geocoded_address end,
          website_overrides = '{}'::jsonb,
+         retained_for_payroll = false,
          updated_at = clock_timestamp()
        where jobs.updated_at <= $2::timestamptz`,
       [JSON.stringify(rows), snapshotStartedAt],
@@ -2039,6 +2041,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
       `select jobs.* from jobs
        join job_assignments on job_assignments.job_id = jobs.id
        where job_assignments.employee_id = $1
+         and not jobs.retained_for_payroll
          and jobs.date between current_date - 7 and current_date + 7
        order by jobs.date asc, jobs.time asc`,
       [subject.id],
@@ -2052,7 +2055,7 @@ app.get("/api/employee/bootstrap", requireDatabase, allowEmployeeOrOwner, async 
         `select ja.*, ua.name as employee_name from job_assignments ja
          join user_accounts ua on ua.id = ja.employee_id
          join jobs on jobs.id = ja.job_id
-         where ja.employee_id = $1 and jobs.date between current_date - 7 and current_date + 7`,
+         where ja.employee_id = $1 and not jobs.retained_for_payroll and jobs.date between current_date - 7 and current_date + 7`,
         [subject.id],
       ),
       pool.query(`${earningSelect} where es.employee_id = $1 order by jobs.date desc`, [subject.id]),

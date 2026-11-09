@@ -41,7 +41,7 @@ test('Postgres sync keeps payroll jobs and payroll amounts when sheet rows disap
   const { PGlite } = await import(process.env.PGLITE_MODULE);
   const db = new PGlite();
   try {
-    await db.exec(`create table jobs (id text primary key, source text not null, status text not null, updated_at timestamptz not null);
+    await db.exec(`create table jobs (id text primary key, source text not null, status text not null, updated_at timestamptz not null, retained_for_payroll boolean not null default false);
       create table payroll_run_lines (job_id text references jobs(id) on delete restrict, amount numeric not null);
       create table sales_credits (job_id text references jobs(id) on delete restrict);
       insert into jobs values
@@ -67,6 +67,9 @@ test('Postgres sync keeps payroll jobs and payroll amounts when sheet rows disap
       { id: 'sales-only', status: 'canceled' },
       { id: 'still-on-sheet', status: 'scheduled' },
       { id: 'worker-paid', status: 'completed' },
+    ]);
+    assert.deepEqual((await db.query('select id from jobs where retained_for_payroll order by id')).rows, [
+      { id: 'both-paid' }, { id: 'worker-paid' },
     ]);
     assert.deepEqual((await db.query('select job_id,amount::float8 as amount from payroll_run_lines order by job_id')).rows, [
       { job_id: 'both-paid', amount: 55.5 }, { job_id: 'worker-paid', amount: 105.25 },

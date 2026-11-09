@@ -48,6 +48,7 @@ create table if not exists jobs (
   before_photo text,
   after_photo text,
   source text not null default 'spreadsheet-import',
+  retained_for_payroll boolean not null default false,
   latitude double precision,
   longitude double precision,
   geocoded_address text,

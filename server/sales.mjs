@@ -57,7 +57,7 @@ export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSh
   app.get('/api/owner/sales-preview/map',requireDatabase,requireOwner,route(async(_req,res)=>{
     let syncError='';
     try { await refreshSheetsIfStale(); } catch(error) { syncError=error.message; console.error('Sales preview sheet refresh failed',error); }
-    const jobs=await pool.query('select id,customer_id,date,time,address,service_type,status,latitude,longitude from jobs order by date desc,time,id');
+    const jobs=await pool.query('select id,customer_id,date,time,address,service_type,status,latitude,longitude from jobs where not retained_for_payroll order by date desc,time,id');
     const customers=await pool.query('select id,name,address from customers where id=any($1::text[])',[[...new Set(jobs.rows.map(row=>row.customer_id))]]);
     res.json({mapJobs:jobs.rows.map(row=>mapProjection(row,false)),mapCustomers:customers.rows.map(row=>({id:row.id,name:row.name,address:row.address})),syncError});
   }));
@@ -65,7 +65,7 @@ export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSh
     let syncError='';
     try { await refreshSheetsIfStale(); } catch(error) { syncError=error.message; console.error('Salesman sheet refresh failed',error); }
     const id=req.authUser.id;
-    const jobs=await pool.query(`select j.*,sc.salesman_id from jobs j left join sales_credits sc on sc.job_id=j.id order by j.date desc,j.time`,[]);
+    const jobs=await pool.query(`select j.*,sc.salesman_id from jobs j left join sales_credits sc on sc.job_id=j.id where not j.retained_for_payroll order by j.date desc,j.time`,[]);
     const owned=jobs.rows.filter(row=>row.salesman_id===id);
     const ownCustomers=new Set(owned.map(row=>row.customer_id));
     const customers=await pool.query('select * from customers where id=any($1::text[])',[ [...new Set(jobs.rows.map(row=>row.customer_id))] ]);
