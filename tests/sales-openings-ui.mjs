@@ -18,7 +18,8 @@ await mkdir('artifacts', { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
   for (const viewport of [{ width: 320, height: 740 }, { width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
-    const context = await browser.newContext({ viewport, timezoneId: 'America/Chicago' });
+    const mobile = viewport.width < 1024;
+    const context = await browser.newContext({ viewport, timezoneId: 'America/Chicago', isMobile: mobile, hasTouch: mobile });
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     if (viewport.width < 1024) await page.route(/\.css$/, async route => {
@@ -119,6 +120,25 @@ try {
     await page.getByText('9:00 AM - 12:00 PM', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Book opening', exact: true }).click();
     const quickBook = page.getByRole('dialog', { name: 'Book a job', exact: true });
+    async function assertScheduleControls(form) {
+      const service = await form.getByLabel('Service', { exact: true }).boundingBox();
+      const controls = form.locator('input:is([type="date"], [type="time"])');
+      const fields = await controls.evaluateAll(nodes => nodes.map(node => {
+        const rect = node.getBoundingClientRect(), css = getComputedStyle(node);
+        return { left: rect.left, width: rect.width, height: rect.height, appearance: css.appearance, alignment: css.textAlign, font: parseFloat(css.fontSize) };
+      }));
+      assert.equal(fields.length, 2);
+      for (const field of fields) {
+        if (mobile) assert.ok(Math.abs(field.left - service.x) <= 1);
+        assert.ok(Math.abs(field.width - service.width) <= 1);
+        assert.equal(field.appearance, 'none');
+        assert.equal(field.alignment, 'left');
+        assert.ok(field.font >= 16);
+      }
+      assert.ok(Math.abs(fields[0].height - fields[1].height) <= 1);
+      assert.ok(await form.evaluate(node => node.scrollWidth <= node.clientWidth));
+    }
+    await assertScheduleControls(quickBook);
     assert.equal(await quickBook.getByLabel('Date', { exact: true }).inputValue(), tomorrow);
     assert.equal(await quickBook.getByLabel('Time', { exact: true }).inputValue(), '09:00');
     await quickBook.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -139,6 +159,10 @@ try {
     await calendar.getByRole('button', { name: /My Scheduled Customer/ }).click();
     const editBooking = page.getByRole('dialog', { name: 'Edit booking', exact: true });
     assert.equal(await editBooking.getByLabel('Date', { exact: true }).inputValue(), followingDay);
+    await assertScheduleControls(editBooking);
+    const time = editBooking.getByLabel('Time', { exact: true });
+    await time.fill('15:15');
+    assert.equal(await time.inputValue(), '15:15');
     await editBooking.getByRole('button', { name: 'Cancel', exact: true }).click();
     await view.getByRole('button', { name: 'month', exact: true }).click();
     assert.ok(await calendar.locator('.calendar-day').count() >= 28);

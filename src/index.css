@@ -96,18 +96,33 @@ select {
 .dark .sales-dialog { background: #0f172a; color: #fff; }
 .sales-dialog .settings-grid input, .sales-dialog .settings-grid textarea { font-size: 16px; }
 
-/* Safari's native date control otherwise keeps its intrinsic content width. */
-.reimbursement-date, .recurring-date {
+/* Safari's native date and time controls otherwise keep their intrinsic width. */
+.reimbursement-date,
+.recurring-date,
+.sales-dialog .settings-grid input:is([type="date"], [type="time"]) {
   display: block;
   appearance: none;
   -webkit-appearance: none;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   min-height: 52px;
+  text-align: left;
 }
-.reimbursement-date::-webkit-date-and-time-value, .recurring-date::-webkit-date-and-time-value { min-width: 0; text-align: left; }
-.reimbursement-date::-webkit-datetime-edit, .recurring-date::-webkit-datetime-edit { min-width: 0; padding: 0; }
+.reimbursement-date::-webkit-date-and-time-value,
+.recurring-date::-webkit-date-and-time-value,
+.sales-dialog .settings-grid input:is([type="date"], [type="time"])::-webkit-date-and-time-value {
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+.reimbursement-date::-webkit-datetime-edit,
+.recurring-date::-webkit-datetime-edit,
+.sales-dialog .settings-grid input:is([type="date"], [type="time"])::-webkit-datetime-edit {
+  min-width: 0;
+  padding: 0;
+}
 
 .team-pay-tabs, .recurring-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #cbd5e1; }
 .recurring-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
