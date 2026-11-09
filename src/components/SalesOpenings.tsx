@@ -10,6 +10,7 @@ export function OwnerOpeningButton({ opening, onClick }: { opening: OwnerSalesOp
   return <button type="button" onClick={onClick} className={`calendar-opening ${opening.status === 'open' ? 'calendar-opening-available' : ''}`}>
     <span className="text-xs font-semibold">{openingHours(opening)}</span>
     <span className="text-xs">{ownerStatuses[opening.status]}</span>
+    {opening.weekendDefault && <span className="text-xs opacity-80">Weekend opening</span>}
   </button>;
 }
 
@@ -20,8 +21,8 @@ export function OwnerOpeningEditor({ opening, onClose, onSaved }: {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const editable = !['pending', 'booked', 'past'].includes(opening.status);
-  const path = opening.id ? `${ownerOpeningsPath}/${opening.id}` : ownerOpeningsPath;
+  const editable = !['pending', 'booked'].includes(opening.status) && opening.date >= centralToday();
+  const path = opening.id ? `${ownerOpeningsPath}/${opening.id}${opening.weekendDefault ? `?date=${opening.date}` : ''}` : ownerOpeningsPath;
   const title = opening.id ? 'Calendar opening' : 'Add opening';
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -43,14 +44,14 @@ export function OwnerOpeningEditor({ opening, onClose, onSaved }: {
       <div><h2 className="text-xl font-bold">{title}</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">One job per opening · Central time</p></div>
       <button type="button" className="icon-button shrink-0" title="Close" aria-label="Close opening" onClick={onClose} disabled={working}><X size={17} /></button>
     </div>
-    {opening.id && <p className="mt-3 text-sm font-semibold">{ownerStatuses[opening.status]}</p>}
+    {opening.id && <p className="mt-3 text-sm font-semibold">{opening.weekendDefault ? 'Weekend opening · ' : ''}{ownerStatuses[opening.status]}</p>}
     <fieldset className="settings-grid mt-4" disabled={working || !editable}>
-      <label className="block min-w-0 text-sm font-semibold sm:col-span-2">Date<input className="recurring-date" type="date" required min={centralToday()} value={draft.date} onChange={event => setDraft({ ...draft, date: event.target.value })} /></label>
+      <label className="block min-w-0 text-sm font-semibold sm:col-span-2">Date<input className="recurring-date" type="date" required readOnly={opening.weekendDefault} min={centralToday()} value={draft.date} onChange={event => setDraft({ ...draft, date: event.target.value })} /></label>
       <label className="block min-w-0 text-sm font-semibold">Start time<input type="time" required value={draft.startTime} onChange={event => setDraft({ ...draft, startTime: event.target.value })} /></label>
       <label className="block min-w-0 text-sm font-semibold">End time<input type="time" required value={draft.endTime} onChange={event => setDraft({ ...draft, endTime: event.target.value })} /></label>
     </fieldset>
     {error && <p role="alert" className="mt-4 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
-    {confirmRemove && <div className="mt-4 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="text-sm">Remove this opening? Existing jobs won’t change.</p><button type="button" className="text-button text-rose-600" disabled={working} onClick={() => void perform('DELETE')}>Confirm removal</button></div>}
+    {confirmRemove && <div className="mt-4 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="text-sm">{opening.weekendDefault ? 'Remove this date’s opening? Other weekends and existing jobs won’t change.' : 'Remove this opening? Existing jobs won’t change.'}</p><button type="button" className="text-button text-rose-600" disabled={working} onClick={() => void perform('DELETE')}>Confirm removal</button></div>}
     <div className="mt-5 flex flex-wrap justify-end gap-2">
       {opening.id && opening.status !== 'pending' && !confirmRemove && <button type="button" className="text-button gap-2" disabled={working} onClick={() => setConfirmRemove(true)}><Trash2 size={15} />Remove opening</button>}
       {editable && <button className="primary-button gap-2" disabled={working}><Save size={16} />{working ? 'Saving...' : opening.id ? 'Save changes' : 'Publish opening'}</button>}

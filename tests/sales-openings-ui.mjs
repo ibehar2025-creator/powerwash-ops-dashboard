@@ -51,6 +51,7 @@ try {
         assert.equal(role, 'owner');
         const index = openings.findIndex(item => path.endsWith(item.id));
         assert.ok(index >= 0);
+        if (openings[index].weekendDefault) assert.equal(new URL(route.request().url()).searchParams.get('date'), openings[index].date);
         if (method === 'PATCH') { result = Object.assign(openings[index], route.request().postDataJSON()); }
         if (method === 'DELETE') { openings.splice(index, 1); result = { deleted: true }; }
       }
@@ -138,6 +139,27 @@ try {
     await saved.waitFor({ state: 'detached' });
     await page.getByText('Calendar Customer', { exact: true }).waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    const saturday = shift(today, (6 - new Date(`${today}T12:00:00Z`).getUTCDay() + 7) % 7 + 7);
+    openings.push({ id: 'weekend', date: saturday, startTime: '11:30', endTime: '18:30', status: 'open', weekendDefault: true });
+    role = 'owner'; await page.reload();
+    if (viewport.width < 1024) await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+    await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+    const targetDay = page.getByRole('button', { name: `Add opening on ${saturday}`, exact: true });
+    await page.getByRole('button', { name: `Add opening on ${today}`, exact: true }).waitFor();
+    for (let week = 0; week < 3 && !await targetDay.isVisible(); week++) {
+      await page.getByRole('button', { name: 'Next week', exact: true }).click();
+    }
+    await page.getByRole('button', { name: /11:30 AM.*6:30 PM.*Weekend opening/ }).click();
+    assert.equal(await existing.getByLabel('Date', { exact: true }).evaluate(input => input.readOnly), true);
+    await existing.getByLabel('End time', { exact: true }).fill('16:30');
+    await existing.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await existing.waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: /11:30 AM.*4:30 PM.*Weekend opening/ }).click();
+    await existing.getByRole('button', { name: 'Remove opening', exact: true }).click();
+    await existing.getByText(/Other weekends and existing jobs/).waitFor();
+    await existing.getByRole('button', { name: 'Confirm removal', exact: true }).click();
+    await existing.waitFor({ state: 'detached' });
+    assert.equal(openings.some(item => item.id === 'weekend'), false);
     assert.deepEqual(errors, []);
     await context.close();
     console.log(`Manual openings ${viewport.width}px: publish, edit, remove, next slot, safe areas, stale slot, and booking passed`);

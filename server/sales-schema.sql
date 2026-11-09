@@ -25,6 +25,7 @@ create table if not exists sales_openings (
   check (start_time < end_time)
 );
 create index if not exists sales_openings_date_idx on sales_openings(date, start_time);
+alter table sales_openings add column if not exists closed boolean not null default false;
 alter table sales_openings enable row level security;
 revoke all on sales_openings from anon,authenticated;
 alter table sales_bookings add column if not exists opening_id uuid references sales_openings(id) on delete set null;

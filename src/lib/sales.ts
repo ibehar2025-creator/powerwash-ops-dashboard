@@ -23,6 +23,7 @@ export interface SalesOpening {
 }
 export interface OwnerSalesOpening extends SalesOpening {
   status: 'open' | 'busy' | 'booked' | 'pending' | 'past';
+  weekendDefault?: boolean;
 }
 export interface SalesBooking {
   requestId?:string;name:string;phone:string;email:string;address:string;serviceType:string;
