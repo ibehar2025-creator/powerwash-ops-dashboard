@@ -5,7 +5,6 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { fetchMetaSheetLeads } from "./meta-sheet-leads.mjs";
 import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
 import { commissionRateForService } from "./commission-rates.mjs";
@@ -1427,14 +1426,6 @@ async function runSheetSync() {
   const response = await fetch(syncUrl, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Sheet sync endpoint failed with ${response.status}`);
   const payload = await response.json();
-  if (process.env.META_SHEET_SYNC_SECRET) {
-    try {
-      const metaLeads = await fetchMetaSheetLeads(syncUrl, process.env.META_SHEET_SYNC_SECRET);
-      payload.leads = [...(payload.leads ?? []), ...metaLeads];
-    } catch (error) {
-      console.error("Meta lead sheet sync failed:", error.message);
-    }
-  }
   const customersById = new Map((payload.customers ?? []).map((customer) => [customer.id, customer]));
   for (const plan of payload.servicePlans ?? []) {
     if (plan.customer?.id && !customersById.has(plan.customer.id)) customersById.set(plan.customer.id, plan.customer);
