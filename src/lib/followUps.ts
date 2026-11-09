@@ -1,4 +1,10 @@
+import type { LeadStatus } from "../types/business";
+
 export type FollowUpTiming = "overdue" | "today" | "upcoming" | "later" | "unscheduled";
+
+export function isClosedLead(status: LeadStatus) {
+  return status === "won" || status === "lost";
+}
 
 export function followUpTiming(followUpDate: string, currentDate: string): FollowUpTiming {
   if (!followUpDate) return "unscheduled";

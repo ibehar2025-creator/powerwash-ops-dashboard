@@ -15,6 +15,8 @@ try{
   const job={id:'test-job',customerId:'test-customer',date:'2099-10-10',time:'09:00',address:'123 Example Avenue',serviceType:'Windows',status:'scheduled',price:450,amountPaid:0,tipAmount:0,paymentStatus:'unpaid',notes:'',employeeInstructions:'Use the side gate',source:'manual',crewIds:[]};
   const credit={id:'test-credit',jobId:job.id,salesmanId:user.id,salesmanName:user.name,customerName:'Test Customer',jobDate:job.date,servicePrice:450,currentServicePrice:450,rate:0.20,amount:90,status:'estimated',ownerNote:'',workerPending:false,payrollLinked:false};
   const data={jobs:[job],mapJobs:[job],customers:[{id:'test-customer',name:'Test Customer',phone:'555-0100',email:'customer@example.invalid',address:job.address,notes:'',insights:[]}],mapCustomers:[{id:'test-customer',name:'Test Customer',address:job.address}],commissions:[credit],leads:[{id:'test-lead',name:'Example Lead',contact:'555-0101',address:'124 Example Avenue',source:'Map solicitation',status:'new',estimatedValue:0,followUpDate:'2026-01-01',notes:'Call before visiting.'}],solicitations:[],notifications:[{id:'test-event',title:'Job booked',detail:'Test Customer - 2099-10-10',created_at:'2026-10-03'}],statements:[]};
+  data.leads.push({ ...data.leads[0], id:'won-lead', name:'Won example', status:'won' }, { ...data.leads[0], id:'lost-lead', name:'Lost example', status:'lost' });
+  const ownerLeads = data.leads.map(lead => ({ ...lead }));
   if(mobile)await page.route(/\.css$/,async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replaceAll('env(safe-area-inset-top)','59px').replaceAll('env(safe-area-inset-bottom)','34px')});});
   await page.route('**/api/**',async route=>{const path=new URL(route.request().url()).pathname;requests.push(path);let result={};if(path==='/api/auth/config')result={enabled:true,clientId:'test',state:'test',signupCodeRequired:true};if(path==='/api/auth/session')result={user};if(path==='/api/salesman/bootstrap')result=data;if(path==='/api/notifications/read'){if(route.request().method()==='POST')read=[...new Set([...read,...route.request().postDataJSON().keys])];result={readKeys:read};}if(path==='/api/salesman/jobs'&&route.request().method()==='POST'){const body=route.request().postDataJSON();assert.ok(body.requestId);const saved={...job,...body,id:'new-test-job',customerId:'new-test-customer'};data.jobs.push(saved);data.customers.push({...data.customers[0],id:saved.customerId,name:body.name});result=saved;}await route.fulfill({json:result});});
   await page.goto(url);await page.getByRole('heading',{name:'Sales overview'}).waitFor();
@@ -34,7 +36,18 @@ try{
   if(mobile){const top=await page.locator('.sales-dialog').evaluate(n=>n.getBoundingClientRect().top);assert.ok(top>=59);}
   await page.screenshot({path:`artifacts/salesman-booking-${viewport.width}.png`,fullPage:true});await page.locator('.sales-dialog').getByRole('button',{name:'Book job',exact:true}).click();await page.getByRole('heading',{name:'My Jobs',exact:true}).last().waitFor();await page.getByLabel('Search my jobs').fill('New Test');assert.equal(await page.locator('article').count(),1);
   if(mobile)await page.getByRole('button',{name:'Open menu',exact:true}).click();await page.getByRole('button',{name:'My Earnings',exact:true}).click();await page.getByText('$450 × 20% =').waitFor();assert.ok((await page.locator('main').innerText()).includes('$90'));
-  await page.screenshot({path:`artifacts/salesman-earnings-${viewport.width}.png`,fullPage:true});assert.deepEqual(errors,[]);await context.close();console.log(`Salesman UI: ${viewport.width}px passed (safe areas, notifications, booking, zero deletion, search, earnings)`);
+  await page.screenshot({path:`artifacts/salesman-earnings-${viewport.width}.png`,fullPage:true});
+  if(mobile)await page.getByRole('button',{name:'Open menu',exact:true}).click();
+  await page.getByRole('button',{name:'Leads',exact:true}).click();
+  const salesLeadView=page.getByRole('group',{name:'Lead view',exact:true});
+  assert.equal(await salesLeadView.getByRole('button',{name:'Outstanding',exact:true}).getAttribute('aria-pressed'),'true');
+  assert.equal(await page.getByRole('heading',{name:'Example Lead',exact:true}).count(),1);
+  assert.equal(await page.getByRole('heading',{name:/^(Won|Lost) example$/}).count(),0);
+  await salesLeadView.getByRole('button',{name:'Closed',exact:true}).click();
+  assert.equal(await page.getByRole('heading',{name:/^(Won|Lost) example$/}).count(),2);
+  assert.equal(await page.getByRole('heading',{name:'Example Lead',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Book job',exact:true}).count(),0);
+  assert.deepEqual(errors,[]);await context.close();console.log(`Salesman UI: ${viewport.width}px passed (booking, leads, earnings, and notification flows)`);
   const ownerContext=await browser.newContext({viewport,isMobile:mobile,hasTouch:mobile});const ownerPage=await ownerContext.newPage();const ownerErrors=[];const ownerRequests=[];ownerPage.on('pageerror',e=>ownerErrors.push(e.message));
   if(mobile)await ownerPage.route(/\.css$/,async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replaceAll('env(safe-area-inset-top)','59px').replaceAll('env(safe-area-inset-bottom)','34px')});});
   const person={id:'test-salesman',name:'Test Salesman',email:'sales@example.invalid',active:true,pictureUrl:'',commissionPct:0.20};
@@ -45,7 +58,8 @@ try{
     ownerRequests.push({path,method});
     if(path==='/api/auth/config')result={enabled:true,clientId:'test',state:'test',signupCodeRequired:true};
     if(path==='/api/auth/session')result={user:{...user,id:'test-owner',role:'owner'}};
-    if(path==='/api/bootstrap'||path==='/api/sync-sheets')result={customers:[],jobs:[],leads:[],invoices:[],expenses:[],servicePlans:[],reviews:[],solicitations:[],calendarEvents:[]};
+    if(path==='/api/bootstrap'||path==='/api/sync-sheets')result={customers:[],jobs:[],leads:ownerLeads,invoices:[],expenses:[],servicePlans:[],reviews:[],solicitations:[],calendarEvents:[]};
+    if(path==='/api/leads/test-lead'&&method==='PATCH')result=Object.assign(ownerLeads[0],route.request().postDataJSON());
     if(path==='/api/owner/operations')result={employees:[],assignments:[],earnings:[],contracts:[],payouts:[]};
     if(path==='/api/owner/sales')result={salesmen:[person],commissions:[],notifications:[]};
     if(path===`/api/owner/salesmen/${person.id}`&&method==='PATCH'){const body=route.request().postDataJSON();assert.equal(body.commissionPct,0.15);person.commissionPct=body.commissionPct;result={saved:true};}
@@ -63,6 +77,34 @@ try{
   });
   await ownerPage.goto(url);await ownerPage.getByRole('heading',{name:'Performance snapshot'}).waitFor();
   await ownerPage.waitForLoadState('networkidle');
+  const ownerTab=async name=>{
+    if(mobile)await ownerPage.getByRole('button',{name:'Open navigation',exact:true}).click();
+    await ownerPage.getByRole('button',{name,exact:true}).click();
+  };
+  await ownerTab('Leads');
+  const ownerLeadView=ownerPage.getByRole('group',{name:'Lead view',exact:true});
+  assert.equal(await ownerLeadView.getByRole('button',{name:'Outstanding',exact:true}).getAttribute('aria-pressed'),'true');
+  assert.equal(await ownerPage.getByRole('button',{name:'Edit Example Lead',exact:true}).count(),1);
+  assert.equal(await ownerPage.getByRole('button',{name:/^Edit (Won|Lost) example$/}).count(),0);
+  await ownerLeadView.getByRole('button',{name:'Closed',exact:true}).click();
+  assert.equal(await ownerPage.getByRole('button',{name:/^Edit (Won|Lost) example$/}).count(),2);
+  assert.equal(await ownerPage.getByRole('combobox',{name:'Follow-up timing filter',exact:true}).count(),0);
+  await ownerPage.getByRole('combobox',{name:'Lead status filter',exact:true}).selectOption('lost');
+  assert.equal(await ownerPage.getByRole('button',{name:'Edit Won example',exact:true}).count(),0);
+  await ownerLeadView.getByRole('button',{name:'Outstanding',exact:true}).click();
+  await ownerPage.getByRole('button',{name:'Edit Example Lead',exact:true}).click();
+  const leadEditor = ownerPage.getByRole('dialog',{name:'Edit lead',exact:true});
+  await leadEditor.getByRole('combobox').selectOption('won');
+  assert.ok(await ownerPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
+  await leadEditor.getByRole('button',{name:'Save changes',exact:true}).click({timeout:5000});
+  await ownerPage.getByText('No outstanding leads.',{exact:true}).waitFor();
+  await ownerLeadView.getByRole('button',{name:'Closed',exact:true}).click();
+  await ownerPage.getByRole('button',{name:'Edit Example Lead',exact:true}).waitFor();
+  assert.ok(await ownerPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await ownerPage.screenshot({path:`artifacts/closed-leads-${viewport.width}.png`,fullPage:true});
+  await ownerTab('Dashboard');await ownerTab('Leads');
+  assert.equal(await ownerLeadView.getByRole('button',{name:'Outstanding',exact:true}).getAttribute('aria-pressed'),'true');
+  await ownerTab('Dashboard');
   const pendingKey='powerwash-pending-sales-booking:test-owner';
   await ownerPage.evaluate(key=>localStorage.setItem(key,JSON.stringify({requestId:'real-pending-owner-booking',name:'Real pending draft'})),pendingKey);
   await ownerPage.getByRole('button',{name:'Open profile menu'}).click();
@@ -112,7 +154,10 @@ try{
   assert.equal(await ownerPage.getByLabel('Customer name',{exact:true}).inputValue(),'Sample Follow-up');
   await ownerPage.getByLabel('Service',{exact:true}).fill('Driveway');await ownerPage.getByLabel('Service price',{exact:true}).fill('250');
   await ownerPage.locator('.sales-dialog').getByRole('button',{name:'Book job',exact:true}).click();
-  await previewTab('Leads');await ownerPage.getByText('won',{exact:true}).waitFor();
+  await previewTab('Leads');
+  assert.equal(await ownerPage.getByText('Sample Follow-up',{exact:true}).count(),0);
+  await ownerPage.getByRole('group',{name:'Lead view',exact:true}).getByRole('button',{name:'Closed',exact:true}).click();
+  await ownerPage.getByText('won',{exact:true}).waitFor();
   await previewTab('My Earnings');assert.ok((await ownerPage.locator('main').innerText()).includes('$100'));
   await ownerPage.getByRole('button',{name:'Refresh',exact:true}).click();
   await ownerPage.waitForLoadState('networkidle');

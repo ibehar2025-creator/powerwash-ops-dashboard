@@ -9,6 +9,8 @@ import { createSalesmanPreview, mergePreviewMapHistory, removePreviewSolicitatio
 import type { SalesBooking,SalesMapHistory,SalesNotification,SalesOpening,SalesWorkspace } from '../lib/sales';
 import { NextSalesOpening } from './SalesOpenings';
 import { SalesCalendar } from './SalesCalendar';
+import { LeadViewSwitch } from './LeadViewSwitch';
+import { isClosedLead } from '../lib/followUps';
 import { centralToday, openingHours, sampleOpenings, useSalesOpenings } from '../lib/salesOpenings';
 import type { Job,Lead } from '../types/business';
 import { ProfileMenu } from './ProfileMenu';
@@ -71,13 +73,43 @@ export function SalesmanWorkspace({preview=false,onExitPreview}:{preview?:boolea
         onAddJob={property=>newJob(property)} onSaveJobCoordinates={async()=>{}} onCreateSolicitation={async item=>{if(isPreview){setData(current=>current?savePreviewSolicitation(current,item):current);return;}await createSolicitation(item);await refresh();}}
         onUpdateSolicitation={async(id,patch)=>{if(isPreview){setData(current=>{const item=current?.solicitations.find(s=>s.id===id);return current&&item?savePreviewSolicitation(current,{...item,...patch},id):current;});return;}await saveSolicitationPatch(id,patch);await refresh();}} onDeleteSolicitation={async id=>{if(isPreview){setData(current=>current?removePreviewSolicitation(current,id):current);return;}await deleteSolicitation(id);await refresh();}}/></Suspense>}
       {data&&tab==='jobs'&&<><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">My Jobs</h2><button className="primary-button gap-2" onClick={()=>newJob()}><Plus size={17}/>Book job</button></div><div className="flex flex-col gap-3 sm:flex-row"><label className="relative min-w-0 flex-1"><Search size={18} className="absolute left-3 top-5 text-slate-400"/><input type="search" className={`${input} pl-10`} aria-label="Search my jobs" placeholder="Search name or address" value={search} onChange={e=>setSearch(e.target.value)}/></label><select className={`${input} sm:max-w-48`} aria-label="Job status" value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All statuses</option>{['scheduled','in progress','completed','canceled','past due'].map(s=><option key={s}>{s}</option>)}</select></div>{filtered.map(job=><div key={job.id}><JobRow job={job} name={customer(job)?.name??'Customer'} onEdit={()=>{setEditing(job);setBooking({});}} onFind={()=>find(job)}/><div className="flex flex-wrap gap-3 px-3 py-2 text-sm">{customer(job)?.phone&&<a className="inline-flex gap-1 items-center text-lagoon" href={`tel:${customer(job)?.phone}`}><Phone size={15}/>Call</a>}{customer(job)?.phone&&<a className="text-lagoon" href={`sms:${customer(job)?.phone}`}>Text</a>}{customer(job)?.email&&<a className="inline-flex gap-1 items-center text-lagoon" href={`mailto:${customer(job)?.email}`}><Mail size={15}/>Email</a>}<span>{(()=>{const c=data.commissions.find(item=>item.jobId===job.id);return c?`${currency.format(c.servicePrice)} × ${formatRate(c.rate)} = ${currency.format(c.amount)} (${c.status})`:'';})()}</span></div></div>)}{!filtered.length&&<p className="text-slate-500">No jobs match.</p>}</>}
-      {data&&tab==='leads'&&<><h2 className="text-xl font-bold">My follow-ups</h2>{data.leads.map(item=><article key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"><div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><h3 className="font-semibold break-words">{item.name}</h3><p className="text-sm break-words text-slate-500">{item.address}</p><p className="mt-2 text-sm">{item.followUpDate||'Not scheduled'} <span className={statusClass}>{['won','lost'].includes(item.status)?item.status:!item.followUpDate?'No date':item.followUpDate<today?'Overdue':item.followUpDate===today?'Today':'Upcoming'}</span></p><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.notes}</p></div>{!['won','lost'].includes(item.status)&&<div className="flex flex-wrap items-start gap-2"><button className="text-button gap-2" onClick={()=>setLead(item)}><Pencil size={15}/>Edit</button><button className="primary-button gap-2" onClick={()=>newJob({leadId:item.id,name:item.name==='Map follow-up'?'':item.name,address:item.address})}><Plus size={15}/>Book job</button></div>}</div></article>)}{!data.leads.length&&<p className="text-slate-500">No follow-ups yet.</p>}</>}
+      {data&&tab==='leads'&&<SalesLeadList leads={data.leads} today={today} onEdit={setLead} onBook={item=>newJob({leadId:item.id,name:item.name==='Map follow-up'?'':item.name,address:item.address})}/>}
       {data&&tab==='earnings'&&<><h2 className="text-xl font-bold">My Earnings</h2>{data.commissions.map(c=><article key={c.id} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"><div className="flex flex-wrap items-center justify-between gap-2"><strong>{c.customerName}</strong><span className={statusClass}>{c.status==='pending'?'Awaiting approval':c.status}</span></div><p className="mt-2">{currency.format(c.servicePrice)} × {formatRate(c.rate)} = <strong>{currency.format(c.amount)}</strong></p><p className="mt-1 text-sm text-slate-500">{c.jobDate}{c.paidAt?` · Paid ${c.paidAt.slice(0,10)}`:''}</p>{['approved','paid'].includes(c.status)&&c.currentServicePrice!==c.servicePrice&&<p className="mt-2 text-sm text-amber-600">Approved amount is locked; owner correction required for the changed price.</p>}{c.ownerNote&&<p className="mt-2 text-sm">{c.ownerNote}</p>}</article>)}{!data.commissions.length&&<p>No commissions yet.</p>}<EmployeePayrollStatements statements={data.statements}/></>}
     </main></div>
     {booking&&<SalesBookingForm seed={booking} job={editing} openings={published} onStaleOpening={()=>void refreshOpenings()} customer={editing?customer(editing):undefined} onSave={isPreview?async(input,job)=>{setData(current=>current?savePreviewSalesBooking(current,input,job):current);if(input.openingId)setUsedSampleOpenings(current=>[...current,input.openingId!]);}:undefined} onClose={()=>{setBooking(null);setEditing(null);}} onSaved={async()=>{setBooking(null);setEditing(null);await Promise.all([refresh(),refreshOpenings()]);choose('jobs');}}/>}
     {lead&&<SalesLeadForm lead={lead} onSave={isPreview?async item=>{setData(current=>current?savePreviewSalesLead(current,item):current);}:undefined} onClose={()=>setLead(null)} onSaved={async()=>{setLead(null);await refresh();}}/>}
   </div>;
 }
+function SalesLeadList({ leads, today, onEdit, onBook }: { leads: Lead[]; today: string; onEdit: (lead: Lead) => void; onBook: (lead: Lead) => void }) {
+  const [closed, setClosed] = useState(false);
+  const closedCount = leads.filter(lead => isClosedLead(lead.status)).length;
+  const visible = leads.filter(lead => isClosedLead(lead.status) === closed);
+  return <>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="text-xl font-bold">My follow-ups</h2>
+      <LeadViewSwitch closed={closed} outstandingCount={leads.length - closedCount} closedCount={closedCount} onChange={setClosed} />
+    </div>
+    {visible.map(item => <article key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div className="flex flex-wrap justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="break-words font-semibold">{item.name}</h3>
+          <p className="break-words text-sm text-slate-500">{item.address}</p>
+          <p className="mt-2 text-sm">
+            {!closed && <>{item.followUpDate || 'Not scheduled'}{' '}</>}
+            <span className={statusClass}>{closed ? item.status : !item.followUpDate ? 'No date' : item.followUpDate < today ? 'Overdue' : item.followUpDate === today ? 'Today' : 'Upcoming'}</span>
+          </p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm">{item.notes}</p>
+        </div>
+        {!closed && <div className="flex flex-wrap items-start gap-2">
+          <button className="text-button gap-2" onClick={() => onEdit(item)}><Pencil size={15} />Edit</button>
+          <button className="primary-button gap-2" onClick={() => onBook(item)}><Plus size={15} />Book job</button>
+        </div>}
+      </div>
+    </article>)}
+    {!visible.length && <p className="text-sm text-slate-500 dark:text-slate-400">{closed ? 'No closed leads yet.' : 'No outstanding leads.'}</p>}
+  </>;
+}
+
 function JobRow({job,name,onEdit,onFind}:{job:Job;name:string;onEdit:()=>void;onFind:()=>void}){return <article className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"><div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><strong className="break-words">{name}</strong><p className="mt-1 text-sm text-slate-500">{job.date} at {job.time} · {job.status}</p><p className="mt-1 break-words text-sm">{job.address} · {job.serviceType} · {currency.format(job.price)}</p>{job.employeeInstructions&&<p className="mt-2 break-words text-sm text-slate-500">{job.employeeInstructions}</p>}</div><div className="flex items-start gap-2"><button className="icon-button" title="Find on map" aria-label={`Find ${name} on map`} onClick={onFind}><MapPinned size={17}/></button>{canEdit(job)&&<button className="icon-button" title="Edit job" aria-label={`Edit ${name}`} onClick={onEdit}><Pencil size={17}/></button>}</div></div></article>;}
 function SalesBookingForm({seed,job,customer,openings,onSave,onClose,onSaved,onStaleOpening}:{seed:Partial<SalesBooking>;job:Job|null;customer?:{name:string;phone:string;email:string};openings:SalesOpening[];onSave?:(input:SalesBooking,job:Job|null)=>Promise<void>;onClose:()=>void;onSaved:()=>Promise<void>;onStaleOpening:()=>void}){
   const {user}=useAuth();const storageKey=`powerwash-pending-sales-booking:${user.id}`;
