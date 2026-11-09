@@ -17,6 +17,18 @@ create table if not exists sales_bookings (
   saved boolean not null default false,
   created_at timestamptz not null default now()
 );
+create table if not exists sales_openings (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  start_time time not null,
+  end_time time not null,
+  check (start_time < end_time)
+);
+create index if not exists sales_openings_date_idx on sales_openings(date, start_time);
+alter table sales_openings enable row level security;
+revoke all on sales_openings from anon,authenticated;
+alter table sales_bookings add column if not exists opening_id uuid references sales_openings(id) on delete set null;
+create unique index if not exists sales_bookings_opening_idx on sales_bookings(opening_id) where opening_id is not null;
 create table if not exists sales_credits (
   id uuid primary key default gen_random_uuid(),
   job_id text not null unique references jobs(id) on delete restrict,

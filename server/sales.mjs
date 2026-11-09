@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { installSalesOpeningRoutes, openingIdPattern, reserveSalesOpening } from './sales-openings.mjs';
 
 export async function ensureSalesSchema(pool) {
   if (pool) await pool.query(await readFile(new URL('./sales-schema.sql', import.meta.url), 'utf8'));
@@ -50,7 +51,8 @@ function bookingInput(body) {
   return data;
 }
 export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSheetAction,syncUrl,toJob,toCustomer,toLead,toSolicitation,audit,sendPushToRole,sendPushToUsers,refreshSheetsIfStale,loadPayrollRuns}) {
-  const route = fn => async(req,res,next)=>{try{await fn(req,res);}catch(error){if(error.status)res.status(error.status).json({error:error.message});else next(error);}};
+  const route = fn => async(req,res,next)=>{try{await fn(req,res);}catch(error){if(error.status)res.status(error.status).json({error:error.message,code:error.code});else next(error);}};
+  installSalesOpeningRoutes(app, { pool, requireDatabase, requireOwner, salesmanOnly });
   const notify = async(db,userId,jobId,title,detail)=>db.query('insert into sales_notifications(user_id,job_id,title,detail) values($1,$2,$3,$4)',[userId,jobId,title,detail]);
   app.get('/api/owner/sales-preview/map',requireDatabase,requireOwner,route(async(_req,res)=>{
     let syncError='';
@@ -80,13 +82,19 @@ export function installSalesRoutes(app, {pool,requireDatabase,requireOwner,runSh
     const requestId=req.body.requestId;
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId ?? '')) return res.status(400).json({error:'A stable booking request ID is required.'});
     const data=bookingInput(req.body); const id=req.authUser.id;
+    if (req.body.openingId != null) {
+      if (!openingIdPattern.test(req.body.openingId) || data.leadId) return res.status(400).json({error:'Choose a valid calendar opening.'});
+      data.openingId=req.body.openingId;
+    }
     const prior=await pool.query('select request_id from sales_bookings where request_id=$1',[requestId]);
-    if(!prior.rows[0]){
+    if(!prior.rows[0]&&!data.openingId){
       const future=(await pool.query(`select ($1::date+$2::time) > (now() at time zone 'America/Chicago') as valid`,[data.date,data.time])).rows[0].valid;
       if(!future) return res.status(400).json({error:'Choose a future job date and time.'});
     }
-    await pool.query(`insert into sales_bookings(request_id,salesman_id,job_id,customer_id,payload) values($1,$2,$3,$4,$5) on conflict(request_id) do nothing`,
-      [requestId,id,`manual-job-${randomUUID()}`,`manual-customer-${randomUUID()}`,JSON.stringify(data)]);
+    const newJobId=`manual-job-${randomUUID()}`, newCustomerId=`manual-customer-${randomUUID()}`;
+    if (data.openingId) await reserveSalesOpening(pool,{requestId,salesmanId:id,jobId:newJobId,customerId:newCustomerId,data});
+    else await pool.query(`insert into sales_bookings(request_id,salesman_id,job_id,customer_id,payload) values($1,$2,$3,$4,$5) on conflict(request_id) do nothing`,
+      [requestId,id,newJobId,newCustomerId,JSON.stringify(data)]);
     const client=await pool.connect();
     try{
       await client.query('begin');

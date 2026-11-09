@@ -28,7 +28,7 @@ test('server guards reject direct wrong-role API attempts',()=>{
   for(const role of ['owner','salesman']){let next=false;ownerOrSalesman({authUser:{role}},{},()=>{next=true;});assert.equal(next,true);}
 });
 test('all salesman APIs are role guarded and never expose owner routing',()=>{
-  const routes=[];const app=Object.fromEntries(['get','post','patch'].map(method=>[method,(path,...handlers)=>routes.push({path,handlers})]));
+  const routes=[];const app=Object.fromEntries(['get','post','patch','delete'].map(method=>[method,(path,...handlers)=>routes.push({path,handlers})]));
   installSalesRoutes(app,{});
   for(const route of routes.filter(r=>r.path.startsWith('/api/salesman/')))assert.equal(route.handlers[1],salesmanOnly);
   assert.ok(routes.some(r=>r.path==='/api/owner/sales-commissions/:id/review'));
@@ -38,7 +38,7 @@ test('owner preview map returns every past and future job without private fields
   const routes=new Map(),queries=[];
   const requireOwner=(req,res,next)=>req.authUser?.role==='owner'?next():res.status(403).json({error:'Owner access required.'});
   const requireDatabase=(_req,_res,next)=>next();
-  const app=Object.fromEntries(['get','post','patch'].map(method=>[method,(path,...handlers)=>routes.set(`${method} ${path}`,handlers)]));
+  const app=Object.fromEntries(['get','post','patch','delete'].map(method=>[method,(path,...handlers)=>routes.set(`${method} ${path}`,handlers)]));
   const jobs=Array.from({length:150},(_,index)=>({id:`job-${index}`,customer_id:'customer',date:index%2?'2020-01-01':'2099-01-01',time:'09:00',address:'123 Example',service_type:'Windows',status:index%2?'completed':'scheduled',price:450,notes:'private'}));
   const pool={query:async(sql,args)=>{queries.push({sql,args});return {rows:sql.includes('from jobs')?jobs:[{id:'customer',name:'Customer',address:'123 Example',phone:'private',notes:'private'}]};}};
   installSalesRoutes(app,{pool,requireOwner,requireDatabase,refreshSheetsIfStale:async()=>{}});
@@ -75,7 +75,7 @@ function bookingHarness(failure){
     return {rows:[]};
   };
   const pool={query,connect:async()=>({query,release:()=>{released=true;}})};
-  const app=Object.fromEntries(['get','post','patch'].map(method=>[method,(path,...handlers)=>routes.set(`${method} ${path}`,handlers.at(-1))]));
+  const app=Object.fromEntries(['get','post','patch','delete'].map(method=>[method,(path,...handlers)=>routes.set(`${method} ${path}`,handlers.at(-1))]));
   const runSheetAction=async(action,row)=>{writes.push(action);if(action==='addCustomer')snapshot.customers.push({id:row.customerId});if(action==='addUpcomingJob'){snapshot.jobs.push({id:row.jobId});if(fail==='timeout'){fail=null;throw new Error('Response timeout after successful write');}}};
   installSalesRoutes(app,{pool,syncUrl:'https://example.invalid/sheets',runSheetAction,toJob:r=>r,audit:async()=>{},sendPushToRole:async()=>{}});
   return {handler:routes.get('post /api/salesman/jobs'),snapshot,writes,reservation:()=>reservation,released:()=>released};
@@ -102,7 +102,7 @@ for(const failure of ['database','timeout'])test(`booking retry recovers ${failu
 test('unsafe fields, foreign jobs and foreign leads are rejected',async()=>{
   const routes=new Map();let mutations=0;
   const query=async(sql)=>{if(sql.startsWith('update'))mutations++;return {rows:[]};};
-  const app=Object.fromEntries(['get','post','patch'].map(method=>[method,(path,...handlers)=>routes.set(path,handlers.at(-1))]));
+  const app=Object.fromEntries(['get','post','patch','delete'].map(method=>[method,(path,...handlers)=>routes.set(path,handlers.at(-1))]));
   installSalesRoutes(app,{pool:{query,connect:async()=>({query,release(){}})}});
   const res={code:200,status(n){this.code=n;return this;},json(){}};
   await routes.get('/api/salesman/jobs/:id')({params:{id:'foreign'},body:{status:'completed'},authUser:{id:'salesman'}},res,error=>{throw error;});

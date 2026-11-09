@@ -15,13 +15,22 @@ export interface SalesWorkspace {
   commissions:SalesCredit[];leads:Lead[];solicitations:Solicitation[];notifications:SalesNotification[];statements:PayrollRun[];syncError?:string;
 }
 export interface OwnerSales {salesmen:SalesmanProfile[];commissions:SalesCredit[];notifications:SalesNotification[]}
+export interface SalesOpening {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}
+export interface OwnerSalesOpening extends SalesOpening {
+  status: 'open' | 'busy' | 'booked' | 'pending' | 'past';
+}
 export interface SalesBooking {
   requestId?:string;name:string;phone:string;email:string;address:string;serviceType:string;
-  date:string;time:string;price:number;employeeInstructions:string;latitude?:number;longitude?:number;leadId?:string;
+  date:string;time:string;price:number;employeeInstructions:string;latitude?:number;longitude?:number;leadId?:string;openingId?:string;
 }
 export async function salesRequest<T>(path:string,method='GET',body?:unknown):Promise<T> {
   const response=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
   const data=await response.json();
-  if(!response.ok)throw Object.assign(new Error(data.detail || data.error || 'Unable to save. Please try again.'),{status:response.status});
+  if(!response.ok)throw Object.assign(new Error(data.detail || data.error || 'Unable to save. Please try again.'),{status:response.status,code:data.code});
   return data;
 }

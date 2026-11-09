@@ -81,7 +81,7 @@ test('sales approval is idempotent, rejects unfinished worker review, and locks 
     const routes=new Map();const queries=[];
     const credit={id:'credit',job_id:'job',salesman_id:'salesman',job_status:'completed',service_price:450,current_service_price:450,amount:90,date:'2026-10-01',...state};
     const query=async(sql)=>{queries.push(sql);return {rows:sql==='select job_id from sales_credits where id=$1'?[{job_id:'job'}]:sql.includes('select sc.*')?[credit]:[]};};
-    const app=Object.fromEntries(['get','post','patch'].map(method=>[method,(path,...handlers)=>routes.set(path,handlers.at(-1))]));
+    const app=Object.fromEntries(['get','post','patch','delete'].map(method=>[method,(path,...handlers)=>routes.set(path,handlers.at(-1))]));
     installSalesRoutes(app,{pool:{connect:async()=>({query,release(){}}),query},audit:async()=>{},sendPushToUsers:async()=>{}});
     const res=response();await routes.get('/api/owner/sales-commissions/:id/review')({body:{decision:'approved'},params:{id:'credit'},authUser:{id:'owner'}},res,error=>{throw error;});
     assert.equal(res.code,state.expected);assert.equal(queries.filter(sql=>sql.startsWith('update sales_credits')).length,state.mutations);
@@ -100,7 +100,7 @@ test('payroll adjustments cannot race past the finalization lock',async()=>{
 });
 
 test('a spreadsheet snapshot cannot overwrite a job edited while it was being fetched',async()=>{
-  const context=vm.createContext({Date});
+  const context=vm.createContext({Date,refreshServiceCommissionRates:async()=>{}});
   vm.runInContext(source.slice(source.indexOf('async function upsertJobs('),source.indexOf('async function upsertInvoices(')),context);
   const stamp=new Date('2026-10-03T12:00:00Z');let called=false;
   await context.upsertJobs({query:async(sql,params)=>{called=true;assert.match(sql,/where jobs.updated_at <= \$2::timestamptz/);assert.match(sql,/clock_timestamp\(\)/);assert.equal(params[1],stamp);return {rows:[]};}},[{id:'job',customerId:'customer',date:'2026-10-04',status:'scheduled',price:450}],stamp);
