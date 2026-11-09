@@ -8,6 +8,7 @@ import pg from "pg";
 import webpush from "web-push";
 import { completeJobAfterEarnings } from "./complete-job.mjs";
 import { commissionRateForService } from "./commission-rates.mjs";
+import { pruneMissingImportedJobs } from "./imported-job-retention.mjs";
 import { previousWeeklyPayPeriod } from "./payday.mjs";
 import { ensureSalesSchema, installSalesRoutes, ownerOrSalesman, salesPayrollLines, priceAfterUpsell } from "./sales.mjs";
 import { ensureReimbursementSchema, installReimbursementRoutes, loadReimbursements, reimbursementPayrollLines, validateReimbursementItems } from "./reimbursements.mjs";
@@ -1150,8 +1151,7 @@ async function syncSheetsIntoDatabase(payload, snapshotStartedAt) {
     await upsertServicePlans(client, payload.servicePlans);
     await client.query("delete from service_plans where id like 'sp-%' and not (id = any($1::text[]))", [servicePlanIds]);
     await client.query("delete from invoices where id like 'sheet-invoice-%' and not (id = any($1::text[]))", [invoiceIds]);
-    await client.query("update jobs set status='canceled',updated_at=clock_timestamp() where source='spreadsheet-import' and status<>'canceled' and not (id=any($1::text[])) and updated_at <= $2::timestamptz and exists(select 1 from sales_credits where job_id=jobs.id)", [jobIds, snapshotStartedAt]);
-    await client.query("delete from jobs where source = 'spreadsheet-import' and not (id = any($1::text[])) and updated_at <= $2::timestamptz and not exists(select 1 from sales_credits where job_id=jobs.id)", [jobIds, snapshotStartedAt]);
+    await pruneMissingImportedJobs(client, jobIds, snapshotStartedAt);
     await client.query("delete from reviews where source = 'spreadsheet-import' and not (id = any($1::text[]))", [reviewIds]);
     await client.query("delete from customers where id like 'sheet-customer-%' and not (id = any($1::text[])) and not exists(select 1 from jobs where customer_id=customers.id)", [customerIds]);
     await client.query("commit");
@@ -1612,6 +1612,8 @@ app.delete("/api/jobs/:id", requireDatabase, requireOwner, async (req, res, next
     await client.query("begin");
     const existing = await client.query("select id from jobs where id = $1 for update", [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: "Job not found." });
+    const payroll = await client.query("select 1 from payroll_run_lines where job_id = $1 limit 1", [req.params.id]);
+    if (payroll.rows[0]) return res.status(409).json({ error: "This job is linked to payroll and cannot be deleted. Keep it for your payment history." });
     const locked = await client.query("select 1 from sales_credits sc where sc.job_id=$1 and (sc.status in ('approved','paid') or exists(select 1 from payroll_run_lines where sales_credit_id=sc.id))", [req.params.id]);
     if (locked.rows[0]) return res.status(409).json({ error: "This job has locked sales earnings. Cancel it and use a payroll correction instead of deleting it." });
     await runSheetAction("deleteJob", { jobId: req.params.id });
